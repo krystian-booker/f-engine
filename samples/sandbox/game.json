@@ -1,9 +1,0 @@
-{
-  "title": "f-engine · Crystal of the Vale",
-  "window": {"width": 1280, "height": 720},
-  "virtual_resolution": {"width": 480, "height": 270},
-  "pixels_per_unit": 32,
-  "start_map": "town",
-  "start_spawn": "entry",
-  "battle_effect_sprite": "sprites/spark.anim.json"
-}

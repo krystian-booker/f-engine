@@ -1,0 +1,14 @@
+[
+  {"id": "slime", "name": "Slime", "sprite": "sprites/slime.anim.json", "level": 2,
+   "stats": {"max_hp": 70, "attack": 16, "defense": 5, "magic": 5, "spirit": 4, "speed": 10, "accuracy": 0, "evasion": 0, "critical": 2},
+   "skills": ["attack", "venom"], "ai": "ai.slime.think", "resist": {"fire": 1.5},
+   "rewards": {"exp": 24, "money": 14, "drops": [{"item": "potion", "chance": 0.3}]}},
+  {"id": "wisp", "name": "Wisp", "sprite": "sprites/wisp.anim.json", "level": 3,
+   "stats": {"max_hp": 60, "attack": 8, "defense": 4, "magic": 20, "spirit": 14, "speed": 20, "accuracy": 0, "evasion": 10, "critical": 0},
+   "skills": ["glow"], "resist": {"fire": 0.5, "light": 0},
+   "rewards": {"exp": 32, "money": 20, "drops": [{"item": "ether", "chance": 0.2}]}},
+  {"id": "golem", "name": "Crystal Guardian", "sprite": "sprites/golem.anim.json", "level": 6, "scale": 1.4,
+   "stats": {"max_hp": 900, "attack": 34, "defense": 18, "magic": 10, "spirit": 12, "speed": 9, "accuracy": 0, "evasion": 0, "critical": 4},
+   "skills": ["attack", "quake"], "ai": "ai.golem.think", "resist": {"fire": 0.7},
+   "rewards": {"exp": 260, "money": 300, "drops": [{"item": "calm_charm", "chance": 1}]}}
+]

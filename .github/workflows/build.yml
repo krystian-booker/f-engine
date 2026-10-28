@@ -4,33 +4,46 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cache/CPM
+  LINUX_DEPS: >-
+    ninja-build libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev
+    libasound2-dev libpulse-dev libudev-dev libvulkan-dev
+
 jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pipx run --spec clang-format==23.1.3 clang-format --dry-run -Werror $(git ls-files 'engine/*.cpp' 'engine/*.h' 'apps/*.cpp' 'tests/*.cpp' 'tools/assetc/*.cpp')
+
   desktop:
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
-    env:
-      CPM_SOURCE_CACHE: ${{ github.workspace }}/.cache/CPM
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: actions/cache@v4
         with:
           path: .cache/CPM
           key: cpm-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/CPM.cmake') }}
       - name: Linux build dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev libasound2-dev libpulse-dev libudev-dev libvulkan-dev
+        run: sudo apt-get update && sudo apt-get install -y $LINUX_DEPS
       - name: Configure Unix
         if: runner.os != 'Windows'
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DFENGINE_WARNINGS_AS_ERRORS=ON
       - name: Configure Windows
         if: runner.os == 'Windows'
-        run: cmake -S . -B build -A x64
+        run: cmake -S . -B build -A x64 -DFENGINE_WARNINGS_AS_ERRORS=ON
       - name: Build
         run: cmake --build build --config Release --parallel 4
-      - name: Headless tests
+      - name: Tests (C++, Lua library, samples, boundary and API checks)
         run: ctest --test-dir build -C Release --output-on-failure
       - name: Install distribution
         run: cmake --install build --prefix build/package --config Release
@@ -40,10 +53,36 @@ jobs:
         with:
           name: fengine-${{ runner.os }}
           path: build/dist/fengine-*.zip
+
+  replays:
+    # Windowed input replays on a virtual display with Mesa's software drivers.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .cache/CPM
+          key: cpm-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/CPM.cmake') }}
+      - run: sudo apt-get update && sudo apt-get install -y $LINUX_DEPS mesa-vulkan-drivers xvfb xauth
+      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DFENGINE_RUN_REPLAYS=ON
+      - run: cmake --build build --parallel 4
+      - run: xvfb-run -a -s "-screen 0 1280x720x24" ctest --test-dir build --output-on-failure -R '^replay_'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: replay-screenshots
+          path: build/**/replay-out/*.png
+          if-no-files-found: ignore
+
   sanitizers:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: cmake -S . -B build -DFENGINE_BUILD_RUNTIME=OFF -DFENGINE_ENABLE_SANITIZERS=ON
+      - uses: actions/cache@v4
+        with:
+          path: .cache/CPM
+          key: cpm-sanitizers-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/CPM.cmake') }}
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - run: cmake -S . -B build -G Ninja -DFENGINE_BUILD_RUNTIME=OFF -DFENGINE_ENABLE_SANITIZERS=ON
       - run: cmake --build build --parallel 4
       - run: ctest --test-dir build --output-on-failure

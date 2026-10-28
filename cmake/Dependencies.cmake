@@ -69,6 +69,13 @@ CPMAddPackage(NAME bgfx_cmake
     "BGFX_CONFIG_MULTITHREADED OFF" "BGFX_BUILD_TOOLS_GEOMETRY OFF"
     "BGFX_BUILD_TOOLS_TEXTURE OFF" "BGFX_BUILD_TOOLS_BIN2C OFF"
     "BGFX_WITH_WAYLAND OFF")
+# Third-party headers are system headers so engine warnings (-Wpedantic,
+# -Werror) apply only to engine code.
+foreach(dependency bx bimg bgfx)
+  if(TARGET ${dependency})
+    set_target_properties(${dependency} PROPERTIES SYSTEM TRUE)
+  endif()
+endforeach()
 if(MINGW)
   # The engine compiles Shader Model 5 for D3D11. MinGW's SDK provides
   # D3DCompiler, but not Microsoft's optional Shader Model 6 DXC headers.
@@ -86,5 +93,5 @@ add_library(fengine_imgui STATIC
   "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
   "${imgui_SOURCE_DIR}/imgui_demo.cpp"
   "${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp")
-target_include_directories(fengine_imgui PUBLIC "${imgui_SOURCE_DIR}" "${imgui_SOURCE_DIR}/backends")
+target_include_directories(fengine_imgui SYSTEM PUBLIC "${imgui_SOURCE_DIR}" "${imgui_SOURCE_DIR}/backends")
 target_link_libraries(fengine_imgui PUBLIC SDL3::SDL3)

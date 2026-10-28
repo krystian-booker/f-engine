@@ -1,37 +1,78 @@
-# Runtime architecture
+# Architecture
 
-`fengine_logic` contains platform-independent gameplay, asset decoding and tests. `fengine_core` adds SDL, bgfx, audio, the game UI and editor. `fengine` is a thin command-line application. The engine uses C++20 and Lua 5.4; dependencies and exact revisions live in `cmake/Dependencies.cmake`.
+```
+game folder      main.lua · data/*.json · maps/ · sprites/ · audio/ · any Lua modules   (owned by the game)
+     │ require: the game folder is searched first, so a game overrides any kit module
+lualib/fe/       scene · task · signal · tween · state · save · schema · data · test
+                 field · event · cutscene · dialogue · ui · rpg · effects · battle · tactical · ...
+     │ sol2 bindings (fe.*), described by generated docs/api.md and lualib/types/fengine.d.lua
+engine/          platform · input · assets · world · nav · render · canvas · text · audio · saves
+                 Lua host · hot reload · editor · replays                         (C++ services only)
+```
 
-## Frame and scene lifetime
+## The boundary rule
 
-The main thread pumps SDL events and collects input edges. A bounded accumulator advances 60 Hz logic; rendering interpolates transforms and animation time. bgfx is built in single-threaded mode, including on macOS. SDL supplies a Metal layer, HWND or X11 window to bgfx's swap chain.
+If a concept would appear in a JRPG design document, it does not belong in `engine/` C++. The engine knows about entities, sprites, meshes, lights, grids, paths, reachability, raycasts, text, sounds and files. It does not know about HP, parties, items, skills, battles, turns, shops, encounters or quests. `tools/ci/check_boundary.py` scans `engine/` for that vocabulary and is a CTest test.
 
-`SceneStack` defers mutations during callbacks. Scenes independently block updates and rendering below them. The session implements Title, Field, Dialogue, Choice, Menu, Shop and Battle layers. Message boxes keep the field visible. Battles render their own map. Field movement stops while blocking events or modal screens own control; parallel event coroutines can continue when appropriate.
+## Libraries and programs
 
-`World` owns an EnTT registry for field entities. Transform, SpriteRenderer, Mover, Interactable, NpcRoutine, Light, CameraTarget and particles are scene components. RPG state lives separately as plain structs: actors, party, inventory, gold, flags, variables and playtime. Changing maps therefore does not discard the party.
+| Target | Contents |
+| --- | --- |
+| `fengine_core` | Headless: `core` (paths, JSON, asset cache, random), `assets` (images, glTF models, sprite animations), `text`, `nav`, `world`, `services` (input state, canvas command list, screen effects, audio interface, saves), `script` (Lua host and bindings), `runtime/Engine` and the headless runner |
+| `fengine_runtime` | SDL3 window and input, miniaudio, bgfx renderers (world, canvas, ImGui), the editor, `MainLoop` and `ReplayHarness` |
+| `fengine` | The player and development runtime |
+| `fengine_headless` | `--test`, `--check` and `--write-api`; needs no GPU or display |
+
+Services in the core are plain data. For example, the canvas records quads and the world stores entities, lights and overlays. The runtime's renderers consume that data, so all game logic, including UI, runs and is tested headless.
+
+## A frame
+
+`MainLoop` pumps SDL events into `InputState` and advances logic at a fixed 60 Hz. Each tick calls the game's `update(dt)`; `fe.game` runs the task scheduler and the scene stack there. Rendering then calls `draw(alpha)`. Scenes ask for worlds to be drawn (`world:draw()`) and draw UI on the canvas. The renderer draws the requested worlds, then the canvas, then the editor and error overlay.
+
+## Lua host
+
+- **Sandbox.** Lua 5.4 through sol2. `require` searches the game folder, then `lualib/`. `io`, `os`, `debug`, `package` loaders, `load` and `dofile` are unavailable. Development builds add a watchdog that stops runaway scripts.
+- **Entry.** `main.lua` returns `{init, update, draw, file_changed, validate}`. `fe.game.main` and `fe.starter.main` build that table.
+- **Waiting is Lua.** `fe.task` is a pure-Lua coroutine scheduler: `wait`, `wait_until`, `wait_signal`, `all`, `race`, `join`, `cancel` and `finally`. Engine calls return immediately; scripts wait on state, signals or `world:events()`.
+- **Hot reload.** Changed Lua modules are reloaded and their tables patched in place, so live references see the new functions. Data tables reload with validation, and a broken edit keeps the old data. Maps, images and shaders reload too. Errors show in a dev overlay with a traceback and are logged in release builds.
+
+## World
+
+`fe.world.load(name, map)` creates a named world, and several can exist at once (the field stays loaded while a battle stage renders). A world owns:
+
+- **Entities.** Generational handles with a transform, sprite (directional clips, tint, flash, outline, palette swap), mesh (glTF node animation), light, emitter, mover, collider, tags and a free `props` table.
+- **Map grid.** Multiple layers with per-cell height, walkability, ramps and tags; links between layers for bridges; points; zones; placements. C++ never interprets placements or props; `fe.field` spawns them by type.
+- **Queries.** A* paths, flood-fill reachability with step-height and blocked cells, line of sight, shapes, raycasts and mouse picking.
+- **Movement.** Movers walk or jump to targets, colliding against the grid and other solid entities through a spatial hash. The resulting events are delivered through `world:events()`: `contact_begin`, `contact_end`, `arrived`, `blocked`, `landed`, `anim_event`, `anim_finished`, `zone_enter` and `zone_exit`.
+- **Presentation.** Environment (ambient, sun, fog, sky gradient and backdrops, weather, post-processing with two blended LUTs, bloom, tilt-shift, pixelation), particles, tile overlays with pulse, path arrows and a cursor, and a camera.
 
 ## Rendering
 
-Coordinates are right-handed and Y-up, one world unit per tile. A configurable pixels-per-unit value converts sprite dimensions. Maps use static glTF triangle meshes, optional albedo/normal textures and opaque, masked or blended materials. Upright Y-axis billboards select a directional clip relative to camera yaw.
+The renderer uses one bgfx view set per drawn world:
 
-Views render a directional shadow map, opaque scenery and depth-writing alpha-tested sprites, then sorted blended geometry and emissive particles. Sprites participate in the shadow pass. Lighting combines ambient, Lambert sunlight, PCF shadows, rim light, up to eight point lights and height/distance fog. HDR scene color and depth feed bloom and depth-aware tilt-shift blur; tone mapping, exposure, vignette and a 16³ grading LUT finish the image. Game UI draws in a centered virtual pixel canvas, with integer scaling when the viewport permits it. ImGui supplies the final draw lists and the developer interface.
+1. A shadow map fitted to the camera.
+2. Sky and backdrop cards.
+3. Chunked map geometry, frustum-culled, lit by the 8 nearest point or spot lights (any number per world, with flicker curves).
+4. Mesh entities.
+5. Sprites with lighting, shadows, flash, outline and palette swap.
+6. Particles, water (scrolling normals, depth tint), tile overlays and the cursor.
+7. Post-processing (bloom, tilt-shift, vignette, LUT grading and blending, tint, screen transitions such as swirl, mosaic, wipe and iris).
 
-## Data and scripts
+The canvas renderer then draws the 2D UI in virtual pixels, with integer scaling where possible.
 
-Map movement resolves circles against height/walkability cells, ramps and other entities, with substeps to prevent tunneling. Cached breadth-first paths handle scripted movement and patrols. Event pages choose the last matching condition set; action, touch, autorun and parallel triggers start Lua coroutines. A running blocking event may finish after setting a flag that changes its page. Obsolete parallel page tasks are canceled.
+## Library kits
 
-Lua events yield typed host requests. The host resumes each request when its dialogue, movement, transition or battle completes. Events get separate global/library tables. File execution, OS/debug libraries and dynamic code loading are unavailable. Instruction budgets, nesting limits and task limits contain accidental infinite scripts; this is a game scripting environment, not a hardened hostile-code boundary.
+Each kit is ordinary Lua, documented at the top of its file. Games change behaviour through settings tables, hooks and signals, or by overriding a module.
 
-`Battle` contains no graphics dependency. It ticks speed-based ATB, validates queued commands, applies typed effects, advances states and emits presentation events. Lua provides formulas, AI and custom effect expansion. Victory rewards apply once. The session translates action events into data timelines, staged sprite movement, particles, sounds, flashes, camera shake, popups and animated gauges.
-
-## Reload and persistence
-
-Typed generational asset handles provide a reusable transactional registry. Rendering caches use paths and rebuild GPU resources when watched files change. Development builds poll data and compiled shaders every quarter second. Source shader changes start an asynchronous shader build when running from the original build tree. Program creation checks stage signatures; failed reloads keep valid programs. Database edits during a battle wait until it ends, and candidate data must validate against live state.
-
-Events read source on each start; changing an event affects its next invocation, while an already running coroutine finishes its old code. `scripts/rules.lua` reloads transactionally. Explicit map reloads preserve the current position where possible. Save slots use atomic JSON writes, version 2 with version 1 variable migration. Only persistent state is saved; active event coroutines and mid-battle presentation are not serialized.
-
-## Optional native module
-
-Set `-DFENGINE_GAME_MODULE=samples/modules/logging` to compile the example. A module directory defines `fengine_game_module`, links `fengine_core`, and implements `fe::createGameModule()` returning a `GameModule`. Hooks are `onStart(GameSession&)`, `onFixedUpdate(GameSession&, double)` and `onStop(GameSession&)`. The session exposes its world, database, state, scripts and renderer. Ordinary games can stay entirely data-driven.
-
-The intended scope is compact JRPG maps and side-view battles. Static geometry, simple cell navigation and a focused RPG UI keep the engine small. Skeletal animation, physics, networking, tactical battles and compressed/binary asset cooking are extension work outside this implementation.
+| Kit | Purpose |
+| --- | --- |
+| `fe.game`, `fe.starter` | Entry loop, title, new game, continue, standard setup |
+| `fe.scene`, `fe.task`, `fe.signal`, `fe.tween`, `fe.timeline` | Scene stack, coroutines, events, animation |
+| `fe.state`, `fe.save`, `fe.config` | Flags and variables, save slots with metadata and migrations, player settings |
+| `fe.schema`, `fe.data`, `fe.i18n` | Validated data tables (which also drive the editor's forms), localisation |
+| `fe.field`, `fe.event`, `fe.cutscene`, `fe.dialogue`, `fe.camera` | Exploration, event pages and triggers, scripted scenes, message boxes, camera rigs |
+| `fe.ui` | Widgets, themes and default screens (title, menu, save, config, shop, name entry) |
+| `fe.rpg` | Game-declared stats and resources, modifiers, classes, actors, party, inventory |
+| `fe.effects` | Phased action pipeline (before, hit, calculate, modify, apply, after) with hooks, formulas and handlers |
+| `fe.battle` | Battle core with rule hooks; schedulers `atb`, `round_order`, `initiative`; presentations `sideview` and `tactical` |
+| `fe.encounter`, `fe.quest`, `fe.worldmap`, `fe.daynight`, `fe.sound`, `fe.devtools` | Supporting systems |

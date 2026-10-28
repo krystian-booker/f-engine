@@ -1,0 +1,23 @@
+[
+  {"id": "attack", "name": "Attack", "type": "attack", "uses_weapon": true, "timeline": "attack",
+   "effects": [{"type": "damage", "formula": "physical", "power": 100}]},
+  {"id": "true_shot", "name": "True Shot", "type": "art", "cost": {"sp": 6}, "damage_type": "bow",
+   "description": "A bow shot that never misses.", "effects": [{"type": "damage", "formula": "physical", "power": 130, "always_hit": true}]},
+  {"id": "pounce", "name": "Pounce", "type": "art", "cost": {"sp": 9}, "damage_type": "sword", "target": "random_enemy", "hits": 3,
+   "description": "Three sword strikes at random foes.", "effects": [{"type": "damage", "formula": "physical", "power": 60}]},
+  {"id": "eagle_eye", "name": "Eagle Eye", "passive": true, "modifiers": [{"stat": "accuracy", "add": 15}, {"stat": "critical", "add": 5}]},
+  {"id": "ember", "name": "Ember", "type": "magic", "cost": {"sp": 7}, "element": "fire",
+   "effects": [{"type": "damage", "formula": "magical", "power": 110}]},
+  {"id": "frost", "name": "Frost", "type": "magic", "cost": {"sp": 7}, "element": "ice",
+   "effects": [{"type": "damage", "formula": "magical", "power": 110}]},
+  {"id": "gale", "name": "Gale", "type": "magic", "cost": {"sp": 12}, "element": "wind", "target": "all_enemies",
+   "effects": [{"type": "damage", "formula": "magical", "power": 80}]},
+  {"id": "mend", "name": "Mend", "type": "magic", "cost": {"sp": 6}, "target": "ally", "scope": "both",
+   "effects": [{"type": "heal", "power": 120}]},
+  {"id": "bite", "name": "Bite", "type": "attack", "damage_type": "beast",
+   "effects": [{"type": "damage", "formula": "physical", "power": 110}]},
+  {"id": "slash", "name": "Slash", "type": "attack", "damage_type": "sword",
+   "effects": [{"type": "damage", "formula": "physical", "power": 100}]},
+  {"id": "spark", "name": "Spark", "type": "magic", "element": "fire",
+   "effects": [{"type": "damage", "formula": "magical", "power": 90}]}
+]

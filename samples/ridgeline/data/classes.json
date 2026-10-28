@@ -1,0 +1,10 @@
+[
+  {"id": "vanguard", "name": "Vanguard", "growth": {"max_hp": 26, "attack": 3, "defense": 3, "speed": 1},
+   "skills": [{"skill": "shove", "level": 1}, {"skill": "rally_cry", "level": 2}], "equip": ["sword", "armor"]},
+  {"id": "archer", "name": "Archer", "growth": {"max_hp": 18, "attack": 3, "defense": 1, "speed": 2},
+   "skills": [{"skill": "longshot", "level": 1}, {"skill": "firebrand", "level": 1}], "equip": ["bow", "leather"]},
+  {"id": "mender", "name": "Mender", "growth": {"max_hp": 16, "max_mp": 5, "magic": 3, "spirit": 3, "speed": 1},
+   "skills": [{"skill": "mend", "level": 1}, {"skill": "frostbite", "level": 1}], "equip": ["staff", "robe"]},
+  {"id": "scout", "name": "Scout", "growth": {"max_hp": 20, "attack": 2, "defense": 1, "speed": 3},
+   "skills": [{"skill": "spark_dart", "level": 1}], "equip": ["dagger", "leather"]}
+]

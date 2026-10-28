@@ -1,0 +1,11 @@
+[
+  {"id": "raider", "name": "Raider", "sprite": "sprites/raider.anim.json", "level": 4,
+   "stats": {"max_hp": 140, "attack": 24, "defense": 12, "magic": 4, "spirit": 6, "speed": 16, "accuracy": 0, "evasion": 3, "critical": 4, "move": 4, "jump": 1},
+   "skills": ["attack"], "rewards": {"exp": 50, "money": 40}},
+  {"id": "raider_archer", "name": "Raider Archer", "sprite": "sprites/raider.anim.json", "level": 4,
+   "stats": {"max_hp": 110, "attack": 22, "defense": 8, "magic": 4, "spirit": 6, "speed": 18, "accuracy": 5, "evasion": 5, "critical": 6, "move": 4, "jump": 2},
+   "skills": ["longshot"], "rewards": {"exp": 50, "money": 40}},
+  {"id": "captain", "name": "Captain Vey", "sprite": "sprites/captain.anim.json", "level": 6,
+   "stats": {"max_hp": 300, "attack": 30, "defense": 16, "magic": 8, "spirit": 10, "speed": 17, "accuracy": 5, "evasion": 5, "critical": 8, "move": 3, "jump": 1},
+   "skills": ["attack", "shove"], "rewards": {"exp": 200, "money": 200}}
+]

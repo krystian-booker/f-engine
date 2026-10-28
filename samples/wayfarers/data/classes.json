@@ -1,0 +1,8 @@
+[
+  {"id": "hunter", "name": "Hunter", "growth": {"max_hp": 26, "max_sp": 3, "attack": 3, "defense": 2, "magic": 1, "spirit": 1, "speed": 2},
+   "skills": [{"skill": "true_shot", "level": 1}, {"skill": "pounce", "level": 3}, {"skill": "eagle_eye", "jp": 40}],
+   "equip": ["sword", "bow", "leather", "charm"], "commands": ["attack", "art", "item", "defend", "flee"]},
+  {"id": "scholar", "name": "Scholar", "growth": {"max_hp": 18, "max_sp": 6, "attack": 1, "defense": 1, "magic": 4, "spirit": 3, "speed": 1},
+   "skills": [{"skill": "ember", "level": 1}, {"skill": "frost", "level": 1}, {"skill": "gale", "level": 2}, {"skill": "mend", "level": 1}],
+   "equip": ["staff", "tome", "robe", "charm"], "commands": ["attack", "magic", "item", "defend", "flee"]}
+]

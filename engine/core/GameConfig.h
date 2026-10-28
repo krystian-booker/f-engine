@@ -3,14 +3,16 @@
 #include <string>
 
 namespace fe {
+// The few settings the engine itself needs before any script runs.
+// Everything else a game wants to configure lives in its own Lua/data.
 struct GameConfig {
     std::string title = "f-engine";
-    int windowWidth = 1280, windowHeight = 720;
-    int virtualWidth = 480, virtualHeight = 270;
+    std::string entry = "main";
+    int windowWidth = 1280;
+    int windowHeight = 720;
+    int virtualWidth = 480;
+    int virtualHeight = 270;
     int pixelsPerUnit = 32;
-    std::string startMap = "town";
-    std::string startSpawn = "entry";
-    std::string battleEffectSprite;
     static GameConfig load(const std::filesystem::path& gameFolder);
 };
-}
+} // namespace fe

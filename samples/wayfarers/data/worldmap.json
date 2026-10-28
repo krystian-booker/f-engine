@@ -1,0 +1,5 @@
+{"image": "ui/worldmap.png",
+ "places": [{"id": "riverford", "name": "Riverford", "map": "riverford", "point": "start", "at": [150, 70], "region": "Lowlands"},
+            {"id": "route", "name": "Meadow Road", "map": "route", "point": "east", "at": [110, 66], "region": "Lowlands"},
+            {"id": "cliffhaven", "name": "Cliffhaven", "map": "cliffhaven", "point": "south", "at": [60, 60],
+             "region": "Highlands", "unlock": "found_cliffhaven"}]}

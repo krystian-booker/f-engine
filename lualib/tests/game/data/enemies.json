@@ -1,0 +1,9 @@
+[
+  {"id": "slime", "name": "Slime", "stats": {"max_hp": 40, "attack": 12, "defense": 4, "magic": 4, "spirit": 4,
+   "speed": 8, "accuracy": 0, "evasion": 0, "critical": 0, "move": 3, "jump": 1},
+   "skills": ["attack", "venom"], "rewards": {"exp": 30, "money": 12, "jp": 5, "drops": [{"item": "potion", "chance": 1}]},
+   "resist": {"fire": 2}},
+  {"id": "golem", "name": "Golem", "stats": {"max_hp": 300, "attack": 30, "defense": 20, "magic": 4, "spirit": 10,
+   "speed": 6, "accuracy": 0, "evasion": 0, "critical": 0, "move": 2, "jump": 1},
+   "skills": ["attack"], "rewards": {"exp": 200, "money": 100}}
+]

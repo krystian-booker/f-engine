@@ -1,64 +1,94 @@
-# Build, test and distribution
+# Build, test and ship
 
 ## Build options
 
 | CMake option | Default | Purpose |
 | --- | --- | --- |
-| FENGINE_BUILD_RUNTIME | ON | SDL/bgfx runtime and editor |
-| FENGINE_BUILD_TESTS | ON | Headless doctest suites |
-| FENGINE_BUILD_TOOLS | ON | Asset validator / atlas tools |
-| FENGINE_DEV | ON | F1 editor and file watching |
-| FENGINE_ENABLE_SANITIZERS | OFF | Address + undefined behavior sanitizers |
-| FENGINE_GAME_MODULE | empty | Directory defining an optional native module |
-| FENGINE_SHADERC | empty | Override shader compiler with a host executable |
-| FENGINE_PRECOMPILED_SHADER_DIR | empty | Cross-build input containing verified backend/*.bin |
+| `FENGINE_BUILD_RUNTIME` | ON | SDL/bgfx runtime (`fengine`) and editor. OFF gives a headless build with no GPU or display. |
+| `FENGINE_BUILD_TESTS` | ON | C++ doctests, Lua tests, sample checks and CI lint tests |
+| `FENGINE_BUILD_TOOLS` | ON | `fengine_assetc` |
+| `FENGINE_DEV` | ON | F1 editor, hot reload and the error overlay |
+| `FENGINE_WARNINGS_AS_ERRORS` | OFF | Treat warnings in engine code as errors (CI turns this on) |
+| `FENGINE_RUN_REPLAYS` | OFF | Register `samples/*/replays/*.json` as CTest tests (needs a display and GPU) |
+| `FENGINE_ENABLE_SANITIZERS` | OFF | Address and undefined-behaviour sanitizers |
+| `FENGINE_SHADERC` / `FENGINE_PRECOMPILED_SHADER_DIR` | empty | Host shader compiler, or verified shader binaries for cross builds |
 
-`CPM_SOURCE_CACHE` can cache downloaded dependencies. A gameplay-only build needs no window server or GPU:
+`CPM_SOURCE_CACHE` caches downloaded dependencies between build trees.
+
+## What CTest runs
+
+| Test | Checks |
+| --- | --- |
+| `fengine_tests` | C++ services: grid, paths, reachability, line of sight, text layout and markup, world entities, movement and contacts, saves, input maps, canvas, the Lua sandbox and bindings |
+| `lua_library` | Every kit, against the fixture game in `lualib/tests/game` (`fengine_headless --test`) |
+| `check_<sample>` | `fengine_headless --check`: data tables against schemas, maps, placements against their types, script syntax and asset paths |
+| `lua_<sample>` | Each sample's `tests/*.lua`, which drive real game flows headless: events, council votes, battles and AI-vs-AI tactics |
+| `engine_boundary` | `tools/ci/check_boundary.py`: no JRPG vocabulary in `engine/` |
+| `api_stubs_current` | `tools/ci/check_api.py`: `docs/api.md` and `lualib/types/fengine.d.lua` match the bindings |
+| `replay_<sample>_<name>` | With `FENGINE_RUN_REPLAYS=ON`, the windowed runtime plays a recorded input script and must finish with no failed assertions or Lua errors |
+
+When you change a binding, refresh the API files with `python3 tools/ci/check_api.py build/fengine_headless --update`.
+
+## Replays
+
+A replay is a JSON array of commands, each with a `tick`. Logic advances exactly 1/60 s per frame, so a replay is deterministic for a given `--seed`.
+
+| Command | Meaning |
+| --- | --- |
+| `{"input": {"key:Return": 1}}` | Set raw inputs (`key:`, `pad:`, `mouse:` names); 0 releases |
+| `{"lua": "code"}` | Run Lua in the game |
+| `{"wait_for": "expr", "timeout": ticks}` | Pause the replay until a Lua expression is true; later ticks shift by the wait |
+| `{"assert": "expr", "message": "text"}` | Fail unless the expression is true |
+| `{"capture": "path.png"}` | Screenshot |
+| `{"resize": [w, h]}` | Resize the window |
 
 ```sh
-cmake -S . -B build-headless -G Ninja -DFENGINE_BUILD_RUNTIME=OFF -DFENGINE_ENABLE_SANITIZERS=ON
-cmake --build build-headless --parallel 4
-ctest --test-dir build-headless --output-on-failure
+./build/fengine samples/ridgeline --mute --user-data /tmp/ridge-user \
+  --replay samples/ridgeline/replays/battle.json
 ```
 
-CTest runs the gameplay/asset suites and validates the sandbox when tools are enabled. Tests cover collision/ramp/pathfinding invariants, triggers and event pages, Lua isolation/budgets/formulas/effects, save migrations/round trips, inventory/equipment/growth, ATB/effects/rewards, text pagination, animation, mesh markers and editor picking.
+A failed assertion, a timed-out wait or a Lua error makes the process exit non-zero. Use a separate `--user-data` folder so saved settings don't change key bindings.
 
-## Runtime checks and replays
+## Hot reload checks
 
-```sh
-build/apps/runtime/fengine samples/sandbox --mute --skip-title \
-  --replay tests/replays/town.json --user-data build/replay-user \
-  --dump-state build/qa/town-state.json
-build/apps/runtime/fengine samples/sandbox --mute \
-  --replay tests/replays/load.json --user-data build/replay-user
-build/apps/runtime/fengine samples/sandbox --mute --skip-title \
-  --replay tests/replays/systems.json --user-data build/systems-user
-build/apps/runtime/fengine samples/sandbox --mute --start-battle slimes \
-  --replay tests/replays/battle.json --user-data build/battle-user
-build/apps/runtime/fengine samples/sandbox --mute --skip-title \
-  --replay tests/replays/gamepad.json --user-data build/gamepad-user
-build/apps/runtime/fengine samples/sandbox --skip-title --replay-realtime \
-  --replay tests/replays/audio.json --user-data build/audio-user
-```
+Run a sample, then:
 
-Replays are sorted arrays of tick-stamped commands. Logic advances exactly 1/60 second each frame; `--replay-realtime` also paces wall time for audio/listening checks. Supported fields: key/down, gamepad (connect/disconnect), button/down, axis/value (-1..1), script, resize, capture, assert_map, assert_flags, assert_gold, assert_inventory and assert_position ([x,y,z], tolerance 0.15). The virtual gamepad passes through SDL's actual device/event plumbing. Unknown fields, failed assertions and incomplete replays fail the process. `--frames` must allow all commands to run. `--capture basepath` requests a screenshot; bgfx writes `basepath.tga`. `--tools` opens F1 tools; `--shaders` overrides the backend shader directory.
+1. Edit a battle rule or UI module; the next call uses the new code and the game state is kept.
+2. Edit a data table; it reloads after validation, and an invalid edit logs an error and keeps the old data.
+3. Edit a map or image; it reloads.
+4. Introduce a Lua error; the overlay shows the traceback until the file is fixed.
 
-Town exercises dialogue, quest acceptance, menus, saving, resize, editor and two map transitions. Load uses the slot created by Town. Systems exercises long dialogue, a shop purchase, equipment, healing/inn, camera/particles and another save. Battle drives actual command and target menus through a slime victory. Audio checks nonzero loop points, a music crossfade and SFX. Each replay should use the indicated dedicated user profile; reusing modified settings may change key mappings.
+From the original build tree, editing `shaders/*.sc` rebuilds the shaders in the background, and the last working program stays active if compilation fails.
 
-The optional `tests/replays/quest.json` runs the original guardian and elder scripts with a prepared party (equipment and EXP supplied by its test harness). Run it with `--skip-title --mute` and a separate user profile. Controller button names in replay files use SDL mapping names (`a`, `b`, `x`, `y`, `dpup`, etc.).
+## Continuous integration
 
-Development hot reload can be checked by changing an event, PNG, map or database while running. Changed Lua events take effect on their next start. Invalid candidates log errors. In the original build tree, editing `shaders/*.sc` starts a shader-only build. An invalid shader leaves the last working program active; fix the source to recover. Packaged games use their adjacent compiled shaders.
+`.github/workflows/build.yml` runs these jobs:
 
-## Cross-platform checks
+- **Format**: `clang-format` 23.1.3 (`pipx run --spec clang-format==23.1.3 clang-format -i <files>` fixes it) against `.clang-format`.
+- **macOS, Windows and Ubuntu** native builds with warnings as errors, all headless tests, the boundary and API checks, install and a ZIP artifact.
+- **Ubuntu replays** under Xvfb with Mesa (lavapipe Vulkan, falling back to OpenGL).
+- **Ubuntu headless** with address and undefined-behaviour sanitizers.
 
-`.github/workflows/build.yml` configures macOS, Windows and Ubuntu native builds, tests, installation and ZIP artifacts, plus a Linux sanitizer job. Push the repository or trigger workflow_dispatch to run it. CI configuration is checked in; a local build does not mean the remote workflow has run.
+The scripts in `tools/ci/` reproduce Linux and Windows (MinGW cross build and Wine test run) in Docker:
 
-`tools/ci/Dockerfile` and `tools/ci/linux-build.sh` build/test/install the full Linux runtime and run Vulkan under Xvfb/Mesa. `Dockerfile.windows-cross` and `windows-cross-build.sh` compile x64 Windows programs with MinGW. `Dockerfile.wine` and `windows-wine.sh` execute Windows tests/validation and shaderc. Wine's builtin HLSL compiler may lack needed intrinsics; use a legally obtained Microsoft SDK `d3dcompiler_47.dll` beside shaderc and `WINEDLLOVERRIDES=d3dcompiler_47=n`. It is a verification dependency, not a bundled game asset. The Wine script writes `build-windows/wine-shaders`; pass that directory through FENGINE_PRECOMPILED_SHADER_DIR when completing a cross-build. Set `SDL_JOYSTICK_DIRECTINPUT=0` for the Wine runtime smoke check when DirectInput initialization is unavailable; the native Windows default stays enabled. Native Windows CI uses its normal shader compiler directly. Wine testing supplements native Windows testing and does not certify MSVC or hardware drivers.
+- `linux-build.sh` runs the headless tests, then the replays under `xvfb-run`.
+- `windows-wine.sh` runs the doctests, the library tests and every sample's `--check` and `--test` under Wine. It also compiles D3D shaders with shaderc; Wine's built-in HLSL compiler may need Microsoft's `d3dcompiler_47.dll`.
 
 ## Package a game
 
-`cmake --install` installs the runtime, compiled shaders, sandbox and collected third-party notices. CPack ZIP bundles the same layout. The Python game packager accepts a different data folder, checks required files and complete shader sets, optionally runs asset validation and creates a launcher and SHA-256 manifest. It refuses to overwrite an existing output or package into the source game folder. Include `--licenses build/licenses` for redistribution.
+```sh
+python3 tools/package_game.py --runtime build-release/fengine --shaders build-release/shaders \
+  --game path/to/game --validator build-release/fengine_headless --licenses build-release/licenses \
+  --output dist/my-game --zip
+```
 
-Build a fresh Release tree with FENGINE_DEV=OFF for shipping. Test the resulting launcher from a different working directory. Packages are OS/architecture specific; Linux system libraries remain platform prerequisites, and macOS/Windows signing is handled by your distribution pipeline. Saves are outside the package. Never bundle developer profiles or player saves.
+The packager:
 
-CMake's MSVC install collects the required Visual C++ runtime DLLs. When using the Python packager on an MSVC build, pass those installed DLLs with repeatable `--runtime-dependency path/to/file.dll`, or require the appropriate Visual C++ Redistributable in your installer. Static MinGW builds do not need those MSVC DLLs.
+- runs `--check` on the game first;
+- verifies complete shader sets;
+- copies the runtime to `bin/`, the shaders to `bin/shaders`, `lualib/` (without tests) to `bin/lualib`, and the game (without tests, replays or saves) to `game/`;
+- writes a `play` or `play.cmd` launcher and a SHA-256 manifest.
+
+It refuses to overwrite existing output. Build release packages with `-DFENGINE_DEV=OFF`. On MSVC builds, pass the Visual C++ runtime DLLs with `--runtime-dependency`. Saves go to the platform's per-user folder, never into the package.
+
+`cmake --install build --prefix <dir>` installs the runtime, `fengine_headless`, shaders, `lualib` and the samples. `cpack -G ZIP` zips the same layout.

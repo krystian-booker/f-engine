@@ -1,0 +1,6 @@
+[
+  {"id": "poison", "name": "Poison", "turns": 3, "on_turn": [{"type": "damage", "formula": "percent", "power": 10, "always_hit": true, "variance": 0}],
+   "removed_by": ["battle_end", "rest"]},
+  {"id": "slow", "name": "Slow", "turns": 2, "modifiers": [{"stat": "speed", "mul": 0.5}]},
+  {"id": "sleep", "name": "Sleep", "turns": 2, "prevents_action": true, "ends_on_damage": true}
+]

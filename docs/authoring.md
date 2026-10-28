@@ -1,102 +1,87 @@
 # Authoring a game
 
-The sandbox is the executable reference for every format. JSON files are UTF-8 and paths are relative to the game directory unless specified otherwise. IDs should be stable; saves refer to actor, item, skill, state and map IDs.
+The samples are the reference for every format: `samples/vale`, `samples/wayfarers` and `samples/ridgeline`. Files are UTF-8 JSON or Lua, and paths are relative to the game folder.
 
 ## Game folder
 
 ```text
-game.json                 title, window, virtual_resolution, pixels_per_unit,
-                          start_map, start_spawn, battle_effect_sprite
-initial_state.json        party IDs, gold, inventory counts
-database.json             RPG tables
-timelines.json            battle presentation sequences
-maps/<id>/map.json        navigation, events, lights, cameras, encounters
-maps/<id>/geometry.glb    static diorama
-sprites/*.anim.json       directional animation descriptions
-sprites/*.png            sprite sheets / atlases
-events/*.lua              event functions
-scripts/rules.lua         formulas, effects and AI
-audio/                    music and sounds
-audio/events.json         sprite-animation event → sound path
-ui/layout.json            window rectangles, skin and optional BMFont
-ui/skin.png               nine-slice skin
-ui/icons.json             optional icon name → image path
+game.json                 title, window {width,height}, virtual_resolution {width,height}, pixels_per_unit
+main.lua                  entry point (see scripting.md)
+data/*.json               data tables (loaded and validated by Lua schemas)
+data/audio.json           music and sound ids -> files, loop points, volumes (fe.sound)
+maps/<id>/map.json        grid, points, placements, zones, lights, emitters, environment, props
+maps/<id>/geometry.glb    static diorama exported from Blender (optional per map)
+sprites/*.anim.json       directional sprite animations + atlas PNGs
+portraits/ ui/ audio/     images, LUTs (.cube), backdrops, fonts, music, sounds
+lang/<code>.json          localised strings for {t:key} and fe.i18n.t
+events/ battle/ ai/ ...   any Lua modules, required by dotted name ("events.elder")
+tests/*.lua               headless tests (fengine_headless --test)
+replays/*.json            windowed input replays (CTest when FENGINE_RUN_REPLAYS=ON)
 ```
 
-`game.json` uses `window: {width,height}`, `virtual_resolution: {width,height}` and `pixels_per_unit`. The sample uses 1280×720, 480×270 and 32 PPU. `initial_state.json` recruits the listed actors and selects them as the active party (one to four members).
+Any file in the game folder with the same path as a library module overrides it. For example, `fe/ui/screens/title.lua` replaces the default title screen.
 
-## Blender and maps
+## Data tables
 
-Model at one unit per tile, apply transforms and export a static glTF 2.0 `.glb` with normals. Use uncompressed triangles; skins and Draco compression are unsupported. The renderer reads base color, optional normal maps, material alpha and vertex color. It supports embedded GLB images and external image files. Use GLB for portable map exports. Blender's glTF exporter converts its coordinates into Y-up automatically.
-
-Enable custom properties in the exporter. Node extras may be directly on the node or inside `fengine`:
-
-```json
-{"spawn":"entry"}
-{"collision":true}
-{"collision":{"walkable":true,"height":1}}
-{"light":{"color":[1,0.6,0.2],"radius":6,"intensity":2}}
-```
-
-The editor's **Import Blender markers** action bakes these into the map. Collision markers rasterize transformed mesh bounds into nav cells. A walkable marker supplies a flat height. Spawn markers use the node's X/Z location; point and directional `KHR_lights_punctual` are imported too. Save the map after import. Author detailed ramps and boundaries with the nav painter.
-
-`nav` contains `width`, `depth` and row-major `cells` (index `z*width+x`). Each cell has `height`, `walkable`, `ramp` (`none/north/east/south/west`), numeric `flags` and `region`. Ramp names indicate the direction of rising height. Flags are water=1, counter=2 and damage-floor=4; combine them with addition. Region 0 has no encounter unless configured. Map `encounters` maps region-number strings to database encounter IDs. `spawns` maps names to `[x,y,z]`; height is resolved from navigation.
-
-Entities have unique `id`, `name`, `[x,y,z] position`, sprite path, clip, `[x,z] facing`, speed, radius, solid and routine. Routines are `stationary`, `wander` or `patrol`; patrol `route` contains `[x,z]` points. A `pages` array selects its **last matching page**:
-
-```json
-{
-  "conditions":{"flags":{"chest_open":false},
-    "variables":[{"id":"chapter","op":">=","value":1}]},
-  "trigger":"action", "script":"events/chest.lua", "solid":true
-}
-```
-
-Conditions also support `item` and `actor` IDs. Variable comparisons are `==`, `!=`, `>=`, `<=`, `>` and `<`. Triggers are action, touch, autorun and parallel. A page may override the sprite and solidity. A touch event runs on entry; autorun pages should change a condition when finished to avoid restarting forever. Counters let interaction reach an NPC across a flagged cell.
-
-Map cameras use pitch, yaw and FOV in degrees, distance and `[x,z] min/max` target bounds. Camera zones provide min/max rectangles and partial camera overrides; the last containing zone wins. Maps also define point lights, ambient/sun colors and direction, fog and BGM. Post keys are `bloom`, `depth_of_field`, `vignette`, `color_grade`, `bloom_strength`, `focus` (vertical tilt band center), `focus_range`, `focus_distance` (0 follows the camera distance), `aperture`, `exposure` and `lut`. LUT paths accept text `.cube` 3D LUTs and are resampled to 16³.
-
-## Sprites and asset tools
-
-An animation file references an `atlas` relative to itself, optional `pixels_per_unit`, and named clips. Each clip has `loop` and `directions`; each direction contains frames with `rect:[x,y,w,h]`, `duration` seconds and optional `event` string. Direction counts are 1, 4 or 8. Four-direction order is south, west, north, east; eight adds diagonals between these in that order. Frames are bottom-centered in the world. Idle and walk are conventional field clip names.
-
-```json
-{"atlas":"hero.png","pixels_per_unit":32,"clips":{"idle":{
-  "loop":true,"directions":[[{"rect":[0,0,24,32],"duration":0.2}]]
-}}}
-```
-
-`fengine_assetc anim sheet.json hero.anim.json` converts uniform sheets. Its manifest includes `atlas`, `frame_width`, `frame_height`, `directions` and `clips`; each clip supplies frame column indices, duration and optional row/column offsets. The atlas is copied beside the output when needed.
-
-`fengine_assetc atlas manifest.json output-dir` shelf-packs separate images with duplicated edge padding. The manifest uses width, height, padding, directions, pixels_per_unit and `frames:[{file,id,clip,direction,duration,event}]`. Every declared direction of a clip must contain frames. Output is `atlas.png`, `atlas.anim.json` and `regions.json`.
-
-## RPG database
-
-Tables are arrays of objects with unique `id`. Names are display strings; references use IDs. The loader validates references, target scopes, stats, rewards, probabilities and prices.
+`fe.rpg.database.load()` (called by `fe.starter`) loads the standard tables when they exist: `classes`, `actors`, `skills`, `items`, `states`, `enemies`, `troops`, `shops`, `encounters` and `quests`. A file is an array of records with an `id`, or an object keyed by id. Schemas live in Lua (`lualib/fe/rpg/database.lua`). They check types and cross-table references, and they drive the editor's Data tab. Schemas are open: extra fields such as Wayfarers' `shield` and `weak` are kept, and `schema.extend(name, fields)` adds validation for them. Your own tables use `data.load(name, path, schema)`.
 
 | Table | Main fields |
 | --- | --- |
-| actors | name, job, sprite, level, stats, skills, elements |
-| jobs | name, growth, learn:[{level,skills}], curves |
-| skills | name, target, mp_cost, timeline, effects |
-| items | name, type (consumable/equipment/key), price, slot, bonus, effects |
-| states | name, duration, damage_fraction, speed_multiplier, prevent_action |
-| elements | id, name |
-| enemies | name, sprite, stats, level, skills, ai, elements, exp, gold, drops |
-| troops | enemies, stage (map ID), escapable |
-| encounters | distance, troops:[{troop,weight}] |
-| shops | items, buy_rate, sell_rate |
+| classes | `name`, `growth` (stat per level), `curves`, `skills [{skill, level, jp}]`, `equip` (types), `commands`, `passives`, `modifiers` |
+| actors | `name`, `class`, `level`, `stats`, `sprite`, `battle_sprite`, `portrait`, `skills`, `equipment`, `slots` |
+| skills | `name`, `type`, `target`, `scope`, `cost {resource: n}`, `hits`, `effects [...]`, `element`, `damage_type`, `timeline`, `range`, `area`, `passive`, `modifiers`, `priority`, `tags` (tactics also reads `los`) |
+| items | `name`, `kind`, `price`, `stack`, `use {target, effects}`, `equip {slot, type, modifiers}` |
+| states | `name`, `turns`, `modifiers [{stat, add/mul/set}]`, `prevents_action`, `on_turn` effects, `removed_by`, `stacking` |
+| enemies | `name`, `sprite`, `scale`, `level`, `stats`, `skills`, `ai`, `resist {element: multiplier}`, `rewards {exp, money, drops}` |
+| troops | `name`, `members [{enemy, ...}]`, `stage`, `music`, `escapable`, `script` |
+| encounters | per-area tables with steps, weights and danger levels (fe.encounter) |
+| shops, quests | stock and prices; quest stages, chapters and journal text |
 
-Stats are hp, mp, attack, defense, magic, resistance and speed. Job growth adds bonuses per level beyond level 1. Optional job `curves:{hp:[0,12,28],...}` supplies cumulative bonuses indexed by level and overrides linear growth for that stat; short curves hold their final value. Top-level `experience_curve` supplies cumulative EXP thresholds starting with 0, for 2–99 levels. The default is `(level-1)²*50`. Learning occurs as levels are crossed.
+Effects are tables with a `type` handled by `fe.effects` (`damage`, `heal`, `add_state`, `remove_state`, `revive`, `push`, or your own handlers) plus fields such as `formula`, `power`, `element` and `chance`. Tactical skills add `range` and `area` as `{shape, min, max, height}`.
 
-Element multipliers on actors/enemies use `{fire:0.5,ice:2}`: zero is immune, one normal, two double damage. Declaring the optional elements table enables reference checking. Effects use types `damage`, `heal`, `restore_mp`, `state`, `remove_state`, `revive` or `script`; other fields include power, formula, element, state, chance, script and recipient (`target` or `user`). Skills target `enemy`, `ally`, `all_enemies`, `all_allies`, `self` or `dead_ally`. Consumables' field effects cover healing, MP, revive and state removal. Script effects and damage formulas execute in battles.
+## Maps
 
-Battle timeline files map names to arrays of `{time,command,...parameters}` events (see the sample). Commands are step, animate, effect, return, flash, sfx and shake. Each timeline must contain exactly one effect event. Step moves the acting sprite until return. Skills select timelines by name.
+`map.json` uses format 2. The engine stores and queries a map's contents but does not interpret them.
 
-## UI and editing
+- `grid`: `width`, `depth`, a `tags` name list and `layers`. Each layer holds rows of text: `height` (space-separated numbers), `walk` (`1`/`0`), `ramp` (`.` or the rising direction `n e s w`) and `tags` (space-separated hex bitmasks indexing the tag list). Use extra layers for bridges and overpasses, and `links` (`{x, z, from, to, dir}`) to connect them.
+- `points`: named positions (`{position, facing, layer}`) for spawns, battle stage slots and cutscene marks.
+- `placements`: `{id, type, position, facing, layer, props}`. `fe.field` spawns them by `type`; props are type-specific and include event `pages`.
+- `zones`: named rectangles with a type and props, which fire `zone_enter` and `zone_exit`.
+- `lights` (point or spot, with flicker), `emitters` (particles), `colliders` (extra solid boxes).
+- `environment`: `ambient`, `sun_color`, `sun_direction`, `fog_color`, `fog_density`, `sky` (gradient colours, clouds, `backdrops`), `weather` (`rain`, `snow`, `leaves`, `embers`, `dust`), and `post` (`bloom_strength`, `focus`, `focus_range`, `vignette`, `exposure`, `lut`, `lut_blend_target`, `lut_blend`, `pixel_scale` (1–8)).
+- `props`: free data read by Lua, such as `music`, `camera`, `battle_stage`, `encounters` and `daynight`.
 
-`ui/layout.json` names rectangles with x/y/w/h in virtual pixels. Existing sample keys cover dialogue, choices, menus, actor panels, shops and battle windows. The skin is a nine-slice image with `skin_border`. Optional `font` selects an AngelCode text `.fnt` and its referenced page images; otherwise ImGui's embedded TrueType font is used. Include glyphs for the language you ship. The layout's default font does not provide every writing system.
+Scripts can change the environment at run time with `world:set_environment{...}`. Those changes are not written back into the map file.
 
-Messages word-wrap and paginate, retain inline codes across pages, reveal with a typewriter effect and optionally show a portrait. First confirm reveals a page; the next advances it. Lists retain their selection and scroll automatically.
+### Blender
 
-F1 toggles developer tools. The map editor can paint navigation, set regions/flags, select/place/edit/delete entities and pages, edit lights, spawns, camera zones and post effects, import markers and play from a picked position. Inspect the ECS and flags/variables, execute Lua snippets, inspect/edit database JSON, or select a troop in the battle sandbox. Map Save writes atomically. Database editing and external data changes are validated before use; inspect the log after a rejected edit. Keep backups/version control for authored data.
+Model at one unit per grid cell, apply transforms and export glTF 2.0 (`.glb`) with normals. Textures, vertex colours, alpha (opaque, mask or blend) and node TRS animations are supported. Skinning and Draco compression are not. Custom properties on a node, either directly or under a `fengine` key, act as markers:
+
+```json
+{"spawn": "entry"}
+{"collision": true}
+{"collision": {"walkable": true, "height": 1}}
+{"material": "water"}
+```
+
+`KHR_lights_punctual` point and spot lights are imported as lights. In the editor, **Import markers** bakes spawn, collision and light markers into the grid, points and lights. Save the map afterwards.
+
+## Sprites
+
+An `.anim.json` file names an `atlas` image, an optional `pixels_per_unit`, and `clips`. Each clip has `loop` and `directions` (1, 4 or 8). Each direction is a list of frames `{rect: [x, y, w, h], duration, event?}`. The 4-direction order is south, west, north, east. Frame `event` strings appear as `anim_event` world events, which is useful for footstep sounds and hit timing. The kits use the clip names `idle`, `walk`, `attack`, `cast`, `hurt`, `ko` and `victory` where they exist.
+
+- `fengine_assetc sheet sheet.json out.anim.json` converts a uniform grid sheet.
+- `fengine_assetc atlas manifest.json outdir` packs loose frames into an atlas with padding.
+
+## Editor (F1, dev builds)
+
+| Tab | Purpose |
+| --- | --- |
+| World | Pick worlds and entities and inspect transform, sprite, light and props |
+| Map | Paint height, walkability, ramps and tags per layer; edit placements with schema-driven prop forms; edit zones, lights, points and environment; import Blender markers; undo, redo and save |
+| Data | Form editing of data tables from their schemas, with validation |
+| Console | Run Lua in the live game |
+| Profiler | Frame, Lua and draw statistics |
+| Launch | Buttons registered by the game with `fe.devtools.register` (battles, warps, cheats) |
+
+Lua errors open an overlay with the traceback. Fix the file and it reloads. Keep authored data in version control; map saves are atomic but overwrite the file.
