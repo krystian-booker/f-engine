@@ -1,0 +1,49 @@
+name: Build and test
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      CPM_SOURCE_CACHE: ${{ github.workspace }}/.cache/CPM
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .cache/CPM
+          key: cpm-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/CPM.cmake') }}
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev libasound2-dev libpulse-dev libudev-dev libvulkan-dev
+      - name: Configure Unix
+        if: runner.os != 'Windows'
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Configure Windows
+        if: runner.os == 'Windows'
+        run: cmake -S . -B build -A x64
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+      - name: Headless tests
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Install distribution
+        run: cmake --install build --prefix build/package --config Release
+      - name: Package
+        run: cpack --config build/CPackConfig.cmake -C Release -G ZIP -B build/dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fengine-${{ runner.os }}
+          path: build/dist/fengine-*.zip
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -DFENGINE_BUILD_RUNTIME=OFF -DFENGINE_ENABLE_SANITIZERS=ON
+      - run: cmake --build build --parallel 4
+      - run: ctest --test-dir build --output-on-failure

@@ -1,0 +1,65 @@
+# Compile only the backends usable on the target OS. shaderc is a host tool;
+# cross-compiling requires a separately built host shaderc via this cache entry.
+set(FENGINE_SHADERC "" CACHE FILEPATH "Host shaderc executable (optional)")
+set(FENGINE_PRECOMPILED_SHADER_DIR "" CACHE PATH "Verified target shader binaries for cross-compilation (backend subdirectories)")
+if(FENGINE_SHADERC)
+  set(shader_compiler "${FENGINE_SHADERC}")
+  set(shader_dependency "${FENGINE_SHADERC}")
+else()
+  set(shader_compiler "$<TARGET_FILE:shaderc>")
+  set(shader_dependency shaderc)
+endif()
+if(APPLE)
+  set(shader_backends metal)
+  set(shader_platform osx)
+elseif(WIN32)
+  set(shader_backends dx11)
+  set(shader_platform windows)
+else()
+  set(shader_backends spirv glsl)
+  set(shader_platform linux)
+endif()
+file(GLOB shader_sources CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/shaders/vs_*.sc" "${PROJECT_SOURCE_DIR}/shaders/fs_*.sc")
+file(GLOB shader_includes CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/shaders/*.sh")
+set(shader_outputs)
+foreach(backend IN LISTS shader_backends)
+  if(backend STREQUAL metal)
+    set(profile metal)
+  elseif(backend STREQUAL dx11)
+    set(profile s_5_0)
+  elseif(backend STREQUAL spirv)
+    set(profile spirv)
+  else()
+    set(profile 330)
+  endif()
+  foreach(source IN LISTS shader_sources)
+    get_filename_component(name "${source}" NAME_WE)
+    if(name MATCHES "^vs_")
+      set(stage vertex)
+    else()
+      set(stage fragment)
+    endif()
+    set(output "${PROJECT_BINARY_DIR}/shaders/${backend}/${name}.bin")
+    if(FENGINE_PRECOMPILED_SHADER_DIR)
+      set(precompiled "${FENGINE_PRECOMPILED_SHADER_DIR}/${backend}/${name}.bin")
+      if(NOT EXISTS "${precompiled}")
+        message(FATAL_ERROR "Missing precompiled shader: ${precompiled}")
+      endif()
+      add_custom_command(OUTPUT "${output}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${PROJECT_BINARY_DIR}/shaders/${backend}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${precompiled}" "${output}"
+        DEPENDS "${precompiled}" VERBATIM)
+    else()
+    add_custom_command(OUTPUT "${output}"
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "${PROJECT_BINARY_DIR}/shaders/${backend}"
+      COMMAND "${shader_compiler}" -f "${source}" -o "${output}"
+        --type "${stage}" --platform "${shader_platform}" --profile "${profile}"
+        --varyingdef "${PROJECT_SOURCE_DIR}/shaders/varying.def.sc"
+        -i "${BGFX_DIR}/src" -i "${PROJECT_SOURCE_DIR}/shaders"
+      DEPENDS "${source}" ${shader_includes} "${PROJECT_SOURCE_DIR}/shaders/varying.def.sc" ${shader_dependency}
+      VERBATIM)
+    endif()
+    list(APPEND shader_outputs "${output}")
+  endforeach()
+endforeach()
+add_custom_target(fengine_shaders ALL DEPENDS ${shader_outputs})

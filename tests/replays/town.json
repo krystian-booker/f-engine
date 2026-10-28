@@ -1,0 +1,316 @@
+[
+  {
+    "tick": 5,
+    "key": "Up",
+    "down": true
+  },
+  {
+    "tick": 77,
+    "key": "Up",
+    "down": false
+  },
+  {
+    "tick": 80,
+    "key": "Z",
+    "down": true
+  },
+  {
+    "tick": 81,
+    "key": "Z",
+    "down": false
+  },
+  {
+    "tick": 88,
+    "capture": "build/qa/dialogue"
+  },
+  {
+    "tick": 90,
+    "key": "Z",
+    "down": true
+  },
+  {
+    "tick": 91,
+    "key": "Z",
+    "down": false
+  },
+  {
+    "tick": 92,
+    "key": "Z",
+    "down": true
+  },
+  {
+    "tick": 93,
+    "key": "Z",
+    "down": false
+  },
+  {
+    "tick": 97,
+    "key": "Z",
+    "down": true
+  },
+  {
+    "tick": 98,
+    "key": "Z",
+    "down": false
+  },
+  {
+    "tick": 104,
+    "key": "Z",
+    "down": true
+  },
+  {
+    "tick": 105,
+    "key": "Z",
+    "down": false
+  },
+  {
+    "tick": 106,
+    "key": "Z",
+    "down": true
+  },
+  {
+    "tick": 107,
+    "key": "Z",
+    "down": false
+  },
+  {
+    "tick": 110,
+    "assert_flags": {
+      "quest_started": true
+    }
+  },
+  {
+    "tick": 111,
+    "assert_map": "town"
+  },
+  {
+    "tick": 115,
+    "key": "Tab",
+    "down": true
+  },
+  {
+    "tick": 116,
+    "key": "Tab",
+    "down": false
+  },
+  {
+    "tick": 118,
+    "key": "Return",
+    "down": true
+  },
+  {
+    "tick": 119,
+    "key": "Return",
+    "down": false
+  },
+  {
+    "tick": 122,
+    "capture": "build/qa/items"
+  },
+  {
+    "tick": 124,
+    "key": "Escape",
+    "down": true
+  },
+  {
+    "tick": 125,
+    "key": "Escape",
+    "down": false
+  },
+  {
+    "tick": 127,
+    "key": "Down",
+    "down": true
+  },
+  {
+    "tick": 128,
+    "key": "Down",
+    "down": false
+  },
+  {
+    "tick": 129,
+    "key": "Down",
+    "down": true
+  },
+  {
+    "tick": 130,
+    "key": "Down",
+    "down": false
+  },
+  {
+    "tick": 131,
+    "key": "Down",
+    "down": true
+  },
+  {
+    "tick": 132,
+    "key": "Down",
+    "down": false
+  },
+  {
+    "tick": 133,
+    "key": "Down",
+    "down": true
+  },
+  {
+    "tick": 134,
+    "key": "Down",
+    "down": false
+  },
+  {
+    "tick": 135,
+    "key": "Down",
+    "down": true
+  },
+  {
+    "tick": 136,
+    "key": "Down",
+    "down": false
+  },
+  {
+    "tick": 137,
+    "key": "Return",
+    "down": true
+  },
+  {
+    "tick": 138,
+    "key": "Return",
+    "down": false
+  },
+  {
+    "tick": 140,
+    "key": "Return",
+    "down": true
+  },
+  {
+    "tick": 141,
+    "key": "Return",
+    "down": false
+  },
+  {
+    "tick": 143,
+    "capture": "build/qa/save",
+    "assert_gold": 150,
+    "assert_inventory": {
+      "potion": 5
+    }
+  },
+  {
+    "tick": 146,
+    "key": "Escape",
+    "down": true
+  },
+  {
+    "tick": 147,
+    "key": "Escape",
+    "down": false
+  },
+  {
+    "tick": 149,
+    "key": "Tab",
+    "down": true
+  },
+  {
+    "tick": 150,
+    "key": "Tab",
+    "down": false
+  },
+  {
+    "tick": 152,
+    "resize": [
+      960,
+      600
+    ]
+  },
+  {
+    "tick": 155,
+    "capture": "build/qa/resized"
+  },
+  {
+    "tick": 160,
+    "key": "F1",
+    "down": true
+  },
+  {
+    "tick": 161,
+    "key": "F1",
+    "down": false
+  },
+  {
+    "tick": 165,
+    "capture": "build/qa/editor"
+  },
+  {
+    "tick": 170,
+    "key": "F1",
+    "down": true
+  },
+  {
+    "tick": 171,
+    "key": "F1",
+    "down": false
+  },
+  {
+    "tick": 180,
+    "key": "Right",
+    "down": true
+  },
+  {
+    "tick": 204,
+    "key": "Right",
+    "down": false
+  },
+  {
+    "tick": 205,
+    "key": "Up",
+    "down": true
+  },
+  {
+    "tick": 350,
+    "key": "Up",
+    "down": false
+  },
+  {
+    "tick": 352,
+    "key": "Left",
+    "down": true
+  },
+  {
+    "tick": 376,
+    "key": "Left",
+    "down": false
+  },
+  {
+    "tick": 378,
+    "key": "Up",
+    "down": true
+  },
+  {
+    "tick": 406,
+    "key": "Up",
+    "down": false
+  },
+  {
+    "tick": 460,
+    "assert_map": "grotto",
+    "assert_flags": {
+      "quest_started": true
+    },
+    "capture": "build/qa/grotto"
+  },
+  {
+    "tick": 465,
+    "key": "Down",
+    "down": true
+  },
+  {
+    "tick": 505,
+    "key": "Down",
+    "down": false
+  },
+  {
+    "tick": 550,
+    "assert_map": "town",
+    "capture": "build/qa/returned"
+  }
+]

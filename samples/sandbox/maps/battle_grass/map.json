@@ -1,0 +1,977 @@
+{
+  "id": "battle_grass",
+  "name": "Amber Vale",
+  "geometry": "geometry.glb",
+  "nav": {
+    "width": 16,
+    "depth": 14,
+    "cells": [
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": true,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      },
+      {
+        "walkable": false,
+        "region": 0
+      }
+    ]
+  },
+  "spawns": {
+    "entry": [
+      8.5,
+      0,
+      11.5
+    ],
+    "return": [
+      8.5,
+      0,
+      2.5
+    ]
+  },
+  "camera": {
+    "pitch": 42,
+    "distance": 19,
+    "fov": 30,
+    "min": [
+      5,
+      4
+    ],
+    "max": [
+      11,
+      10
+    ]
+  },
+  "lights": [
+    {
+      "position": [
+        4,
+        2,
+        5
+      ],
+      "color": [
+        1,
+        0.7,
+        0.35
+      ],
+      "radius": 8,
+      "intensity": 2
+    }
+  ],
+  "ambient": [
+    0.4,
+    0.4,
+    0.38
+  ],
+  "sun_color": [
+    1,
+    0.83,
+    0.61
+  ],
+  "sun_direction": [
+    -0.6,
+    -1,
+    -0.4
+  ],
+  "fog_density": 0.015,
+  "fog_color": [
+    0.1,
+    0.14,
+    0.22
+  ],
+  "bgm": "audio/vale.wav",
+  "post": {
+    "bloom_strength": 0.4,
+    "focus": 0.53,
+    "focus_range": 0.23,
+    "lut": "ui/amber.cube"
+  },
+  "entities": []
+}

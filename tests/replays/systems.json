@@ -1,0 +1,122 @@
+[
+  {
+    "tick": 1,
+    "script": "tests/systems.lua"
+  },
+  {
+    "tick": 5,
+    "capture": "build/qa/dialogue-long"
+  },
+  {
+    "tick": 10,
+    "key": "Z",
+    "down": true
+  },
+  {
+    "tick": 11,
+    "key": "Z",
+    "down": false
+  },
+  {
+    "tick": 12,
+    "capture": "build/qa/dialogue-long-revealed"
+  },
+  {
+    "tick": 18,
+    "key": "Z",
+    "down": true
+  },
+  {
+    "tick": 19,
+    "key": "Z",
+    "down": false
+  },
+  {
+    "tick": 26,
+    "key": "Z",
+    "down": true
+  },
+  {
+    "tick": 27,
+    "key": "Z",
+    "down": false
+  },
+  {
+    "tick": 34,
+    "key": "Z",
+    "down": true
+  },
+  {
+    "tick": 35,
+    "key": "Z",
+    "down": false
+  },
+  {
+    "tick": 42,
+    "key": "Z",
+    "down": true
+  },
+  {
+    "tick": 43,
+    "key": "Z",
+    "down": false
+  },
+  {
+    "tick": 50,
+    "key": "Z",
+    "down": true
+  },
+  {
+    "tick": 51,
+    "key": "Z",
+    "down": false
+  },
+  {
+    "tick": 100,
+    "assert_flags": {
+      "dialogue_pages_complete": true
+    },
+    "capture": "build/qa/shop"
+  },
+  {
+    "tick": 105,
+    "key": "Z",
+    "down": true
+  },
+  {
+    "tick": 106,
+    "key": "Z",
+    "down": false
+  },
+  {
+    "tick": 110,
+    "key": "X",
+    "down": true
+  },
+  {
+    "tick": 111,
+    "key": "X",
+    "down": false
+  },
+  {
+    "tick": 120,
+    "key": "Z",
+    "down": true
+  },
+  {
+    "tick": 121,
+    "key": "Z",
+    "down": false
+  },
+  {
+    "tick": 180,
+    "assert_flags": {
+      "systems_complete": true
+    },
+    "assert_gold": 110,
+    "assert_inventory": {
+      "potion": 5,
+      "bronze_sword": 0
+    }
+  }
+]

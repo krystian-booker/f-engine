@@ -1,0 +1,44 @@
+[
+  {
+    "tick": 10,
+    "key": "Down",
+    "down": true
+  },
+  {
+    "tick": 11,
+    "key": "Down",
+    "down": false
+  },
+  {
+    "tick": 20,
+    "key": "Z",
+    "down": true
+  },
+  {
+    "tick": 21,
+    "key": "Z",
+    "down": false
+  },
+  {
+    "tick": 30,
+    "capture": "build/qa/load-slots"
+  },
+  {
+    "tick": 40,
+    "key": "Z",
+    "down": true
+  },
+  {
+    "tick": 41,
+    "key": "Z",
+    "down": false
+  },
+  {
+    "tick": 60,
+    "assert_map": "town",
+    "assert_flags": {
+      "quest_started": true
+    },
+    "capture": "build/qa/loaded"
+  }
+]

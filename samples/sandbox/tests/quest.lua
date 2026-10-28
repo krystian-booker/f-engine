@@ -1,0 +1,22 @@
+return function()
+  give_item("bronze_sword")
+  assert(equip("aster", "weapon", "bronze_sword"))
+  give_item("linen_robe", 2)
+  assert(equip("aster", "armor", "linen_robe"))
+  assert(equip("mira", "armor", "linen_robe"))
+  gain_experience(1250)
+  rest_party()
+  set_flag("quest_started")
+  fade_out(0.1)
+  warp("grotto", "entry")
+  fade_in(0.1)
+  run_event("events/guardian.lua", "guardian")
+  while not get_flag("crystal_restored") do wait(0.1) end
+  wait(2)
+  fade_out(0.1)
+  warp("town", "entry")
+  fade_in(0.1)
+  run_event("events/elder.lua", "elder")
+  while not get_flag("reward_claimed") do wait(0.1) end
+  set_flag("quest_smoke_complete")
+end

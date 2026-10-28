@@ -1,0 +1,5 @@
+{
+  "party": ["aster", "mira"],
+  "gold": 150,
+  "inventory": {"potion": 5, "ether": 2, "phoenix": 1}
+}

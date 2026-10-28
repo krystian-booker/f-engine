@@ -1,0 +1,387 @@
+{
+  "atlas": "elder.png",
+  "pixels_per_unit": 32,
+  "pivot": [
+    0.5,
+    1
+  ],
+  "clips": {
+    "idle": {
+      "directions": [
+        [
+          {
+            "rect": [
+              0,
+              0,
+              32,
+              48
+            ],
+            "duration": 0.16
+          }
+        ],
+        [
+          {
+            "rect": [
+              0,
+              48,
+              32,
+              48
+            ],
+            "duration": 0.16
+          }
+        ],
+        [
+          {
+            "rect": [
+              0,
+              96,
+              32,
+              48
+            ],
+            "duration": 0.16
+          }
+        ],
+        [
+          {
+            "rect": [
+              0,
+              144,
+              32,
+              48
+            ],
+            "duration": 0.16
+          }
+        ]
+      ]
+    },
+    "walk": {
+      "directions": [
+        [
+          {
+            "rect": [
+              0,
+              0,
+              32,
+              48
+            ],
+            "duration": 0.16
+          },
+          {
+            "rect": [
+              32,
+              0,
+              32,
+              48
+            ],
+            "duration": 0.16,
+            "event": "footstep"
+          },
+          {
+            "rect": [
+              64,
+              0,
+              32,
+              48
+            ],
+            "duration": 0.16
+          },
+          {
+            "rect": [
+              96,
+              0,
+              32,
+              48
+            ],
+            "duration": 0.16,
+            "event": "footstep"
+          }
+        ],
+        [
+          {
+            "rect": [
+              0,
+              48,
+              32,
+              48
+            ],
+            "duration": 0.16
+          },
+          {
+            "rect": [
+              32,
+              48,
+              32,
+              48
+            ],
+            "duration": 0.16,
+            "event": "footstep"
+          },
+          {
+            "rect": [
+              64,
+              48,
+              32,
+              48
+            ],
+            "duration": 0.16
+          },
+          {
+            "rect": [
+              96,
+              48,
+              32,
+              48
+            ],
+            "duration": 0.16,
+            "event": "footstep"
+          }
+        ],
+        [
+          {
+            "rect": [
+              0,
+              96,
+              32,
+              48
+            ],
+            "duration": 0.16
+          },
+          {
+            "rect": [
+              32,
+              96,
+              32,
+              48
+            ],
+            "duration": 0.16,
+            "event": "footstep"
+          },
+          {
+            "rect": [
+              64,
+              96,
+              32,
+              48
+            ],
+            "duration": 0.16
+          },
+          {
+            "rect": [
+              96,
+              96,
+              32,
+              48
+            ],
+            "duration": 0.16,
+            "event": "footstep"
+          }
+        ],
+        [
+          {
+            "rect": [
+              0,
+              144,
+              32,
+              48
+            ],
+            "duration": 0.16
+          },
+          {
+            "rect": [
+              32,
+              144,
+              32,
+              48
+            ],
+            "duration": 0.16,
+            "event": "footstep"
+          },
+          {
+            "rect": [
+              64,
+              144,
+              32,
+              48
+            ],
+            "duration": 0.16
+          },
+          {
+            "rect": [
+              96,
+              144,
+              32,
+              48
+            ],
+            "duration": 0.16,
+            "event": "footstep"
+          }
+        ]
+      ]
+    },
+    "attack": {
+      "loop": false,
+      "directions": [
+        [
+          {
+            "rect": [
+              0,
+              0,
+              32,
+              48
+            ],
+            "duration": 0.16
+          },
+          {
+            "rect": [
+              32,
+              0,
+              32,
+              48
+            ],
+            "duration": 0.16,
+            "event": "footstep"
+          },
+          {
+            "rect": [
+              64,
+              0,
+              32,
+              48
+            ],
+            "duration": 0.16
+          },
+          {
+            "rect": [
+              96,
+              0,
+              32,
+              48
+            ],
+            "duration": 0.16,
+            "event": "footstep"
+          }
+        ],
+        [
+          {
+            "rect": [
+              0,
+              48,
+              32,
+              48
+            ],
+            "duration": 0.16
+          },
+          {
+            "rect": [
+              32,
+              48,
+              32,
+              48
+            ],
+            "duration": 0.16,
+            "event": "footstep"
+          },
+          {
+            "rect": [
+              64,
+              48,
+              32,
+              48
+            ],
+            "duration": 0.16
+          },
+          {
+            "rect": [
+              96,
+              48,
+              32,
+              48
+            ],
+            "duration": 0.16,
+            "event": "footstep"
+          }
+        ],
+        [
+          {
+            "rect": [
+              0,
+              96,
+              32,
+              48
+            ],
+            "duration": 0.16
+          },
+          {
+            "rect": [
+              32,
+              96,
+              32,
+              48
+            ],
+            "duration": 0.16,
+            "event": "footstep"
+          },
+          {
+            "rect": [
+              64,
+              96,
+              32,
+              48
+            ],
+            "duration": 0.16
+          },
+          {
+            "rect": [
+              96,
+              96,
+              32,
+              48
+            ],
+            "duration": 0.16,
+            "event": "footstep"
+          }
+        ],
+        [
+          {
+            "rect": [
+              0,
+              144,
+              32,
+              48
+            ],
+            "duration": 0.16
+          },
+          {
+            "rect": [
+              32,
+              144,
+              32,
+              48
+            ],
+            "duration": 0.16,
+            "event": "footstep"
+          },
+          {
+            "rect": [
+              64,
+              144,
+              32,
+              48
+            ],
+            "duration": 0.16
+          },
+          {
+            "rect": [
+              96,
+              144,
+              32,
+              48
+            ],
+            "duration": 0.16,
+            "event": "footstep"
+          }
+        ]
+      ]
+    }
+  }
+}

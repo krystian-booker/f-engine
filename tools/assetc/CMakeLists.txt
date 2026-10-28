@@ -1,0 +1,7 @@
+add_executable(fengine_assetc main.cpp)
+target_link_libraries(fengine_assetc PRIVATE fengine_logic)
+fengine_windows_manifest(fengine_assetc)
+install(TARGETS fengine_assetc RUNTIME DESTINATION bin)
+if(FENGINE_BUILD_TESTS)
+  add_test(NAME fengine_sandbox_validation COMMAND fengine_assetc validate "${PROJECT_SOURCE_DIR}/samples/sandbox")
+endif()

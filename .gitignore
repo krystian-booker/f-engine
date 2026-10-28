@@ -1,0 +1,8 @@
+/build*/
+/.cache/
+/imgui.ini
+/saves/
+*.log
+.DS_Store
+__pycache__/
+*.pyc

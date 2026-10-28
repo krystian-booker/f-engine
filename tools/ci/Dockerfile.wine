@@ -1,0 +1,6 @@
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml="
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wine64 wine xvfb xauth libgl1-mesa-dri mesa-vulkan-drivers \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /workspace
