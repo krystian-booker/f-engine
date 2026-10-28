@@ -13,4 +13,4 @@ void log(LogLevel level, std::string_view message) {
     std::fprintf(stderr, "[%8.3f] %-7s %.*s\n", seconds, labels[static_cast<int>(level)],
                  static_cast<int>(message.size()), message.data());
 }
-}
+} // namespace fe

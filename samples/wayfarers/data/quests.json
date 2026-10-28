@@ -1,0 +1,8 @@
+[
+  {"id": "rook_1", "name": "Rook I: The Lost Trail", "kind": "chapter", "owner": "rook", "chapter": 1,
+   "stages": [{"id": "ask", "text": "Ask around Riverford about the cliff shrine."},
+              {"id": "travel", "text": "Travel the Meadow Road to Cliffhaven."},
+              {"id": "shrine", "text": "Speak with the Shrine Keeper."}]},
+  {"id": "selene_1", "name": "Selene I: Pages in the Wind", "kind": "chapter", "owner": "selene", "chapter": 1,
+   "stages": [{"id": "join", "text": "Travel with Rook to Cliffhaven's shrine."}]}
+]

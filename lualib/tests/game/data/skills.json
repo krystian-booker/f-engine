@@ -1,0 +1,16 @@
+[
+  {"id": "attack", "name": "Attack", "type": "attack", "uses_weapon": true,
+   "effects": [{"type": "damage", "formula": "physical", "power": 100}]},
+  {"id": "cleave", "name": "Cleave", "type": "art", "cost": {"mp": 3}, "target": "all_enemies",
+   "effects": [{"type": "damage", "formula": "physical", "power": 80}]},
+  {"id": "fire", "name": "Fire", "type": "magic", "cost": {"mp": 4}, "element": "fire",
+   "range": {"shape": "diamond", "min": 1, "max": 3}, "area": {"shape": "diamond", "min": 0, "max": 1},
+   "effects": [{"type": "damage", "formula": "magical", "power": 100}]},
+  {"id": "heal", "name": "Heal", "type": "magic", "cost": {"mp": 3}, "target": "ally", "scope": "both",
+   "range": {"shape": "diamond", "min": 0, "max": 3},
+   "effects": [{"type": "heal", "power": 100}]},
+  {"id": "venom", "name": "Venom", "type": "attack",
+   "effects": [{"type": "damage", "formula": "physical", "power": 60}, {"type": "add_state", "state": "poison", "chance": 1}]},
+  {"id": "guard_up", "name": "Guard Up", "passive": true, "modifiers": [{"stat": "defense", "add": 5}]},
+  {"id": "shove", "name": "Shove", "type": "art", "effects": [{"type": "damage", "formula": "fixed", "power": 5}, {"type": "push", "distance": 1}]}
+]

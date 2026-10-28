@@ -1,0 +1,250 @@
+{
+  "format": 2,
+  "id": "camp",
+  "name": "Ridge Camp",
+  "geometry": "geometry.glb",
+  "grid": {
+    "width": 16,
+    "depth": 12,
+    "layers": [
+      {
+        "name": "ground",
+        "height": [
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
+        ],
+        "walk": [
+          "0000000110000000",
+          "0111111111111110",
+          "0100111111110010",
+          "0100111111110010",
+          "0111111111111110",
+          "0111111001111110",
+          "0111111001111110",
+          "0111111111111110",
+          "0100111111110010",
+          "0100111111110010",
+          "0111111111111110",
+          "0000000000000000"
+        ]
+      }
+    ]
+  },
+  "points": {
+    "start": {
+      "position": [
+        8,
+        0,
+        9.5
+      ],
+      "facing": [
+        0,
+        -1
+      ]
+    }
+  },
+  "placements": [
+    {
+      "id": "bram",
+      "type": "npc",
+      "position": [
+        5.5,
+        0,
+        5.5
+      ],
+      "facing": [
+        1,
+        0
+      ],
+      "props": {
+        "sprite": "sprites/bram.anim.json",
+        "name": "Bram",
+        "script": "events.talk_bram"
+      }
+    },
+    {
+      "id": "lio",
+      "type": "npc",
+      "position": [
+        10.5,
+        0,
+        5.5
+      ],
+      "facing": [
+        -1,
+        0
+      ],
+      "props": {
+        "sprite": "sprites/lio.anim.json",
+        "name": "Lio",
+        "script": "events.talk_lio"
+      }
+    },
+    {
+      "id": "wren",
+      "type": "npc",
+      "position": [
+        8.5,
+        0,
+        8.5
+      ],
+      "facing": [
+        0,
+        -1
+      ],
+      "props": {
+        "sprite": "sprites/wren.anim.json",
+        "name": "Wren",
+        "script": "events.talk_wren"
+      }
+    },
+    {
+      "id": "campfire",
+      "type": "emitter",
+      "position": [
+        8,
+        0.2,
+        6
+      ],
+      "props": {
+        "rate": 26,
+        "lifetime": 1.0,
+        "velocity": [
+          0,
+          1.2,
+          0
+        ],
+        "velocity_jitter": [
+          0.2,
+          0.3,
+          0.2
+        ],
+        "size": 0.12,
+        "size_end": 0.02,
+        "color": [
+          2.4,
+          1.1,
+          0.3,
+          1
+        ],
+        "color_end": [
+          1.2,
+          0.3,
+          0.1,
+          0
+        ]
+      }
+    },
+    {
+      "id": "fire_sound",
+      "type": "sound",
+      "position": [
+        8,
+        0.5,
+        6
+      ],
+      "props": {
+        "sound": "audio/chime.wav",
+        "radius": 4,
+        "volume": 0.1
+      }
+    },
+    {
+      "id": "to_ridge",
+      "type": "npc",
+      "position": [
+        8,
+        0,
+        1.4
+      ],
+      "props": {
+        "name": "Ridge path",
+        "script": "events.ridge_path",
+        "solid": false
+      }
+    }
+  ],
+  "zones": [],
+  "props": {
+    "music": "camp",
+    "camera": {
+      "pitch": 44,
+      "distance": 16,
+      "fov": 30
+    }
+  },
+  "lights": [
+    {
+      "position": [
+        8,
+        1,
+        6
+      ],
+      "color": [
+        1,
+        0.55,
+        0.25
+      ],
+      "radius": 8,
+      "intensity": 3.5,
+      "flicker": 0.25
+    }
+  ],
+  "emitters": [],
+  "colliders": [],
+  "environment": {
+    "ambient": [
+      0.22,
+      0.22,
+      0.32
+    ],
+    "sun_color": [
+      0.45,
+      0.5,
+      0.75
+    ],
+    "sun_direction": [
+      0.4,
+      -1,
+      0.3
+    ],
+    "fog_color": [
+      0.1,
+      0.12,
+      0.2
+    ],
+    "fog_density": 0.02,
+    "sky": {
+      "mode": "gradient",
+      "top": [
+        0.03,
+        0.04,
+        0.12
+      ],
+      "horizon": [
+        0.2,
+        0.2,
+        0.35
+      ],
+      "cloud_cover": 0.2
+    },
+    "weather": {
+      "kind": "embers",
+      "intensity": 0.4
+    },
+    "post": {
+      "bloom_strength": 0.5,
+      "lut": "ui/ridge.cube"
+    }
+  }
+}

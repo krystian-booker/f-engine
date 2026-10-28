@@ -1,0 +1,138 @@
+{
+  "atlas": "emotes.png",
+  "pixels_per_unit": 32,
+  "pivot": [
+    0.5,
+    1
+  ],
+  "clips": {
+    "exclaim": {
+      "loop": false,
+      "directions": [
+        [
+          {
+            "rect": [
+              0,
+              0,
+              16,
+              16
+            ],
+            "duration": 1.2
+          }
+        ]
+      ]
+    },
+    "question": {
+      "loop": false,
+      "directions": [
+        [
+          {
+            "rect": [
+              16,
+              0,
+              16,
+              16
+            ],
+            "duration": 1.2
+          }
+        ]
+      ]
+    },
+    "music": {
+      "loop": false,
+      "directions": [
+        [
+          {
+            "rect": [
+              32,
+              0,
+              16,
+              16
+            ],
+            "duration": 1.2
+          }
+        ]
+      ]
+    },
+    "sweat": {
+      "loop": false,
+      "directions": [
+        [
+          {
+            "rect": [
+              48,
+              0,
+              16,
+              16
+            ],
+            "duration": 1.2
+          }
+        ]
+      ]
+    },
+    "dots": {
+      "loop": false,
+      "directions": [
+        [
+          {
+            "rect": [
+              64,
+              0,
+              16,
+              16
+            ],
+            "duration": 1.2
+          }
+        ]
+      ]
+    },
+    "anger": {
+      "loop": false,
+      "directions": [
+        [
+          {
+            "rect": [
+              80,
+              0,
+              16,
+              16
+            ],
+            "duration": 1.2
+          }
+        ]
+      ]
+    },
+    "heart": {
+      "loop": false,
+      "directions": [
+        [
+          {
+            "rect": [
+              96,
+              0,
+              16,
+              16
+            ],
+            "duration": 1.2
+          }
+        ]
+      ]
+    },
+    "idea": {
+      "loop": false,
+      "directions": [
+        [
+          {
+            "rect": [
+              112,
+              0,
+              16,
+              16
+            ],
+            "duration": 1.2
+          }
+        ]
+      ]
+    }
+  }
+}

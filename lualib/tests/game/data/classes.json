@@ -1,0 +1,7 @@
+[
+  {"id": "fighter", "name": "Fighter", "growth": {"max_hp": 20, "attack": 3, "defense": 2, "speed": 1},
+   "skills": [{"skill": "cleave", "level": 3}, {"skill": "guard_up", "jp": 30}], "equip": ["sword", "armor"]},
+  {"id": "mage", "name": "Mage", "growth": {"max_hp": 12, "max_mp": 5, "magic": 4},
+   "skills": [{"skill": "fire", "level": 1}, {"skill": "heal", "level": 1}], "equip": ["staff"],
+   "commands": ["attack", "magic", "item", "defend", "flee"]}
+]

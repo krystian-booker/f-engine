@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(fengine VERSION 0.1.0 LANGUAGES C CXX)
+project(fengine VERSION 0.2.0 LANGUAGES C CXX)
 include(cmake/Windows.cmake)
 
 if(APPLE AND NOT CMAKE_OSX_ARCHITECTURES)
@@ -13,10 +13,11 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build configuration" FORCE)
 endif()
 option(FENGINE_BUILD_RUNTIME "Build the SDL/bgfx runtime and editor" ON)
-option(FENGINE_BUILD_TESTS "Build headless tests" ON)
-option(FENGINE_DEV "Enable editor and development file watching" ON)
+option(FENGINE_BUILD_TESTS "Build tests" ON)
+option(FENGINE_DEV "Enable the editor and hot reload in the runtime" ON)
 option(FENGINE_BUILD_TOOLS "Build asset authoring tools" ON)
-set(FENGINE_GAME_MODULE "" CACHE PATH "Optional native game-module directory")
+option(FENGINE_WARNINGS_AS_ERRORS "Treat compiler warnings in engine code as errors" OFF)
+option(FENGINE_RUN_REPLAYS "Register windowed replay tests with CTest (needs a GPU/display)" OFF)
 option(FENGINE_ENABLE_SANITIZERS "Enable address and undefined behavior sanitizers" OFF)
 if(FENGINE_ENABLE_SANITIZERS AND NOT MSVC)
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
@@ -24,66 +25,64 @@ if(FENGINE_ENABLE_SANITIZERS AND NOT MSVC)
 endif()
 include(cmake/Dependencies.cmake)
 
-add_library(fengine_logic STATIC
-  engine/core/Log.cpp
+function(fengine_warnings target)
+  if(MSVC)
+    target_compile_options(${target} PRIVATE /W4 /permissive- $<$<BOOL:${FENGINE_WARNINGS_AS_ERRORS}>:/WX>)
+  else()
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic $<$<BOOL:${FENGINE_WARNINGS_AS_ERRORS}>:-Werror>)
+  endif()
+endfunction()
+
+# Headless engine services: everything except the window, GPU and audio device.
+add_library(fengine_core STATIC
+  engine/core/AssetCache.cpp
   engine/core/GameConfig.cpp
-  engine/platform/FileWatcher.cpp
-  engine/scene/SceneStack.cpp
-  engine/world/NavGrid.cpp
-  engine/world/Map.cpp
-  engine/world/World.cpp
-  engine/world/Particles.cpp
-  engine/rpg/Database.cpp
-  engine/rpg/GameState.cpp
-  engine/battle/Battle.cpp
-  engine/battle/ActionSequence.cpp
-  engine/script/ScriptEngine.cpp
-  engine/ui/Text.cpp
-  engine/ui/BitmapFont.cpp
+  engine/core/Json.cpp
+  engine/core/Log.cpp
+  engine/core/Paths.cpp
   engine/assets/Image.cpp
-  engine/assets/Mesh.cpp
+  engine/assets/Model.cpp
   engine/assets/SpriteAnimation.cpp
-  engine/render/Camera.cpp
-  engine/editor/GridPicking.cpp
+  engine/text/Font.cpp
+  engine/text/Markup.cpp
+  engine/text/TextLayout.cpp
+  engine/text/TextSystem.cpp
+  engine/nav/Grid.cpp
+  engine/nav/Query.cpp
+  engine/world/Camera.cpp
+  engine/world/MapData.cpp
+  engine/world/World.cpp
+  engine/services/Canvas.cpp
+  engine/services/InputState.cpp
+  engine/services/SaveStore.cpp
+  engine/platform/FileWatcher.cpp
+  engine/script/Binder.cpp
+  engine/script/LuaHost.cpp
+  engine/script/bindings/CoreBindings.cpp
+  engine/script/bindings/EntityBindings.cpp
+  engine/script/bindings/ServiceBindings.cpp
+  engine/script/bindings/UiBindings.cpp
+  engine/script/bindings/WorldBindings.cpp
+  engine/runtime/Engine.cpp
+  engine/runtime/Headless.cpp
 )
-target_include_directories(fengine_logic PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(fengine_logic PUBLIC nlohmann_json::nlohmann_json glm::glm EnTT::EnTT fengine_sol2 fengine_asset_formats)
-target_compile_definitions(fengine_logic PUBLIC FENGINE_DEV=$<BOOL:${FENGINE_DEV}>)
-if(MSVC)
-  target_compile_options(fengine_logic PRIVATE /W4 /permissive-)
-else()
-  target_compile_options(fengine_logic PRIVATE -Wall -Wextra -Wpedantic)
+target_include_directories(fengine_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(fengine_core PUBLIC nlohmann_json::nlohmann_json glm::glm EnTT::EnTT fengine_sol2 fengine_asset_formats)
+target_compile_definitions(fengine_core PUBLIC FENGINE_DEV=$<BOOL:${FENGINE_DEV}>
+  PRIVATE FENGINE_SOURCE_LUALIB="${PROJECT_SOURCE_DIR}/lualib")
+fengine_warnings(fengine_core)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  # sol2 bindings are template heavy; keep debug objects reasonable.
+  set_source_files_properties(engine/script/bindings/EntityBindings.cpp engine/script/bindings/WorldBindings.cpp
+    PROPERTIES COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O1>")
 endif()
+
+add_executable(fengine_headless apps/headless/main.cpp)
+target_link_libraries(fengine_headless PRIVATE fengine_core)
 
 if(FENGINE_BUILD_RUNTIME)
   include(cmake/Shaders.cmake)
-  add_library(fengine_core STATIC
-    engine/core/App.cpp
-    engine/platform/Window.cpp
-    engine/render/Renderer.cpp
-    engine/render/ImGuiRenderer.cpp
-    engine/render/WorldRenderer.cpp
-    engine/audio/Audio.cpp
-    engine/input/Input.cpp
-    engine/ui/Canvas.cpp
-    engine/scene/GameSession.cpp
-    engine/editor/Editor.cpp
-  )
-  target_link_libraries(fengine_core PUBLIC fengine_logic SDL3::SDL3 bgfx bx fengine_imgui fengine_audio_dependency)
-  target_compile_definitions(fengine_core PRIVATE
-    FENGINE_SHADER_DIR="${CMAKE_CURRENT_BINARY_DIR}/shaders"
-    FENGINE_SHADER_SOURCE_DIR="${PROJECT_SOURCE_DIR}/shaders"
-    FENGINE_BUILD_DIR="${PROJECT_BINARY_DIR}"
-    FENGINE_CMAKE="${CMAKE_COMMAND}")
-  add_dependencies(fengine_core fengine_shaders)
-  if(FENGINE_GAME_MODULE)
-    get_filename_component(FENGINE_GAME_MODULE "${FENGINE_GAME_MODULE}" ABSOLUTE BASE_DIR "${PROJECT_SOURCE_DIR}")
-    add_subdirectory("${FENGINE_GAME_MODULE}" "${PROJECT_BINARY_DIR}/game-module")
-    if(NOT TARGET fengine_game_module)
-      message(FATAL_ERROR "Game module must define a target named fengine_game_module")
-    endif()
-  endif()
-  add_subdirectory(apps/runtime)
+  include(cmake/Runtime.cmake)
 endif()
 
 if(FENGINE_BUILD_TESTS)
@@ -93,6 +92,4 @@ endif()
 if(FENGINE_BUILD_TOOLS)
   add_subdirectory(tools/assetc)
 endif()
-if(FENGINE_BUILD_RUNTIME)
-  include(cmake/Packaging.cmake)
-endif()
+include(cmake/Packaging.cmake)

@@ -1,0 +1,425 @@
+{
+  "format": 2,
+  "id": "town",
+  "name": "Amber Vale",
+  "geometry": "geometry.glb",
+  "grid": {
+    "width": 20,
+    "depth": 16,
+    "layers": [
+      {
+        "name": "ground",
+        "height": [
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.25 -0.25 -0.25 -0.25 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.25 -0.25 -0.25 -0.25 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.25 -0.25 -0.25 -0.25 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
+        ],
+        "walk": [
+          "00000000011000000000",
+          "01111111111111111110",
+          "01000011111110000010",
+          "01000011111110000010",
+          "01000011111110000010",
+          "01111111111111111110",
+          "00111111111111111100",
+          "01111111111111111110",
+          "01111111111111111110",
+          "01111111111111111110",
+          "01000011111111000010",
+          "01000011111111000010",
+          "01000011111111000010",
+          "00111101111111111110",
+          "01111111111101111110",
+          "00000000011000000000"
+        ],
+        "tags": [
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 1 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 1 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 1 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+          "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
+        ]
+      }
+    ],
+    "tags": [
+      "water"
+    ]
+  },
+  "points": {
+    "entry": {
+      "position": [
+        9.5,
+        0,
+        14.5
+      ],
+      "facing": [
+        0,
+        -1
+      ]
+    },
+    "return": {
+      "position": [
+        9.5,
+        0,
+        1.8
+      ],
+      "facing": [
+        0,
+        1
+      ]
+    }
+  },
+  "placements": [
+    {
+      "id": "elder",
+      "type": "npc",
+      "position": [
+        5.5,
+        0,
+        6.5
+      ],
+      "facing": [
+        0,
+        1
+      ],
+      "props": {
+        "sprite": "sprites/elder.anim.json",
+        "name": "Elder Rowan",
+        "pages": [
+          {
+            "script": "events.elder",
+            "trigger": "action"
+          }
+        ]
+      }
+    },
+    {
+      "id": "merchant",
+      "type": "npc",
+      "position": [
+        14.5,
+        0,
+        6.5
+      ],
+      "facing": [
+        0,
+        1
+      ],
+      "props": {
+        "sprite": "sprites/merchant.anim.json",
+        "name": "Merchant",
+        "script": "events.merchant"
+      }
+    },
+    {
+      "id": "innkeeper",
+      "type": "npc",
+      "position": [
+        3.5,
+        0,
+        6.5
+      ],
+      "facing": [
+        1,
+        0
+      ],
+      "props": {
+        "sprite": "sprites/innkeeper.anim.json",
+        "name": "Innkeeper",
+        "script": "events.inn"
+      }
+    },
+    {
+      "id": "villager",
+      "type": "npc",
+      "position": [
+        11.5,
+        0,
+        11.5
+      ],
+      "facing": [
+        0,
+        1
+      ],
+      "props": {
+        "sprite": "sprites/villager.anim.json",
+        "name": "Villager",
+        "routine": "wander",
+        "script": "events.villager"
+      }
+    },
+    {
+      "id": "town_chest",
+      "type": "chest",
+      "position": [
+        16.5,
+        0,
+        8.5
+      ],
+      "props": {
+        "item": "potion",
+        "count": 2,
+        "sprite": "sprites/chest.anim.json"
+      }
+    },
+    {
+      "id": "sign",
+      "type": "sign",
+      "position": [
+        11.5,
+        0,
+        13.5
+      ],
+      "props": {
+        "text": "North: the Crystal Grotto."
+      }
+    },
+    {
+      "id": "save",
+      "type": "save_point",
+      "position": [
+        9.5,
+        0,
+        9.5
+      ],
+      "props": {
+        "sprite": "sprites/crystal.anim.json"
+      }
+    },
+    {
+      "id": "to_grotto",
+      "type": "door",
+      "position": [
+        9.5,
+        0,
+        0.5
+      ],
+      "props": {
+        "map": "grotto",
+        "point": "entry",
+        "trigger": "touch"
+      }
+    },
+    {
+      "id": "to_grotto2",
+      "type": "door",
+      "position": [
+        10.5,
+        0,
+        0.5
+      ],
+      "props": {
+        "map": "grotto",
+        "point": "entry",
+        "trigger": "touch"
+      }
+    },
+    {
+      "id": "fountain",
+      "type": "emitter",
+      "position": [
+        16,
+        0.2,
+        11.5
+      ],
+      "props": {
+        "rate": 14,
+        "lifetime": 1.2,
+        "velocity": [
+          0,
+          1.4,
+          0
+        ],
+        "velocity_jitter": [
+          0.3,
+          0.2,
+          0.3
+        ],
+        "gravity": [
+          0,
+          -2.4,
+          0
+        ],
+        "size": 0.06,
+        "color": [
+          0.7,
+          0.85,
+          1,
+          0.8
+        ],
+        "color_end": [
+          0.7,
+          0.85,
+          1,
+          0
+        ]
+      }
+    }
+  ],
+  "zones": [
+    {
+      "id": "plaza_cam",
+      "type": "camera",
+      "min": [
+        6,
+        5
+      ],
+      "max": [
+        14,
+        11
+      ],
+      "props": {
+        "distance": 15,
+        "pitch": 38
+      }
+    }
+  ],
+  "props": {
+    "music": "vale",
+    "battle_stage": "battle_grass",
+    "camera": {
+      "pitch": 42,
+      "distance": 18,
+      "fov": 30,
+      "min": [
+        6,
+        5
+      ],
+      "max": [
+        14,
+        11
+      ]
+    }
+  },
+  "lights": [
+    {
+      "position": [
+        7.5,
+        2.1,
+        6.5
+      ],
+      "color": [
+        1,
+        0.62,
+        0.26
+      ],
+      "radius": 5.5,
+      "intensity": 2.6,
+      "flicker": 0.08
+    },
+    {
+      "position": [
+        12.5,
+        2.1,
+        9.5
+      ],
+      "color": [
+        1,
+        0.62,
+        0.26
+      ],
+      "radius": 5.5,
+      "intensity": 2.6,
+      "flicker": 0.08
+    },
+    {
+      "position": [
+        8.5,
+        2.1,
+        12.5
+      ],
+      "color": [
+        1,
+        0.62,
+        0.26
+      ],
+      "radius": 5.5,
+      "intensity": 2.6,
+      "flicker": 0.08
+    }
+  ],
+  "emitters": [],
+  "colliders": [],
+  "environment": {
+    "ambient": [
+      0.42,
+      0.42,
+      0.4
+    ],
+    "sun_color": [
+      1,
+      0.86,
+      0.66
+    ],
+    "sun_direction": [
+      -0.6,
+      -1,
+      -0.4
+    ],
+    "fog_color": [
+      0.62,
+      0.7,
+      0.78
+    ],
+    "fog_density": 0.012,
+    "sky": {
+      "mode": "gradient",
+      "top": [
+        0.28,
+        0.46,
+        0.78
+      ],
+      "horizon": [
+        0.82,
+        0.84,
+        0.86
+      ],
+      "cloud_cover": 0.45,
+      "backdrops": [
+        {
+          "image": "ui/hills.png",
+          "distance": 45,
+          "height": 14,
+          "width": 90,
+          "yaw": 0,
+          "elevation": -2,
+          "parallax": 0.3
+        }
+      ]
+    },
+    "weather": {
+      "kind": "leaves",
+      "intensity": 0.6
+    },
+    "post": {
+      "bloom_strength": 0.35,
+      "focus": 0.55,
+      "focus_range": 0.22,
+      "lut": "ui/amber.cube"
+    }
+  }
+}

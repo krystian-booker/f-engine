@@ -1,0 +1,12 @@
+[
+  {"id": "rook", "name": "Rook", "class": "hunter", "sprite": "sprites/rook.anim.json", "portrait": "portraits/rook.png",
+   "slots": ["weapon", "body", "accessory"],
+   "stats": {"max_hp": 190, "max_sp": 30, "attack": 24, "defense": 14, "magic": 8, "spirit": 10, "speed": 24,
+             "accuracy": 5, "evasion": 5, "critical": 8},
+   "equipment": {"weapon": "hunting_bow", "body": "leathers"}},
+  {"id": "selene", "name": "Selene", "class": "scholar", "sprite": "sprites/selene.anim.json", "portrait": "portraits/selene.png",
+   "slots": ["weapon", "body", "accessory"], "level": 3,
+   "stats": {"max_hp": 140, "max_sp": 60, "attack": 9, "defense": 9, "magic": 26, "spirit": 18, "speed": 17,
+             "accuracy": 0, "evasion": 4, "critical": 3},
+   "equipment": {"weapon": "old_tome", "body": "robe"}}
+]

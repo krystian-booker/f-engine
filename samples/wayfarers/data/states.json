@@ -1,0 +1,2 @@
+[{"id": "broken", "name": "Broken", "turns": 2, "prevents_action": true, "modifiers": [{"stat": "defense", "mul": 0.5}],
+  "removed_by": ["battle_end", "death"]}]

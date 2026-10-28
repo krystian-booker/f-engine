@@ -1,4 +1,0 @@
-[
-  {"tick":1,"script":"tests/audio.lua"},
-  {"tick":150,"assert_flags":{"audio_smoke_complete":true}}
-]

@@ -1,0 +1,12 @@
+[
+  {"id": "hero", "name": "Hero", "class": "fighter",
+   "stats": {"max_hp": 120, "max_mp": 10, "attack": 20, "defense": 10, "magic": 6, "spirit": 6, "speed": 14,
+             "accuracy": 0, "evasion": 0, "critical": 0, "move": 4, "jump": 1},
+   "equipment": {"weapon": "bronze_sword"}},
+  {"id": "sage", "name": "Sage", "class": "mage",
+   "stats": {"max_hp": 80, "max_mp": 40, "attack": 8, "defense": 6, "magic": 22, "spirit": 14, "speed": 11,
+             "accuracy": 0, "evasion": 0, "critical": 0, "move": 3, "jump": 1}},
+  {"id": "scout", "name": "Scout", "class": "fighter",
+   "stats": {"max_hp": 90, "max_mp": 10, "attack": 16, "defense": 8, "magic": 6, "spirit": 6, "speed": 20,
+             "accuracy": 0, "evasion": 0, "critical": 0, "move": 5, "jump": 2}}
+]

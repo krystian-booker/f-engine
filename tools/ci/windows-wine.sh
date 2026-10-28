@@ -14,7 +14,11 @@ fi
 task_wine=$(command -v wine || command -v wine64 || true)
 if [[ -z "$task_wine" ]]; then task_wine=/usr/lib/wine/wine64; fi
 "$task_wine" build-windows/tests/fengine_tests.exe
-"$task_wine" build-windows/tools/assetc/fengine_assetc.exe validate samples/sandbox
+"$task_wine" build-windows/fengine_headless.exe --test lualib/tests/game
+for task_sample in samples/*/; do
+  "$task_wine" build-windows/fengine_headless.exe --check "$task_sample"
+  "$task_wine" build-windows/fengine_headless.exe --test "$task_sample"
+done
 mkdir -p build-windows/wine-shaders/dx11
 for task_source in shaders/vs_*.sc shaders/fs_*.sc; do
   task_name=$(basename "$task_source" .sc)

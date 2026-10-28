@@ -1,2 +1,0 @@
-add_library(fengine_game_module STATIC LoggingModule.cpp)
-target_link_libraries(fengine_game_module PUBLIC fengine_core)

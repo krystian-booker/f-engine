@@ -1,0 +1,4 @@
+[
+  {"id": "slimes", "members": [{"enemy": "slime"}, {"enemy": "slime"}]},
+  {"id": "golem", "members": [{"enemy": "golem"}], "escapable": false}
+]

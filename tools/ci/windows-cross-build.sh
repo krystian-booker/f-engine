@@ -8,4 +8,4 @@ done
 cmake "${task_args[@]}"
 # First build the Windows shader compiler and headless programs. Compile real
 # D3D shader binaries under Wine before building the runtime target.
-cmake --build build-windows --target shaderc fengine_tests fengine_assetc --parallel 4
+cmake --build build-windows --target shaderc fengine_tests fengine_headless fengine_assetc --parallel 4

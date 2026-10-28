@@ -1,46 +1,97 @@
-#include "engine/core/App.h"
+#include "engine/core/GameConfig.h"
 #include "engine/core/Log.h"
-#include <SDL3/SDL_main.h>
-#include <charconv>
+#include "engine/runtime/Headless.h"
+#include "engine/runtime/MainLoop.h"
+#include <SDL3/SDL.h>
+#include <exception>
 #include <iostream>
-#include <stdexcept>
 #include <string_view>
+
+namespace {
+void usage() {
+    std::cout << "usage: fengine <game-folder> [options]\n"
+                 "  --mute               no audio device\n"
+                 "  --tools              open the F1 editor at start (development builds)\n"
+                 "  --user-data <dir>    saves and settings folder (default: per-user app data)\n"
+                 "  --replay <file>      play a scripted session; exit code reports failures\n"
+                 "  --realtime           pace a replay in real time (listening checks)\n"
+                 "  --seed <n>           fixed random seed\n"
+                 "  --frames <n>         stop after n frames\n"
+                 "  --capture <png>      screenshot at frame 30\n"
+                 "  --shaders <dir>      compiled shader folder\n"
+                 "Headless: fengine --test <game> | --check <game> | --write-api <folder>\n";
+}
+
+std::filesystem::path defaultShaders(const char* executable) {
+    const auto installed = std::filesystem::path(executable).parent_path() / "shaders";
+    if (std::filesystem::is_directory(installed)) {
+        return installed;
+    }
+    return FENGINE_SHADER_DIR;
+}
+} // namespace
 
 int main(int argc, char** argv) {
     try {
-        fe::AppOptions options;
-#if FENGINE_WITH_GAME_MODULE
-        options.moduleFactory=fe::createGameModule;
-#endif
-        for (int i = 1; i < argc; ++i) {
-            std::string_view argument(argv[i]);
-            if (argument == "--help" || argument == "-h") {
-                std::cout << "Usage: fengine <game-folder> [--frames N] [--shaders directory]\n"
-                             "       [--user-data directory] [--mute] [--skip-title] [--tools]\n"
-                             "       [--capture path-without-extension] [--start-battle troop]\n"
-                             "       [--replay commands.json] [--replay-realtime] [--dump-state state.json]\n";
-                return 0;
-            }
-            if (argument == "--frames" && i + 1 < argc) {
-                std::string_view value(argv[++i]);
-                const auto [end, ec] = std::from_chars(value.data(), value.data() + value.size(), options.frameLimit);
-                if (ec != std::errc{} || end != value.data() + value.size() || !options.frameLimit)
-                    throw std::runtime_error("--frames requires a positive integer");
-            } else if (argument == "--shaders" && i + 1 < argc) options.shaderFolder = argv[++i];
-            else if (argument == "--user-data" && i + 1 < argc) options.userDataFolder = argv[++i];
-            else if (argument == "--mute") options.mute = true;
-            else if (argument == "--skip-title") options.skipTitle = true;
-            else if (argument == "--tools") options.showTools = true;
-            else if (argument == "--capture" && i + 1 < argc) options.capturePath = argv[++i];
-            else if (argument == "--start-battle" && i + 1 < argc) { options.startBattle=argv[++i];options.skipTitle=true; }
-            else if (argument == "--replay" && i + 1 < argc) options.replayPath=argv[++i];
-            else if (argument == "--replay-realtime") options.replayRealtime=true;
-            else if (argument == "--dump-state" && i + 1 < argc) options.dumpStatePath=argv[++i];
-            else if (!argument.starts_with('-') && options.gameFolder.empty()) options.gameFolder = argv[i];
-            else throw std::runtime_error("Unknown or incomplete argument: " + std::string(argument));
+        const int headless = fe::runHeadlessCommand(argc, argv);
+        if (headless >= 0) {
+            return headless;
         }
-        if (options.gameFolder.empty()) throw std::runtime_error("Specify a game folder; try fengine samples/sandbox");
-        return fe::App(std::move(options)).run();
+        fe::RuntimeOptions options;
+        options.shaders = defaultShaders(argv[0]);
+        for (int i = 1; i < argc; ++i) {
+            const std::string_view arg = argv[i];
+            auto value = [&]() -> std::string {
+                if (i + 1 >= argc) {
+                    throw std::runtime_error(std::string(arg) + " needs a value");
+                }
+                return argv[++i];
+            };
+            if (arg == "--help" || arg == "-h") {
+                usage();
+                return 0;
+            } else if (arg == "--mute") {
+                options.mute = true;
+            } else if (arg == "--tools") {
+                options.tools = true;
+            } else if (arg == "--realtime") {
+                options.realtime = true;
+            } else if (arg == "--user-data") {
+                options.userData = value();
+            } else if (arg == "--replay") {
+                options.replay = value();
+            } else if (arg == "--seed") {
+                options.seed = std::stoull(value());
+            } else if (arg == "--frames") {
+                options.frameLimit = std::stoull(value());
+            } else if (arg == "--capture") {
+                options.capture = value();
+            } else if (arg == "--shaders") {
+                options.shaders = value();
+            } else if (!arg.starts_with("--") && options.game.empty()) {
+                options.game = std::string(arg);
+            } else {
+                throw std::runtime_error("Unknown option " + std::string(arg));
+            }
+        }
+        if (options.game.empty()) {
+            usage();
+            return 2;
+        }
+        options.lualib = fe::findLibraryRoot(argv[0]);
+        if (!options.replay.empty() && !options.seed) {
+            options.seed = 1; // replays are deterministic
+        }
+        if (options.userData.empty()) {
+            const auto config = fe::GameConfig::load(options.game);
+            char* path = SDL_GetPrefPath("fengine", config.title.c_str());
+            if (!path) {
+                throw std::runtime_error(std::string("No user data folder: ") + SDL_GetError());
+            }
+            options.userData = path;
+            SDL_free(path);
+        }
+        return fe::MainLoop(std::move(options)).run();
     } catch (const std::exception& error) {
         fe::log(fe::LogLevel::Error, error.what());
         return 1;
