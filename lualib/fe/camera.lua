@@ -11,9 +11,17 @@
 --- rig:shake(0.15, 0.4)
 --- ```
 --- Map props: `"camera": {"pitch": 40, "yaw": 0, "distance": 18, "fov": 30,
---- "min": [x, z], "max": [x, z], "height": 0.8}`. Zones of type "camera"
---- override any of those while the followed entity is inside.
+--- "min": [x, z], "max": [x, z], "height": 0.8}`; `camera.defaults` fills
+--- what neither the rig options nor the map set. Zones of type "camera"
+--- override pitch, yaw, distance, fov, min and max while the followed entity
+--- is inside (their props are described for the editor with fe.schema.zone).
+---
+--- `pan_to` and `path` hold the camera until `release()` or until the task
+--- that started them (its owner, see `Task:owner`) ends, so a cancelled
+--- cutscene never leaves the camera stuck.
 local class = require("fe.class")
+local schema = require("fe.schema")
+local tablex = require("fe.tablex")
 local task = require("fe.task")
 local tween = require("fe.tween")
 
@@ -22,7 +30,21 @@ local camera = {}
 local Rig = class("CameraRig")
 camera.Rig = Rig
 
-local defaults = { pitch = 40, yaw = 0, distance = 18, fov = 30, height = 0.8, smoothing = 7 }
+camera.defaults = { pitch = 40, yaw = 0, distance = 18, fov = 30, height = 0.8, smoothing = 7 }
+
+schema.zone("camera", {
+  pitch = { type = "number", optional = true, doc = "Degrees above the horizon" },
+  yaw = { type = "number", optional = true, doc = "Degrees around the target" },
+  distance = { type = "number", optional = true, min = 0 },
+  fov = { type = "number", optional = true, min = 1, max = 170 },
+  min = { type = { list = "number" }, optional = true, doc = "Lower [x, z] bound of the camera target" },
+  max = { type = { list = "number" }, optional = true, doc = "Upper [x, z] bound of the camera target" },
+}, "Overrides the camera while the followed entity is inside.")
+
+--- Adopt edited defaults on hot reload.
+function camera.__reload(live, fresh)
+  live.defaults = fresh.defaults
+end
 
 local function vec_of(v)
   if not v then return nil end
@@ -35,7 +57,7 @@ function Rig:init(world, options)
   self.cam = world:camera()
   local props = world:props().camera or {}
   self.base = {}
-  for key, value in pairs(defaults) do
+  for key, value in pairs(camera.defaults) do
     self.base[key] = options[key] or props[key] or value
   end
   self.bounds = { min = vec_of(options.min or props.min), max = vec_of(options.max or props.max) }
@@ -44,7 +66,7 @@ function Rig:init(world, options)
   self.yaw_offset = 0
   self.zoom = 1
   self.shakes = {}
-  self.override = nil -- set by scripted moves
+  self.override = nil -- the task holding a scripted move
   self.top_down = false
   self.following = options.follow
   self.point = options.point
@@ -111,13 +133,19 @@ function Rig:snap()
   self.cam:snap()
 end
 
+local function angle_delta(from, to)
+  return ((to - from + 540) % 360) - 180
+end
+
 local function approach_angle(current, goal, rate, dt)
-  local delta = ((goal - current + 540) % 360) - 180
-  return current + delta * (1 - math.exp(-rate * dt))
+  return current + angle_delta(current, goal) * (1 - math.exp(-rate * dt))
 end
 
 --- Call once per tick.
 function Rig:update(dt)
+  if self.override and not self.override:running() then
+    self.override = nil
+  end
   if self.override then
     return self:apply_shake(dt)
   end
@@ -172,7 +200,7 @@ function Rig:rotate(step, snap)
 end
 
 function Rig:set_zoom(zoom)
-  self.zoom = math.max(0.3, math.min(3, zoom))
+  self.zoom = tablex.clamp(zoom, 0.3, 3)
 end
 
 function Rig:set_top_down(on)
@@ -184,16 +212,27 @@ function Rig:yaw()
   return self.cam.yaw
 end
 
+local function hold(rig)
+  local current = task.current()
+  if not current then
+    error("camera moves wait, so they must run inside a task", 3)
+  end
+  rig.override = current:owner()
+end
+
 --- Scripted move: animate the camera to a target/angles, then hold there
---- until `release()`. Waits; call from a task.
+--- until `release()` or the end of the calling task. Waits; call from a
+--- task. Yaw turns the short way round.
 ---@param target table
 ---@param duration number
 ---@param options? {pitch?: number, yaw?: number, distance?: number, fov?: number, ease?: string}
 function Rig:pan_to(target, duration, options)
   options = options or {}
-  self.override = true
+  hold(self)
   local from = { target = self.cam.target, pitch = self.cam.pitch, yaw = self.cam.yaw,
     distance = self.cam.distance, fov = self.cam.fov }
+  local to = { pitch = options.pitch, distance = options.distance, fov = options.fov,
+    yaw = options.yaw and from.yaw + angle_delta(from.yaw, options.yaw) }
   local to_target = { x = target.x, y = (target.y or 0) + self.base.height, z = target.z }
   tween.run(duration, function(t)
     self.cam.target = {
@@ -202,8 +241,8 @@ function Rig:pan_to(target, duration, options)
       z = tween.lerp(from.target.z, to_target.z, t),
     }
     for _, key in ipairs({ "pitch", "yaw", "distance", "fov" }) do
-      if options[key] then
-        self.cam[key] = tween.lerp(from[key], options[key], t)
+      if to[key] then
+        self.cam[key] = tween.lerp(from[key], to[key], t)
         self.current[key] = self.cam[key]
       end
     end
@@ -215,11 +254,12 @@ local function catmull(p0, p1, p2, p3, t)
   return 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3)
 end
 
---- Fly through points (Catmull-Rom spline) over `duration`, then hold.
+--- Fly through points (Catmull-Rom spline) over `duration`, then hold
+--- like `pan_to`.
 ---@param points table[] each {x, y?, z}
 function Rig:path(points, duration, ease)
   assert(#points >= 2, "a camera path needs at least two points")
-  self.override = true
+  hold(self)
   local pts = { points[1] }
   for _, p in ipairs(points) do pts[#pts + 1] = p end
   pts[#pts + 1] = points[#points]

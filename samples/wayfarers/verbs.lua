@@ -1,39 +1,33 @@
 -- Verbs: press Info near certain townsfolk to Inquire (learn something,
--- with a chance based on the leader's level) or Purchase (buy what they
--- carry). Failing an inquiry lowers the town's opinion of you.
--- Entirely game code built on fe.field, fe.ui and fe.state.
+-- with a chance based on the leader's level), Purchase (buy what they
+-- carry) or Guide (ask them to travel with you as a follower who can help
+-- in battle). Failing an inquiry lowers the town's opinion of you.
+-- Entirely game code: fe.field verbs on the "info" input, fe.follower, and a
+-- HUD prompt. Placements opt in with props.verbs = ["inquire", "purchase"];
+-- who can be guided is `verbs.guides`, by placement id.
 local data = require("fe.data")
 local dialogue = require("fe.dialogue")
 local field = require("fe.field")
-local game = require("fe.game")
-local input = require("fe.input")
+local follower = require("fe.follower")
 local inventory = require("fe.rpg.inventory")
 local party = require("fe.rpg.party")
 local state = require("fe.state")
-local task = require("fe.task")
+local tablex = require("fe.tablex")
 local ui = require("fe.ui")
 
-local verbs = { random = fe.random.new() }
-
-local function nearest()
-  local player = field.player
-  if not player or not player:valid() then return nil end
-  local best, best_distance
-  for _, e in ipairs(field.entities()) do
-    if e:valid() and e:props().verbs then
-      local p, q = player.position, e.position
-      local d = math.sqrt((p.x - q.x) ^ 2 + (p.z - q.z) ^ 2)
-      if d < 1.8 and (not best or d < best_distance) then best, best_distance = e, d end
-    end
-  end
-  return best
-end
+local verbs = {
+  random = fe.random.new(),
+  --- Townsfolk who agree to be guided, with their battle assist.
+  guides = {
+    child = { assist = { enemy = "wolf", skill = "attack", chance = 0.5 } },
+  },
+}
 
 --- Chance that the leader's inquiry succeeds (0..1).
 function verbs.chance(target)
   local leader = party.leader()
   local difference = leader:level() - (target:props().level or 1)
-  return math.max(0.1, math.min(0.95, 0.6 + difference * 0.1))
+  return tablex.clamp(0.6 + difference * 0.1, 0.1, 0.95)
 end
 
 local function inquire(target)
@@ -71,35 +65,47 @@ local function purchase(target)
   end
 end
 
-local actions = { inquire = { label = "Inquire", run = inquire }, purchase = { label = "Purchase", run = purchase } }
+local function guide(target)
+  local props = target:props()
+  dialogue.say(props.name, "You'll take me along? Hooray!")
+  follower.join_entity(target, verbs.guides[target.id])
+  dialogue.say(nil, "{color:good}" .. props.name .. " is following you.{color:reset}")
+end
+
+local function offers(verb)
+  return function(target)
+    if verb == "guide" then return verbs.guides[target.id] ~= nil end
+    local list = target:props().verbs
+    return list ~= nil and tablex.contains(list, verb)
+  end
+end
+
+local function verb(id, spec)
+  local run = spec.run
+  spec.input, spec.range, spec.facing, spec.ask, spec.when = "info", 1.8, false, true, offers(id)
+  spec.run = function(target, player)
+    target:face(player)
+    run(target)
+  end
+  field.verb(id, spec)
+end
 
 function verbs.install()
-  game.updated:connect(function()
-    if not field.can_control() or not fe.input.pressed("info") then return end
-    local target = nearest()
-    if not target then return end
-    task.named("verbs", function()
-      field.lock()
-      target:face(field.player)
-      local entries = {}
-      for _, verb in ipairs(target:props().verbs) do
-        local label = actions[verb].label
-        if verb == "inquire" then label = label .. string.format(" (%d%%)", math.floor(verbs.chance(target) * 100)) end
-        entries[#entries + 1] = { label = label, value = verb }
-      end
-      local _, chosen = ui.choose(entries, { title = target:props().name, cancel = true, width = 140 })
-      if chosen then actions[chosen.value].run(target) end
-      dialogue.close()
-      field.unlock()
-    end)
-  end)
+  verb("inquire", {
+    label = function(target) return string.format("Inquire (%d%%)", math.floor(verbs.chance(target) * 100)) end,
+    run = inquire,
+  })
+  verb("purchase", { label = "Purchase", run = purchase })
+  verb("guide", { label = "Guide", run = guide })
   field.hud:connect(function()
-    local target = field.can_control() and nearest()
+    if not field.can_control() then return end
+    local _, h = fe.canvas.size()
+    local target = field.target("info")
     if target then
-      local _, h = fe.canvas.size()
-      ui.text(input.prompt("info") .. ": talk to " .. target:props().name, 8, h - 16, { color = ui.theme.heading })
+      ui.text(ui.prompt("info") .. ": talk to " .. target:props().name, 8, h - 16, { color = ui.theme.heading })
     end
-  end)
+    ui.text(ui.prompt("toggle_time") .. ": day/night", 8, h - 28, { color = ui.theme.muted })
+  end, 0, "wayfarers.hud")
 end
 
 return verbs

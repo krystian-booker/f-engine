@@ -10,6 +10,7 @@
 --- validation; a broken edit keeps the previous data).
 local schema = require("fe.schema")
 local signal = require("fe.signal")
+local tablex = require("fe.tablex")
 
 local data = {
   --- Emitted as (table_name) after a table loads or reloads.
@@ -18,8 +19,9 @@ local data = {
 
 local tables = {}
 
-local function build(name, file, schema_name)
-  local raw = fe.json.read(file)
+-- Records from an array or an object keyed by id, checked against a
+-- schema. Returns list, by_id, errors and refs.
+local function check_records(name, raw, schema_name, label)
   local list, by_id = {}, {}
   local entries = raw
   if raw[1] == nil and next(raw) ~= nil then
@@ -29,16 +31,16 @@ local function build(name, file, schema_name)
     table.sort(ids)
     for _, id in ipairs(ids) do
       local entry = raw[id]
-      entry.id = entry.id or id
+      if type(entry) == "table" then entry.id = entry.id or id end
       entries[#entries + 1] = entry
     end
   end
   local errors, refs = {}, {}
   for index, entry in ipairs(entries) do
     if type(entry) ~= "table" or type(entry.id) ~= "string" or entry.id == "" then
-      errors[#errors + 1] = file .. "[" .. index .. "]: every record needs a string id"
+      errors[#errors + 1] = label .. "[" .. index .. "]: every record needs a string id"
     elseif by_id[entry.id] then
-      errors[#errors + 1] = file .. ": duplicate id '" .. entry.id .. "'"
+      errors[#errors + 1] = label .. ": duplicate id '" .. entry.id .. "'"
     else
       if schema_name then
         local _, entry_errors, entry_refs = schema.validate(schema_name, entry, name .. "." .. entry.id)
@@ -49,6 +51,11 @@ local function build(name, file, schema_name)
       list[#list + 1] = entry
     end
   end
+  return list, by_id, errors, refs
+end
+
+local function build(name, file, schema_name)
+  local list, by_id, errors, refs = check_records(name, fe.json.read(file), schema_name, file)
   if #errors > 0 then
     error(table.concat(errors, "\n"), 0)
   end
@@ -91,6 +98,29 @@ function data.list(name)
   return t.list
 end
 
+--- Check records for a table without loading them (the editor's Data tab
+--- does this before saving): ids, the table's schema (or `schema_name`)
+--- and references to other loaded tables. The records are not changed.
+---@param name string
+---@param records table array or object keyed by id
+---@param schema_name? string
+---@return boolean, string[]
+function data.validate(name, records, schema_name)
+  local loaded = tables[name]
+  schema_name = schema_name or (loaded and loaded.schema)
+  local copy = tablex.deep_copy(records)
+  local _, by_id, errors, refs = check_records(name, copy, schema_name, name)
+  for _, ref in ipairs(refs) do
+    local target = ref.table == name and { by_id = by_id } or tables[ref.table]
+    if not target then
+      errors[#errors + 1] = ref.path .. ": table '" .. ref.table .. "' is not loaded"
+    elseif not target.by_id[ref.id] then
+      errors[#errors + 1] = ref.path .. ": unknown " .. ref.table .. " '" .. ref.id .. "'"
+    end
+  end
+  return #errors == 0, errors
+end
+
 --- Check every {ref = "table"} field across loaded tables.
 ---@return boolean, string[]
 function data.check_references()
@@ -119,13 +149,14 @@ function data.describe()
   return out
 end
 
---- Reload any table that came from `file`; returns true if one did.
+--- Reload any table that came from `file`; returns true if one did. The
+--- table is rebuilt: look records up again (data.get) rather than keeping
+--- references to old ones.
 function data.reload(file)
   for name, t in pairs(tables) do
     if t.file == file then
       local ok, result = pcall(build, name, file, t.schema)
       if ok then
-        -- Keep record tables stable for code holding references.
         tables[name] = result
         data.changed:emit(name)
         fe.log.info("Reloaded data table " .. name)

@@ -1,6 +1,6 @@
-$input v_texcoord0, v_color0, v_worldPos, v_normal, v_shadowPos, v_viewDir
+$input v_texcoord0, v_color0, v_worldPos, v_normal, v_viewDir, v_tangent
 #include <bgfx_shader.sh>
-uniform vec4 u_overlay; // time, pulse speed, border enabled, unused
+uniform vec4 u_overlay; // time, pulse speed, border enabled
 void main() {
     vec2 edge = min(v_texcoord0, 1.0 - v_texcoord0);
     float border = u_overlay.z > 0.5 ? step(min(edge.x, edge.y), 0.08) : 0.0;

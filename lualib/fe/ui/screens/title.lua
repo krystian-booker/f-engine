@@ -8,6 +8,9 @@
 ---   continue = function(slot) field.resume() end,
 --- })
 --- ```
+--- Each choice runs in a detached task ("title:new", ...), so the game it
+--- starts does not depend on the title screen.
+local i18n = require("fe.i18n")
 local save = require("fe.save")
 local scene = require("fe.scene")
 local task = require("fe.task")
@@ -15,20 +18,29 @@ local ui = require("fe.ui")
 
 local title = {}
 
+i18n.defaults({ fe = { title = { new = "New Game", continue = "Continue", config = "Settings", quit = "Quit" } } })
+
 function title.new(options)
   local view = { name = "title", opaque = true, blocks_update = true, time = 0 }
   local has_save = #save.list() > 0
-  local entries = {
-    { label = "New Game", value = "new" },
-    { label = "Continue", value = "continue", enabled = has_save },
-    { label = "Settings", value = "config" },
-    { label = "Quit", value = "quit" },
-  }
+  local function entries()
+    return {
+      { label = ui.t("fe.title.new"), value = "new" },
+      { label = ui.t("fe.title.continue"), value = "continue", enabled = has_save },
+      { label = ui.t("fe.title.config"), value = "config" },
+      { label = ui.t("fe.title.quit"), value = "quit" },
+    }
+  end
   local busy = false
-  local list = ui.List({ items = entries, rows = #entries, on_confirm = function(item)
+  local list
+  list = ui.List({ items = entries(), rows = 4, on_confirm = function(item)
     if busy then return end
     busy = true
-    task.named("title:" .. item.value, function()
+    task.detached("title:" .. item.value, function()
+      task.finally(function()
+        busy = false
+        list:set_items(entries())
+      end)
       if item.value == "new" then
         scene.remove(view)
         options.new_game()
@@ -43,7 +55,6 @@ function title.new(options)
       elseif item.value == "quit" then
         fe.app.quit()
       end
-      busy = false
     end)
   end })
   list:select(has_save and 2 or 1)
@@ -64,7 +75,7 @@ function title.new(options)
     if options.subtitle then
       ui.text(options.subtitle, 0, math.floor(ch * 0.25) + 26, { width = cw, align = "center", color = ui.theme.muted })
     end
-    local w, h = 110, #entries * ui.theme.row_height + 12
+    local w, h = 110, #list.items * ui.row_height() + 12
     local x, y = math.floor((cw - w) / 2), math.floor(ch * 0.55)
     fe.canvas.push({ alpha = 0.85 + 0.15 * glow })
     ui.window(x, y, w, h)

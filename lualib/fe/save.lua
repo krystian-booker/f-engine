@@ -5,9 +5,12 @@
 --- ```lua
 --- save.version = 2
 --- save.migrations[1] = function(data) data.vars.chapter = data.vars.chapter or 1 return data end
---- save.add_meta(function(meta) meta.location = field.current_map_name() end)
+--- save.add_meta(function(meta) meta.chapter = state.var("chapter") end)
 --- save.write("slot1")
 --- ```
+--- `save.write` raises (naming the offending value) if state holds anything
+--- that cannot be saved; see fe.state.
+local game = require("fe.game")
 local signal = require("fe.signal")
 local state = require("fe.state")
 
@@ -23,8 +26,19 @@ local save = {
 local providers = {}
 
 --- Add a metadata provider: fn(meta) fills fields shown on save screens.
-function save.add_meta(fn)
-  providers[#providers + 1] = fn
+--- With a `key`, a provider added earlier with the same key is replaced.
+---@param fn fun(meta: table)
+---@param key? string
+function save.add_meta(fn, key)
+  if key ~= nil then
+    for i, entry in ipairs(providers) do
+      if entry.key == key then
+        providers[i] = { fn = fn, key = key }
+        return
+      end
+    end
+  end
+  providers[#providers + 1] = { fn = fn, key = key }
 end
 
 --- Write the current state to a slot.
@@ -32,14 +46,16 @@ end
 ---@param options? {thumbnail?: boolean, meta?: table}
 function save.write(slot, options)
   options = options or {}
-  local meta = { version = save.version, saved_at = fe.time.wall(), playtime = state.var("playtime", 0) }
+  local snapshot = state.snapshot()
+  state.check(snapshot, "state")
+  local meta = { version = save.version, saved_at = fe.time.wall(), playtime = game.playtime() }
   for _, provider in ipairs(providers) do
-    provider(meta)
+    provider.fn(meta)
   end
   for key, value in pairs(options.meta or {}) do
     meta[key] = value
   end
-  fe.save.write(slot, { version = save.version, state = state.snapshot() }, meta)
+  fe.save.write(slot, { version = save.version, state = snapshot }, meta)
   if options.thumbnail then
     fe.save.thumbnail(slot)
   end

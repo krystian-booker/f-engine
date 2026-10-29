@@ -7,5 +7,8 @@
    "skills": ["longshot"], "rewards": {"exp": 50, "money": 40}},
   {"id": "captain", "name": "Captain Vey", "sprite": "sprites/captain.anim.json", "level": 6,
    "stats": {"max_hp": 300, "attack": 30, "defense": 16, "magic": 8, "spirit": 10, "speed": 17, "accuracy": 5, "evasion": 5, "critical": 8, "move": 3, "jump": 1},
-   "skills": ["attack", "shove"], "rewards": {"exp": 200, "money": 200}}
+   "skills": ["attack", "shove", "riposte"], "rewards": {"exp": 200, "money": 200}},
+  {"id": "barricade", "name": "Barricade", "sprite": "sprites/barricade.anim.json", "obstacle": true,
+   "stats": {"max_hp": 60, "attack": 0, "defense": 8, "magic": 0, "spirit": 0, "speed": 1, "accuracy": 0, "evasion": 0, "critical": 0},
+   "resist": {"fire": 2}, "destroyed": {"add": ["rubble"]}}
 ]

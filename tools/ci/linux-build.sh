@@ -10,7 +10,8 @@ for task_package in json glm EnTT lua sol2 cgltf stb doctest miniaudio SDL bx_so
 done
 cmake "${task_args[@]}"
 cmake --build "$task_build" --parallel 4
-# Headless tests first, then the windowed replays on a virtual display (Mesa).
-ctest --test-dir "$task_build" --output-on-failure -E '^replay_'
-xvfb-run -a ctest --test-dir "$task_build" --output-on-failure -R '^replay_'
+# Headless tests (including headless replays) first, then the windowed replays
+# on a virtual display (Mesa).
+ctest --test-dir "$task_build" --output-on-failure -LE windowed
+xvfb-run -a -s "-screen 0 1280x720x24" ctest --test-dir "$task_build" --output-on-failure -L windowed
 cmake --install "$task_build" --prefix "$task_build/package"

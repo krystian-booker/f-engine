@@ -1,15 +1,21 @@
---- The field main menu. Pages are entries in `menu.pages`; remove, reorder
---- or add your own ({id, label, run = function() ... end}, run in a task).
+--- The field main menu (needs the RPG kit). Pages are entries in
+--- `menu.pages`; remove, reorder or add your own ({id, label, run, enabled?}).
+--- `label` is an i18n key or plain text. A page's `run` is called in the
+--- menu's task; if it raises, the error is reported and the menu returns.
+--- While the menu is open the field world is paused (`fe.game.pause`), so
+--- sprites, particles and field scripts stand still.
 ---
 --- ```lua
 --- table.insert(menu.pages, 3, {id = "crafting", label = "Craft", run = require("ui.crafting").open})
 --- menu.allow_save = function() return false end   -- save only at save points
+--- menu.page("formation").run()                     -- open one page directly
 --- ```
 local data = require("fe.data")
 local effects = require("fe.effects")
+local game = require("fe.game")
+local i18n = require("fe.i18n")
 local inventory = require("fe.rpg.inventory")
 local party = require("fe.rpg.party")
-local scene = require("fe.scene")
 local stats = require("fe.rpg.stats")
 local tablex = require("fe.tablex")
 local task = require("fe.task")
@@ -19,11 +25,30 @@ local menu = {
   allow_save = function() return true end,
 }
 
-local life = function() return require("fe.rpg.combatant").life end
+i18n.defaults({ fe = { menu = {
+  items = "Items", skills = "Skills", equip = "Equip", status = "Status", formation = "Formation", journal = "Journal",
+  settings = "Settings", save = "Save", log = "Log",
+  no_items = "(No items)", no_skills = "(No skills)", no_quests = "(No active quests)", who = "Who?",
+  skills_of = "{name}'s skills", remove = "(Remove)", equip_slot = "Equip {slot}", level = "Lv {level}",
+  level_line = "Level {level}   {class}", exp_line = "EXP {exp}   Next {next}   JP {jp}",
+  previous = "Prev", next = "Next", back = "Back", pick_member = "Formation: pick a member", swap_with = "Swap with",
+  reserve = "{name} (reserve)",
+}, slot = { weapon = "Weapon", shield = "Shield", head = "Head", body = "Body", armor = "Armor",
+  accessory = "Accessory" } } })
+
+local t = ui.t
+
+--- An equipment slot's name: the `fe.slot.<id>` string, else the id
+--- capitalised.
+function menu.slot_name(slot)
+  local key = "fe.slot." .. slot
+  local name = t(key)
+  return name == key and (slot:gsub("^%l", string.upper)) or name
+end
 
 local function member_panel(actor, x, y, w, selected)
   ui.text(actor:name(), x, y, { color = selected and ui.theme.highlight or ui.theme.heading })
-  ui.text("Lv " .. actor:level(), x, y, { width = w - 6, align = "right", color = ui.theme.muted })
+  ui.text(t("fe.menu.level", { level = actor:level() }), x, y, { width = w - 6, align = "right", color = ui.theme.muted })
   local row = y + 12
   for _, def in ipairs(stats.resource_list) do
     if not def.battle_only then
@@ -42,8 +67,7 @@ function menu.choose_member(title, filter)
   local entries = tablex.map(party.members(), function(actor)
     return { label = actor:name(), value = actor, enabled = not filter or filter(actor) }
   end)
-  local _, item = ui.choose(entries, { title = title, anchor = "right", width = 140, rows = #entries, cancel = true,
-    render = nil })
+  local _, item = ui.choose(entries, { title = title, anchor = "right", width = 140, rows = #entries, cancel = true })
   return item and item.value
 end
 
@@ -80,9 +104,9 @@ local function items_page()
         icon = entry.item.icon }
     end)
     if #entries == 0 then
-      entries = { { label = "(No items)", enabled = false } }
+      entries = { { label = t("fe.menu.no_items"), enabled = false } }
     end
-    local _, item = ui.choose(entries, { title = "Items", anchor = "left", width = 200, rows = 10, cancel = true })
+    local _, item = ui.choose(entries, { title = t("fe.menu.items"), anchor = "left", width = 200, rows = 10, cancel = true })
     if not item then return end
     local it = item.value
     use_on_members(it, nil, function()
@@ -92,7 +116,7 @@ local function items_page()
 end
 
 local function skills_page()
-  local user = menu.choose_member("Who?")
+  local user = menu.choose_member(t("fe.menu.who"))
   if not user then return end
   while true do
     local entries = tablex.map(user:skills(), function(skill)
@@ -102,9 +126,9 @@ local function skills_page()
       for r, n in pairs(skill.cost) do if user:resource(r) < n then enabled = false end end
       return { label = skill.name, right = table.concat(cost, " "), value = skill, enabled = enabled }
     end)
-    if #entries == 0 then entries = { { label = "(No skills)", enabled = false } } end
-    local _, item = ui.choose(entries, { title = user:name() .. "'s skills", anchor = "left", width = 220, rows = 10,
-      cancel = true })
+    if #entries == 0 then entries = { { label = t("fe.menu.no_skills"), enabled = false } } end
+    local _, item = ui.choose(entries, { title = t("fe.menu.skills_of", { name = user:name() }), anchor = "left", width = 220,
+      rows = 10, cancel = true })
     if not item then return end
     local skill = item.value
     use_on_members(skill, user, function()
@@ -129,17 +153,17 @@ local function stat_lines(actor, preview)
 end
 
 local function equip_page()
-  local actor = menu.choose_member("Equip")
+  local actor = menu.choose_member(t("fe.menu.equip"))
   if not actor then return end
   while true do
     local slots = tablex.map(actor:slots(), function(slot)
       local id = actor:equipped(slot)
-      return { label = slot:gsub("^%l", string.upper), right = id and data.get("items", id).name or "-", value = slot }
+      return { label = menu.slot_name(slot), right = id and data.get("items", id).name or "-", value = slot }
     end)
     local _, chosen = ui.choose(slots, { title = actor:name(), anchor = "left", width = 200, rows = #slots, cancel = true })
     if not chosen then return end
     local slot = chosen.value
-    local options = { { label = "(Remove)", value = false } }
+    local options = { { label = t("fe.menu.remove"), value = false } }
     for _, entry in ipairs(inventory.list("equipment")) do
       if actor:can_equip(entry.item.id, slot) then
         options[#options + 1] = { label = entry.item.name, right = "x" .. entry.count, value = entry.item.id }
@@ -153,10 +177,8 @@ local function equip_page()
       ui.window(cw - 150, 30, 142, 150)
       ui.text(text, cw - 142, 38)
     end
-    scene.push(preview_view)
-    local _, item = ui.choose(options, { title = "Equip " .. slot, anchor = "left", width = 200, rows = 8, cancel = true,
-      on_change = function(entry) hovered = entry end })
-    scene.remove(preview_view)
+    local _, item = ui.with_view(preview_view, ui.choose, options, { title = t("fe.menu.equip_slot", { slot = menu.slot_name(slot) }),
+      anchor = "left", width = 200, rows = 8, cancel = true, on_change = function(entry) hovered = entry end })
     if item then
       actor:equip(slot, item.value or nil)
       ui.sound("equip")
@@ -165,12 +187,11 @@ local function equip_page()
 end
 
 local function status_page()
-  local actor = menu.choose_member("Status")
+  local actor = menu.choose_member(t("fe.menu.status"))
   if not actor then return end
-  local done = false
   local view = { name = "status", blocks_update = true }
   function view:update()
-    if fe.input.pressed("cancel") or fe.input.pressed("confirm") then done = true end
+    if fe.input.pressed("cancel") or fe.input.pressed("confirm") then ui.close(view) end
     local members = party.members()
     local index = tablex.index_of(tablex.map(members, function(a) return a.id end), actor.id) or 1
     if fe.input.pressed("page_right") then actor = members[index % #members + 1] end
@@ -183,39 +204,42 @@ local function status_page()
     ui.text(actor:name(), 72, 18, { color = ui.theme.heading })
     local cls = actor:class()
     local secondary = actor:secondary()
-    ui.text("Level " .. actor:level() .. "   " .. cls.name .. (secondary and (" / " .. secondary.name) or ""), 72, 30)
-    ui.text("EXP " .. actor:exp() .. "   Next " .. actor:exp_to_next() .. "   JP " .. actor:jp(), 72, 42, { color = ui.theme.muted })
+    ui.text(t("fe.menu.level_line", { level = actor:level(), class = cls.name .. (secondary and (" / " .. secondary.name) or "") }),
+      72, 30)
+    ui.text(t("fe.menu.exp_line", { exp = actor:exp(), next = actor:exp_to_next(), jp = actor:jp() }), 72, 42,
+      { color = ui.theme.muted })
     member_panel(actor, 16, 70, 120, false)
     ui.text(stat_lines(actor), 150, 70)
     local lines = {}
     for _, slot in ipairs(actor:slots()) do
       local id = actor:equipped(slot)
-      lines[#lines + 1] = slot .. ": " .. (id and data.get("items", id).name or "-")
+      lines[#lines + 1] = menu.slot_name(slot) .. ": " .. (id and data.get("items", id).name or "-")
     end
     for _, skill in ipairs(actor:passives()) do lines[#lines + 1] = "{color:good}" .. skill.name .. "{color:reset}" end
     for _, id in ipairs(actor:states()) do lines[#lines + 1] = "{color:bad}" .. data.get("states", id).name .. "{color:reset}" end
     ui.text(table.concat(lines, "\n"), 270, 70, { width = cw - 290 })
-    ui.text(ui.prompts({ { "page_left", "Prev" }, { "page_right", "Next" }, { "cancel", "Back" } }), 16, ch - 24,
-      { color = ui.theme.muted })
+    ui.text(ui.prompts({ { "page_left", t("fe.menu.previous") }, { "page_right", t("fe.menu.next") },
+      { "cancel", t("fe.menu.back") } }), 16, ch - 24, { color = ui.theme.muted })
   end
-  scene.push(view)
-  task.wait_until(function() return done end)
-  scene.remove(view)
+  ui.run_screen(view)
 end
 
 local function formation_page()
   while true do
     local entries = {}
     for i, actor in ipairs(party.members()) do
-      entries[#entries + 1] = { label = actor:name(), right = "Lv " .. actor:level(), value = { kind = "active", index = i } }
+      entries[#entries + 1] = { label = actor:name(), right = t("fe.menu.level", { level = actor:level() }),
+        value = { kind = "active", index = i } }
     end
     for _, actor in ipairs(party.reserve()) do
-      entries[#entries + 1] = { label = actor:name() .. " (reserve)", right = "Lv " .. actor:level(),
-        value = { kind = "reserve", id = actor.id } }
+      entries[#entries + 1] = { label = t("fe.menu.reserve", { name = actor:name() }),
+        right = t("fe.menu.level", { level = actor:level() }), value = { kind = "reserve", id = actor.id } }
     end
-    local _, first = ui.choose(entries, { title = "Formation: pick a member", anchor = "left", width = 200, rows = 10, cancel = true })
+    local _, first = ui.choose(entries, { title = t("fe.menu.pick_member"), anchor = "left", width = 200, rows = 10,
+      cancel = true })
     if not first then return end
-    local _, second = ui.choose(entries, { title = "Swap with", anchor = "left", width = 200, rows = 10, cancel = true })
+    local _, second = ui.choose(entries, { title = t("fe.menu.swap_with"), anchor = "left", width = 200, rows = 10,
+      cancel = true })
     if second then
       local ids = tablex.map(party.members(), function(a) return a.id end)
       local a, b = first.value, second.value
@@ -235,9 +259,15 @@ local function quests_page()
   local quest = require("fe.quest")
   local entries = tablex.map(quest.list("active"), function(q)
     local stage = quest.stage(q.def.id)
-    return { label = q.def.name, right = q.def.kind, value = q, detail = stage and stage.text or q.def.description }
+    local detail = stage and stage.text or q.def.description
+    for _, objective in ipairs(quest.objectives(q.def.id)) do
+      local mark = objective.done and "{color:good}" or "{color:muted}"
+      local count = objective.count > 1 and string.format(" %d/%d", objective.progress, objective.count) or ""
+      detail = detail .. "\n" .. mark .. objective.text .. count .. "{color:reset}"
+    end
+    return { label = q.def.name, right = q.def.kind, value = q, detail = detail }
   end)
-  if #entries == 0 then entries = { { label = "(No active quests)", enabled = false } } end
+  if #entries == 0 then entries = { { label = t("fe.menu.no_quests"), enabled = false } } end
   local hovered = entries[1]
   local view = { name = "quest_detail", blocks_update = false }
   function view:draw()
@@ -246,51 +276,65 @@ local function quests_page()
     ui.window(cw - 170, 30, 162, ch - 60)
     ui.text(hovered.detail, cw - 162, 38, { width = 146 })
   end
-  scene.push(view)
-  ui.choose(entries, { title = "Journal", anchor = "left", width = 190, rows = 10, cancel = true,
-    on_change = function(item) hovered = item end })
-  scene.remove(view)
+  ui.with_view(view, ui.choose, entries, { title = t("fe.menu.journal"), anchor = "left", width = 190, rows = 10,
+    cancel = true, on_change = function(item) hovered = item end })
 end
 
 menu.pages = {
-  { id = "items", label = "Items", run = items_page },
-  { id = "skills", label = "Skills", run = skills_page },
-  { id = "equip", label = "Equip", run = equip_page },
-  { id = "status", label = "Status", run = status_page },
-  { id = "formation", label = "Formation", run = formation_page },
-  { id = "quests", label = "Journal", run = quests_page },
-  { id = "config", label = "Settings", run = function() require("fe.ui.screens.config").open() end },
-  { id = "save", label = "Save", run = function() require("fe.ui.screens.save").open("save") end,
+  { id = "items", label = "fe.menu.items", run = items_page },
+  { id = "skills", label = "fe.menu.skills", run = skills_page },
+  { id = "equip", label = "fe.menu.equip", run = equip_page },
+  { id = "status", label = "fe.menu.status", run = status_page },
+  { id = "formation", label = "fe.menu.formation", run = formation_page },
+  { id = "quests", label = "fe.menu.journal", run = quests_page },
+  { id = "log", label = "fe.menu.log", run = function() require("fe.ui.screens.backlog").open() end },
+  { id = "config", label = "fe.menu.settings", run = function() require("fe.ui.screens.config").open() end },
+  { id = "save", label = "fe.menu.save", run = function() require("fe.ui.screens.save").open("save") end,
     enabled = function() return menu.allow_save() end },
 }
 
---- Open the menu (call in a task); returns when closed.
-function menu.open()
-  local done, running = false, false
-  local entries = tablex.map(menu.pages, function(page)
-    return { label = page.label, value = page, enabled = not page.enabled or page.enabled() }
+--- A page by id, or nil.
+function menu.page(id)
+  return tablex.find(menu.pages, function(page) return page.id == id end)
+end
+
+local function page_entries()
+  return tablex.map(menu.pages, function(page)
+    return { label = t(page.label), value = page, enabled = not page.enabled or page.enabled() }
   end)
-  local list = ui.List({ items = entries, rows = #entries,
-    on_confirm = function(item)
-      running = true
-      task.named("menu:" .. item.value.id, function()
-        item.value.run()
-        running = false
-      end)
-    end,
-    on_cancel = function() done = true end })
+end
+
+--- Open the menu (call in a task); returns when the player closes it.
+function menu.open()
+  local world = require("fe.field").world
+  local resume = world and game.pause(world) or function() end
   local view = { name = "menu", opaque = false, blocks_update = true }
+  local list = ui.List({ items = page_entries(), rows = #menu.pages,
+    on_confirm = function(item) view.chosen = item.value end,
+    on_cancel = function() ui.close(view) end })
+  local function run_pages()
+    while true do
+      task.wait_until(function() return view.chosen ~= nil end)
+      local page = view.chosen
+      local ok, err = pcall(page.run)
+      view.chosen = nil
+      if not ok then fe.log.error("Menu page '" .. page.id .. "' failed: " .. tostring(err)) end
+      list:set_items(page_entries())
+    end
+  end
   function view:update()
-    if not running then
-      if fe.input.pressed("menu") then done = true end
+    if self.chosen then return end
+    if fe.input.pressed("menu") then
+      ui.close(self)
+    else
       list:update()
     end
   end
   function view:draw()
     local cw, ch = fe.canvas.size()
     fe.canvas.rect(0, 0, cw, ch, 0x050a1888)
-    ui.window(8, 8, 90, #entries * ui.theme.row_height + 12)
-    list.active = not running
+    ui.window(8, 8, 90, #list.items * ui.row_height() + 12)
+    list.active = not self.chosen
     list:draw(26, 14, 66)
     local members = party.members()
     local panel_w = math.min(cw - 112, 300)
@@ -300,13 +344,11 @@ function menu.open()
     end
     ui.window(8, ch - 26, 150, 18)
     ui.text(inventory.money() .. " " .. inventory.settings.currency, 14, ch - 21)
-    local playtime = math.floor(require("fe.state").var("playtime", 0))
+    local playtime = math.floor(game.playtime())
     ui.text(string.format("%d:%02d", playtime // 3600, (playtime // 60) % 60), 14, ch - 21,
       { width = 138, align = "right", color = ui.theme.muted })
   end
-  scene.push(view)
-  task.wait_until(function() return done end)
-  scene.remove(view)
+  task.ensure(function() task.race({ function() ui.run_screen(view) end, run_pages }) end, resume)
 end
 
 return menu

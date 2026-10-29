@@ -166,6 +166,7 @@ class GridBuilder:
                         "ramp": [["."] * width for _ in range(depth)], "tags": [[0] * width for _ in range(depth)]}
                        for l in range(layers)]
         self.links = []
+        self.water = []  # (x0, z0, x1, z1, surface height) from water_patch, drawn by terrain()
 
     def tag_bit(self, name):
         if name not in self.tags:
@@ -224,18 +225,22 @@ def write_map(folder, map_id, name, grid, scene, environment, points, lights=(),
 # --------------------------------------------------------------------------- terrain helpers
 
 PALETTE = {"grass": (.30, .46, .26), "path": (.58, .47, .32), "stone": (.46, .45, .44), "cave": (.24, .27, .33),
-           "sand": (.74, .66, .48), "cliff": (.45, .39, .31), "snow": (.85, .88, .92), "wood": (.48, .33, .2)}
+           "sand": (.74, .66, .48), "cliff": (.45, .39, .31), "snow": (.85, .88, .92), "wood": (.48, .33, .2),
+           "silt": (.30, .29, .22)}
 
 
 def terrain(grid, colour_of, rng):
-    """Top surfaces (following heights and ramps) plus cliff walls between levels."""
+    """Top surfaces (following heights and ramps), cliff walls between levels
+    and the surfaces of the water basins carved by water_patch()."""
     scene = Diorama()
     L = grid.layers[0]
+    submerged = {(x, z) for x0, z0, x1, z1, _ in grid.water for x in range(x0, x1) for z in range(z0, z1)}
     for z in range(grid.depth):
         for x in range(grid.width):
             h = L["height"][z][x]
             ramp = L["ramp"][z][x]
-            colour = tuple(v * rng.uniform(0.93, 1.06) for v in colour_of(x, z))
+            base = PALETTE["silt"] if (x, z) in submerged else colour_of(x, z)
+            colour = tuple(v * rng.uniform(0.93, 1.06) for v in base)
             corners = {"nw": h, "ne": h, "sw": h, "se": h}
             if ramp == "e":
                 corners.update(ne=h + 1, se=h + 1)
@@ -261,6 +266,8 @@ def terrain(grid, colour_of, rng):
                         scene.quad([(x + 1, lo, z), (x + 1, lo, z + 1), (x + 1, hi, z + 1), (x + 1, hi, z)], wall)
                     else:
                         scene.quad([(x, lo, z + 1), (x + 1, lo, z + 1), (x + 1, hi, z + 1), (x, hi, z + 1)], wall)
+    for x0, z0, x1, z1, y in grid.water:
+        scene.quad([(x0, y, z0), (x0, y, z1), (x1, y, z1), (x1, y, z0)], (.16, .45, .62, .8), "water")
     return scene
 
 
@@ -284,12 +291,12 @@ def lamp(scene, x, z, lights, colour=(1, .62, .26)):
     lights.append({"position": [x, 2.1, z], "color": list(colour), "radius": 5.5, "intensity": 2.6, "flicker": 0.08})
 
 
-def water_patch(scene, grid, x0, z0, x1, z1, depth=0.25):
-    grid.fill(x0, z0, x1, z1, walk=False, tag="water")
-    scene.quad([(x0, -0.05, z0), (x0, -0.05, z1), (x1, -0.05, z1), (x1, -0.05, z0)], (.16, .45, .62, .8), "water")
-    for x in range(x0, x1):
-        for z in range(z0, z1):
-            grid.layers[0]["height"][z][x] = -depth
+def water_patch(grid, x0, z0, x1, z1, depth=0.25, surface=-0.08):
+    """Carve a basin `depth` below the ground (y = 0) and fill it with water up to
+    `surface`, between the basin floor and the bank top, so it reads as recessed.
+    Call before terrain(), which draws the basin and the water."""
+    grid.fill(x0, z0, x1, z1, walk=False, height=-depth, tag="water")
+    grid.water.append((x0, z0, x1, z1, surface))
 
 
 def stage_points(cx=8.0, cz=7.5):
@@ -359,11 +366,11 @@ def vale():
     grid.fill(9, 0, 11, 1, walk=True)
     grid.fill(9, 15, 11, 16, walk=True)
     lights = []
+    water_patch(grid, 14, 10, 18, 13)
     scene = terrain(grid, paths, rng)
     house(scene, grid, 2, 2, 4, 3)
     house(scene, grid, 13, 2, 5, 3, wall=(.66, .58, .52), roof=(.28, .3, .44))
     house(scene, grid, 2, 10, 4, 3, wall=(.7, .6, .5), roof=(.4, .3, .18))
-    water_patch(scene, grid, 14, 10, 18, 13)
     for x, z in [(1, 6), (18, 6), (6, 13), (12, 14), (1, 13)]:
         tree(scene, grid, x, z)
     for x, z in [(7.5, 6.5), (12.5, 9.5), (8.5, 12.5)]:
@@ -479,6 +486,7 @@ def wayfarers():
     sprite_sheet(folder, "wolf", {"kind": "wolf", "coat": (120, 120, 130)}, monster=True)
     sprite_sheet(folder, "bandit", {"coat": (90, 60, 50), "hair": (30, 20, 20), "hat": (40, 40, 40), "weapon": (180, 180, 190)})
     sprite_sheet(folder, "wisp", {"kind": "wisp", "coat": (255, 170, 90)}, monster=True)
+    render_showcase(folder)
     chest_sprite(folder)
     crystal_sprite(folder, (255, 200, 90))
     standard_audio(folder, {"riverford": (294, "major", 100), "route": (262, "major", 116), "cliffhaven": (247, "minor", 90),
@@ -501,8 +509,8 @@ def wayfarers():
     grid.fill(0, 7, 1, 9, walk=True); grid.fill(21, 7, 22, 9, walk=True)
     lights = []
     colour = lambda x, z: PALETTE["path"] if 7 <= z <= 8 else PALETTE["grass"]
+    water_patch(grid, 10, 1, 13, 15)
     scene = terrain(grid, colour, rng)
-    water_patch(scene, grid, 10, 1, 13, 15)
     # Bridge deck on layer 1, ramps at both ends link from the ground.
     grid.fill(9, 7, 10, 9, layer=1, walk=True, height=0.0, ramp="e")
     grid.fill(10, 7, 13, 9, layer=1, walk=True, height=1.0)
@@ -845,6 +853,13 @@ def draw_monster(c, ox, oy, direction, clip, frame, look):
 
 
 def sprite_sheet(folder, name, look, monster=False):
+    c, clips = draw_sheet(look, monster)
+    c.save(folder / "sprites" / f"{name}.png")
+    write_json(folder / "sprites" / f"{name}.anim.json", {"atlas": f"{name}.png", "pixels_per_unit": 32,
+                                                          "pivot": [0.5, 1], "clips": clips})
+
+
+def draw_sheet(look, monster=False):
     rows = len(CLIPS) * 4
     c = Canvas(128, 48 * rows)
     clips = {}
@@ -863,9 +878,7 @@ def sprite_sheet(folder, name, look, monster=False):
             directions.append(entries)
             row += 1
         clips[clip] = {"loop": loop, "directions": directions}
-    c.save(folder / "sprites" / f"{name}.png")
-    write_json(folder / "sprites" / f"{name}.anim.json", {"atlas": f"{name}.png", "pixels_per_unit": 32,
-                                                          "pivot": [0.5, 1], "clips": clips})
+    return c, clips
 
 
 def prop_sprite(folder, name, draw, clips):
@@ -903,6 +916,170 @@ def crystal_sprite(folder, color):
                 width = 14 - abs(7 - i) * 2
                 c.rect(ox + 16 - width // 2, 18 + i * 2, width, 2, shade(color, bright * (0.7 + i / 30)))
     prop_sprite(folder, "crystal", draw, {"idle": 0, "glow": 1})
+
+
+def bevel_normals(c, depth=3):
+    """Tangent-space normal map (x right, y up) that rounds a sprite's edges:
+    height grows with the distance to the nearest transparent pixel."""
+    w, h = c.width, c.height
+    far = depth + 1
+    height = [0 if c.pixels[i * 4 + 3] < 128 else far for i in range(w * h)]
+    for _ in range(depth):
+        nxt = height[:]
+        for y in range(h):
+            for x in range(w):
+                i = y * w + x
+                if height[i]:
+                    around = [height[j] for j in (i - 1, i + 1, i - w, i + w)
+                              if 0 <= j < w * h and abs(j % w - x) <= 1]
+                    nxt[i] = min(height[i], min(around, default=0) + 1)
+        height = nxt
+    out = Canvas(w, h)
+    for y in range(h):
+        for x in range(w):
+            i = y * w + x
+            if not height[i]:
+                out.rect(x, y, 1, 1, (128, 128, 255, 0))
+                continue
+            at = lambda xx, yy: height[yy * w + xx] if 0 <= xx < w and 0 <= yy < h else 0
+            dx = (at(x + 1, y) - at(x - 1, y)) / (2 * depth)
+            dy = (at(x, y + 1) - at(x, y - 1)) / (2 * depth)
+            n = (-dx, dy, 1.0)
+            length = math.sqrt(sum(v * v for v in n))
+            out.rect(x, y, 1, 1, tuple(int((v / length * 0.5 + 0.5) * 255) for v in n) + (255,))
+    return out
+
+
+def gltf_box(path, size, height, textures):
+    """A textured box (no tangents: the engine generates them) for material tests."""
+    sx, sz = size / 2, size / 2
+    faces = [((0, 1, 0), [(-sx, height, sz), (sx, height, sz), (sx, height, -sz), (-sx, height, -sz)]),
+             ((0, 0, 1), [(-sx, 0, sz), (sx, 0, sz), (sx, height, sz), (-sx, height, sz)]),
+             ((0, 0, -1), [(sx, 0, -sz), (-sx, 0, -sz), (-sx, height, -sz), (sx, height, -sz)]),
+             ((1, 0, 0), [(sx, 0, sz), (sx, 0, -sz), (sx, height, -sz), (sx, height, sz)]),
+             ((-1, 0, 0), [(-sx, 0, -sz), (-sx, 0, sz), (-sx, height, sz), (-sx, height, -sz)])]
+    positions, normals, uvs, indices = [], [], [], []
+    for normal, corners in faces:
+        base = len(positions)
+        positions += corners
+        normals += [normal] * 4
+        uvs += [(0, 1), (1, 1), (1, 0), (0, 0)]
+        indices += [base, base + 1, base + 2, base, base + 2, base + 3]
+    blob = b"".join(struct.pack("<3f", *v) for v in positions)
+    normal_offset = len(blob)
+    blob += b"".join(struct.pack("<3f", *v) for v in normals)
+    uv_offset = len(blob)
+    blob += b"".join(struct.pack("<2f", *v) for v in uvs)
+    index_offset = len(blob)
+    blob += b"".join(struct.pack("<H", i) for i in indices)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.with_suffix(".bin").write_bytes(blob)
+    views = [(0, normal_offset), (normal_offset, uv_offset - normal_offset), (uv_offset, index_offset - uv_offset),
+             (index_offset, len(blob) - index_offset)]
+    write_json(path, {
+        "asset": {"version": "2.0", "generator": "f-engine generate_samples.py"},
+        "extensionsUsed": ["KHR_materials_emissive_strength"],
+        "scene": 0, "scenes": [{"nodes": [0]}], "nodes": [{"name": path.stem, "mesh": 0}],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}, "indices": 3,
+                                    "material": 0}]}],
+        "materials": [{"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}},
+                       "normalTexture": {"index": 1}, "emissiveTexture": {"index": 2},
+                       "emissiveFactor": [1, 1, 1],
+                       "extensions": {"KHR_materials_emissive_strength": {"emissiveStrength": 3}}}],
+        "textures": [{"source": i, "sampler": 0} for i in range(3)],
+        "samplers": [{"magFilter": 9728, "minFilter": 9987}],
+        "images": [{"uri": name} for name in textures],
+        "buffers": [{"uri": path.with_suffix(".bin").name, "byteLength": len(blob)}],
+        "bufferViews": [{"buffer": 0, "byteOffset": o, "byteLength": n} for o, n in views],
+        "accessors": [
+            {"bufferView": 0, "componentType": 5126, "count": len(positions), "type": "VEC3",
+             "min": [min(v[k] for v in positions) for k in range(3)],
+             "max": [max(v[k] for v in positions) for k in range(3)]},
+            {"bufferView": 1, "componentType": 5126, "count": len(normals), "type": "VEC3"},
+            {"bufferView": 2, "componentType": 5126, "count": len(uvs), "type": "VEC2"},
+            {"bufferView": 3, "componentType": 5123, "count": len(indices), "type": "SCALAR"}]})
+
+
+def gltf_water(path, width, depth):
+    """A flat `material: water` surface centred on the origin."""
+    w, d = width / 2, depth / 2
+    positions = [(-w, 0, d), (w, 0, d), (w, 0, -d), (-w, 0, -d)]
+    blob = b"".join(struct.pack("<3f", *v) for v in positions)
+    normal_offset = len(blob)
+    blob += struct.pack("<3f", 0, 1, 0) * 4
+    index_offset = len(blob)
+    blob += struct.pack("<6H", 0, 1, 2, 0, 2, 3)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.with_suffix(".bin").write_bytes(blob)
+    write_json(path, {
+        "asset": {"version": "2.0", "generator": "f-engine generate_samples.py"},
+        "scene": 0, "scenes": [{"nodes": [0]}], "nodes": [{"name": path.stem, "mesh": 0}],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0, "NORMAL": 1}, "indices": 2, "material": 0}]}],
+        "materials": [{"pbrMetallicRoughness": {"baseColorFactor": [.16, .45, .62, .8]}, "alphaMode": "BLEND",
+                       "extras": {"fengine": {"material": "water"}}}],
+        "buffers": [{"uri": path.with_suffix(".bin").name, "byteLength": len(blob)}],
+        "bufferViews": [{"buffer": 0, "byteOffset": 0, "byteLength": normal_offset},
+                        {"buffer": 0, "byteOffset": normal_offset, "byteLength": index_offset - normal_offset},
+                        {"buffer": 0, "byteOffset": index_offset, "byteLength": len(blob) - index_offset}],
+        "accessors": [
+            {"bufferView": 0, "componentType": 5126, "count": 4, "type": "VEC3", "min": [-w, 0, -d], "max": [w, 0, d]},
+            {"bufferView": 1, "componentType": 5126, "count": 4, "type": "VEC3"},
+            {"bufferView": 2, "componentType": 5123, "count": 6, "type": "SCALAR"}]})
+
+
+def render_showcase(folder):
+    """fx/: assets for the rendering replay (materials, lit sprites, decals)."""
+    fx = folder / "fx"
+    plank, seam = (150, 104, 62), (70, 44, 28)
+    albedo, bumps, glow = Canvas(64, 64), Canvas(64, 64), Canvas(64, 64)
+    albedo.rect(0, 0, 64, 64, plank)
+    bumps.rect(0, 0, 64, 64, (128, 128, 255))
+    glow.rect(0, 0, 64, 64, (0, 0, 0))
+    for y in range(64):
+        for x in range(64):
+            grain = int(14 * math.sin(x * 0.7 + math.sin(y * 0.3) * 2))
+            albedo.rect(x, y, 1, 1, shade(plank, 1 + grain / 255))
+    for edge in (0, 15, 16, 31, 32, 47, 48, 63):
+        albedo.rect(0, edge, 64, 1, seam)
+        # Grooves between planks: normals lean away from each seam.
+        lean = 70 if edge % 16 == 15 else 186
+        bumps.rect(0, edge, 64, 1, (128, lean, 230))
+    for x in (0, 1, 62, 63):
+        albedo.rect(x, 0, 1, 64, seam)
+        bumps.rect(x, 0, 1, 64, (60 if x < 32 else 196, 128, 230))
+    for k in range(20):
+        glow.rect(22 + k, 30 + int(3 * math.sin(k * 0.8)), 2, 3, (255, 150, 60))
+    albedo.save(fx / "crate.png")
+    bumps.save(fx / "crate_normal.png")
+    glow.save(fx / "crate_glow.png")
+    gltf_box(fx / "crate.gltf", 0.8, 0.8, ["crate.png", "crate_normal.png", "crate_glow.png"])
+    gltf_water(fx / "pond.gltf", 3, 2)
+
+    sheet, clips = draw_sheet({"coat": (70, 90, 60), "hair": (40, 30, 26), "weapon": (210, 210, 220),
+                               "hat": (60, 50, 40)})
+    sheet.save(fx / "rook_lit.png")
+    bevel_normals(sheet).save(fx / "rook_lit_normal.png")
+    mask = Canvas(sheet.width, sheet.height)
+    for oy in range(0, sheet.height, 48):
+        for ox in range(0, sheet.width, 32):
+            mask.rect(ox + 15, oy + 30, 2, 2, (120, 220, 255, 255))
+    mask.save(fx / "rook_lit_glow.png")
+    write_json(fx / "rook_lit.anim.json", {"atlas": "rook_lit.png", "normal": "rook_lit_normal.png",
+                                           "emissive": "rook_lit_glow.png", "pixels_per_unit": 32,
+                                           "pivot": [0.5, 1], "clips": clips})
+
+    circle = Canvas(64, 64)
+    for y in range(64):
+        for x in range(64):
+            r = math.hypot(x - 31.5, y - 31.5)
+            angle = math.atan2(y - 31.5, x - 31.5)
+            ring = r > 27 and r < 30 or r > 18 and r < 20 or (r > 20 and r < 27 and math.sin(angle * 6) > 0.92)
+            if ring:
+                circle.rect(x, y, 1, 1, (255, 255, 255, 255))
+    circle.save(fx / "circle.png")
+    write_json(fx / "circle.anim.json", {"atlas": "circle.png", "pixels_per_unit": 32, "pivot": [0.5, 0.5],
+                                         "clips": {"idle": {"directions": [[{"rect": [0, 0, 64, 64],
+                                                                              "duration": 1}]]}}})
 
 
 def portrait(folder, name, look):

@@ -37,6 +37,12 @@ function transition.into(kind, duration, color)
   animate(kind or "fade", 1, 0, duration or 0.4, color)
 end
 
+--- Remove any fade or transition at once (cleanup after a cancelled
+--- transition).
+function transition.clear()
+  fe.screen.set({ fade = { 0, 0, 0, 0 }, transition = { kind = "none", progress = 0 } })
+end
+
 --- Flash the screen (additive), e.g. on a critical hit.
 function transition.flash(color, duration)
   color = color or { 1, 1, 1 }

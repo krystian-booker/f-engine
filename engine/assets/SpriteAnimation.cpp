@@ -11,6 +11,8 @@ SpriteAnimation SpriteAnimation::load(const std::filesystem::path& path) {
 SpriteAnimation SpriteAnimation::fromJson(const Json& j) {
     SpriteAnimation a;
     a.atlas = j.at("atlas");
+    a.normal = j.value("normal", std::string{});
+    a.emissive = j.value("emissive", std::string{});
     a.pixelsPerUnit = j.value("pixels_per_unit", 32);
     if (a.atlas.empty() || a.pixelsPerUnit < 1 || a.pixelsPerUnit > 4096)
         throw std::runtime_error("Invalid sprite atlas/PPU");
@@ -46,14 +48,20 @@ SpriteAnimation SpriteAnimation::fromJson(const Json& j) {
         throw std::runtime_error("Sprite needs at least one clip");
     return a;
 }
-const SpriteFrame& SpriteAnimation::frame(const std::string& name, glm::vec2 facing, float yaw,
-                                          double elapsed) const {
-    // Rows run south, west, north, east (then diagonals for eight directions),
-    // clockwise relative to the camera, with south facing the viewer.
-    return frameFor(name, direction(name, facing, yaw), elapsed);
+const std::vector<SpriteFrame>& SpriteClip::row(int direction) const {
+    return directions[static_cast<std::size_t>(
+        std::clamp(direction, 0, static_cast<int>(directions.size()) - 1))];
 }
 
-const SpriteFrame& SpriteAnimation::frameFor(const std::string& name, int row, double elapsed) const {
+double SpriteClip::length(int direction) const {
+    double total = 0;
+    for (const auto& f : row(direction)) {
+        total += f.duration;
+    }
+    return total;
+}
+
+const SpriteClip& SpriteAnimation::clip(const std::string& name) const {
     auto it = clips.find(name);
     if (it == clips.end()) {
         it = clips.find("idle");
@@ -61,15 +69,18 @@ const SpriteFrame& SpriteAnimation::frameFor(const std::string& name, int row, d
     if (it == clips.end()) {
         it = clips.begin();
     }
-    const auto& clip = it->second;
-    const auto& frames = clip.directions[static_cast<std::size_t>(row) % clip.directions.size()];
-    double duration = 0;
-    for (const auto& f : frames) {
-        duration += f.duration;
-    }
+    return it->second;
+}
+
+const SpriteFrame& SpriteAnimation::frameFor(const std::string& name, int row, double elapsed) const {
+    return clip(name).frameAt(row, elapsed);
+}
+
+const SpriteFrame& SpriteClip::frameAt(int direction, double elapsed) const {
+    const auto& frames = row(direction);
     double time = std::max(0.0, elapsed);
-    if (clip.loop) {
-        time = std::fmod(time, duration);
+    if (loop) {
+        time = std::fmod(time, length(direction));
     }
     for (const auto& f : frames) {
         if (time < f.duration) {
@@ -81,39 +92,32 @@ const SpriteFrame& SpriteAnimation::frameFor(const std::string& name, int row, d
 }
 
 int SpriteAnimation::direction(const std::string& name, glm::vec2 facing, float yaw) const {
-    auto it = clips.find(name);
-    if (it == clips.end())
-        it = clips.find("idle");
-    if (it == clips.end())
-        it = clips.begin();
-    const int count = static_cast<int>(it->second.directions.size());
+    const int count = static_cast<int>(clip(name).directions.size());
     const float angle = std::atan2(-facing.x, facing.y) + glm::radians(yaw);
     return (static_cast<int>(std::round(angle / (2 * std::numbers::pi_v<float>)*count)) % count + count) %
            count;
 }
-std::vector<std::string> SpriteAnimation::events(const std::string& name, int direction, double from,
-                                                 double to) const {
-    std::vector<std::string> result;
-    auto found = clips.find(name);
-    if (found == clips.end() || to <= from)
-        return result;
-    const auto& clip = found->second;
-    const auto& frames = clip.directions.at(static_cast<std::size_t>(direction));
-    double length = 0;
-    for (const auto& f : frames)
-        length += f.duration;
-    const int first = clip.loop ? static_cast<int>(std::floor(std::max(0.0, from) / length)) : 0;
+
+void SpriteAnimation::events(const std::string& name, int direction, double from, double to,
+                             const std::function<void(const std::string&)>& emit) const {
+    if (to <= from) {
+        return;
+    }
+    const auto& clip = this->clip(name);
+    const double length = clip.length(direction);
+    constexpr int MaxLoops = 64; // events of older passes are dropped when a tick spans more
     const int last = clip.loop ? static_cast<int>(std::floor(std::max(0.0, to) / length)) : 0;
-    if (last - first > 1000)
-        throw std::runtime_error("Sprite event interval too large");
+    const int first =
+        clip.loop ? std::max(static_cast<int>(std::floor(std::max(0.0, from) / length)), last - MaxLoops) : 0;
     for (int loop = first; loop <= last; ++loop) {
         double time = loop * length;
-        for (const auto& f : frames) {
-            if (time > from && time <= to && !f.event.empty())
-                result.push_back(f.event);
+        for (const auto& f : clip.row(direction)) {
+            const bool reached = time > from || (time == 0 && from <= 0);
+            if (reached && time <= to && !f.event.empty()) {
+                emit(f.event);
+            }
             time += f.duration;
         }
     }
-    return result;
 }
 } // namespace fe

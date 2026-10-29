@@ -3,9 +3,9 @@
 ## Available now
 
 - **Error overlay** (dev builds): every Lua error shows its message and traceback with `file:line`. Fix the file and it hot-reloads.
-- **Console** (F1, Console tab): run Lua in the live game, for example `require("fe.state").flag("met")` or `require("fe.battle").active.battlers[1]:resource("hp")`.
-- **`fe.log`** for logging. **`fe.dev`** provides `traceback(thread)` (for a task's coroutine), `errors()`, `console(code)`, and `zone`/`clock` timings shown in the Profiler tab.
-- **Headless tests and replays**: `fengine_headless --test` with `--filter`, and replays with `assert` and `wait_for`. These reproduce most bugs deterministically, without a window.
+- **Console** (F1, Console tab): run Lua in the live game, for example `require("fe.state").flag("met")` or `require("fe.battle").active.battlers[1]:resource("hp")`. Up and Down recall earlier commands.
+- **`fe.log`** for logging. **`fe.dev`** provides `traceback(thread)` (for a task's coroutine), `errors()`, and `zone`/`clock` timings shown in the Profiler tab. `fe.dev.console(code)` (returns the printable results and whether the code ran without error), `fe.input.feed` and `fe.input.feed_text` exist only in development builds, in `--test`/`--check` runs and in `--replay`/`--record` sessions (including those of a shipped `fengine`); a shipped game played normally has none of them (see the sandbox in architecture.md).
+- **Headless tests and replays**: `fengine_headless --test` with `--filter`, and replays with `assert` and `wait_for` (`fengine_headless <game> --replay <file>`). These reproduce most bugs deterministically, without a window. A replay `lua` step that raises an error fails the replay. Each headless run gets its own temporary user-data folder, deleted when it ends. `fengine <game> --record bug.json` turns a session where a bug happened into a replay.
 
 ## Debugger evaluation (VS Code breakpoints)
 

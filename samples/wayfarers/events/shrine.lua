@@ -2,6 +2,7 @@
 local dialogue = require("fe.dialogue")
 local party = require("fe.rpg.party")
 local quest = require("fe.quest")
+local story = require("fe.story")
 
 return function(ev)
   if quest.status("rook_1") ~= "active" then
@@ -10,11 +11,11 @@ return function(ev)
   end
   dialogue.say("Shrine Keeper", "So the hunter found the trail. The marks you follow were carved by your own teacher.")
   quest.complete("rook_1")
-  quest.set_chapter("rook", 2)
+  story.finish("rook")
   if party.is_active("selene") then
     dialogue.say("Selene", "Then the pages I carry... they're the rest of the map!", { portrait = "portraits/selene.png" })
     quest.complete("selene_1")
-    quest.set_chapter("selene", 2)
+    story.finish("selene")
   end
   dialogue.say(nil, "{color:heading}Chapter 1 complete.{color:reset}")
 end

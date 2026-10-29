@@ -1,5 +1,5 @@
 #pragma once
-#include <bgfx/bgfx.h>
+#include "engine/render/GpuAssets.h"
 #include <filesystem>
 struct ImDrawData;
 
@@ -15,8 +15,8 @@ public:
 
 private:
     bgfx::VertexLayout layout_;
-    bgfx::ProgramHandle program_ = BGFX_INVALID_HANDLE;
-    bgfx::UniformHandle sampler_ = BGFX_INVALID_HANDLE;
-    bgfx::TextureHandle font_ = BGFX_INVALID_HANDLE;
+    Program program_;
+    Uniform sampler_;
+    Texture font_;
 };
 } // namespace fe

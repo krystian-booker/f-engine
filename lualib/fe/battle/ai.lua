@@ -22,15 +22,16 @@ function ai.missing_hp(targets)
   return total
 end
 
---- Every (skill, targets) pair a battler could use now.
+--- Every (skill, targets) pair a battler could use now. A battler without
+--- skills uses the attack skill (fe.battle.core settings.attack_skill).
 function ai.options(battle, battler)
   local out = {}
   local skills = battler:skills()
   if #skills == 0 then
-    skills = { require("fe.data").find("skills", "attack") }
+    skills = { require("fe.battle.core").attack_skill() }
   end
   for _, skill in ipairs(skills) do
-    if skill and battler:can_pay(skill.cost) then
+    if skill and battle:usable(battler, skill) then
       local candidates = battle:targets_for(battler, skill.target)
       if #candidates > 0 then
         if skill.target:find("^all") or skill.target == "everyone" then
@@ -46,8 +47,9 @@ function ai.options(battle, battler)
   return out
 end
 
---- Pick the best-scored option (ties broken randomly); weights can be
---- randomised with `jitter` (0..1).
+--- Pick the best-scored option. Each score is multiplied by a random
+--- factor 1..1+`jitter` (default 0.5; 0 makes the choice deterministic, and
+--- then ties go to the first option).
 ---@param options {score?: fun(skill: table, targets: table[], battle: table, me: table): number, jitter?: number}
 function ai.choose(battle, battler, options)
   options = options or {}
@@ -76,14 +78,20 @@ function ai.default(battle, battler)
   })
 end
 
+--- The function a data path names: "module.name.fn" is `fn` in module
+--- "module.name" (enemy `ai` and `actions` use these).
+function ai.resolve(path)
+  local module_name, fn = path:match("^(.*)%.([%w_]+)$")
+  local f = module_name and require(module_name)[fn]
+  if type(f) ~= "function" then error("function '" .. path .. "' not found", 2) end
+  return f
+end
+
 --- Resolve a battler's AI function.
 function ai.for_battler(battler)
   local name = battler.def and battler.def.ai
   if not name then return ai.default end
-  local module_name, fn = name:match("^(.*)%.([%w_]+)$")
-  local f = module_name and require(module_name)[fn]
-  assert(f, "AI function '" .. name .. "' not found")
-  return f
+  return ai.resolve(name)
 end
 
 return ai

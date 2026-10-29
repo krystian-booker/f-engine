@@ -15,8 +15,11 @@
 ---   bp = {max = 5, start = 1, name = "BP", battle_only = true},
 --- })
 --- ```
---- Modifiers are {stat = "attack", add = 10} or {stat = "speed", mul = 1.5}
---- (optionally `source` and `priority`); `stats.compute` folds them in.
+--- Modifiers are {stat = "attack", add = 10}, {stat = "speed", mul = 1.5} or
+--- {stat = "move", set = 0} (optionally `source` and `priority`);
+--- `stats.compute` folds them in.
+local tablex = require("fe.tablex")
+
 local stats = { list = {}, by_id = {}, resource_list = {}, resource_by_id = {} }
 
 --- Declare the stats (replaces previous definitions).
@@ -59,21 +62,30 @@ end
 
 --- Apply modifiers to base values. Order: additions, then multipliers, then
 --- `set` overrides; results are clamped and rounded per stat definition.
+--- When several `set` modifiers touch a stat, the highest `priority`
+--- (default 0) wins and ties go to the later modifier in the list
+--- (combatants list equipment and passives, then buffs, then states in
+--- sorted id order, so the result never depends on table iteration).
 ---@param base table<string, number>
 ---@param modifiers table[]
 ---@return table<string, number>
 function stats.compute(base, modifiers)
-  local add, mul, set = {}, {}, {}
+  local add, mul, set, set_priority = {}, {}, {}, {}
   for _, m in ipairs(modifiers or {}) do
     if m.add then add[m.stat] = (add[m.stat] or 0) + m.add end
     if m.mul then mul[m.stat] = (mul[m.stat] or 1) * m.mul end
-    if m.set then set[m.stat] = m.set end
+    if m.set then
+      local priority = m.priority or 0
+      if set_priority[m.stat] == nil or priority >= set_priority[m.stat] then
+        set[m.stat], set_priority[m.stat] = m.set, priority
+      end
+    end
   end
   local out = {}
   for _, def in ipairs(stats.list) do
     local value = ((base[def.id] or 0) + (add[def.id] or 0)) * (mul[def.id] or 1)
     if set[def.id] then value = set[def.id] end
-    value = math.max(def.min, def.max and math.min(def.max, value) or value)
+    value = tablex.clamp(value, def.min, def.max or math.huge)
     if def.integer then value = math.floor(value + 0.5) end
     out[def.id] = value
   end

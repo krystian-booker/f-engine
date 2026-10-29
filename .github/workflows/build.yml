@@ -8,6 +8,7 @@ env:
   CPM_SOURCE_CACHE: ${{ github.workspace }}/.cache/CPM
   LINUX_DEPS: >-
     ninja-build libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev
+    libegl-dev libwayland-dev libxkbcommon-dev wayland-protocols
     libasound2-dev libpulse-dev libudev-dev libvulkan-dev
 
 jobs:
@@ -17,6 +18,8 @@ jobs:
       - uses: actions/checkout@v4
       - run: pipx run --spec clang-format==23.1.3 clang-format --dry-run -Werror $(git ls-files 'engine/*.cpp' 'engine/*.h' 'apps/*.cpp' 'tests/*.cpp' 'tools/assetc/*.cpp')
 
+  # Development builds (editor, hot reload) with optimisation: every test,
+  # including each sample replay run headless.
   desktop:
     strategy:
       fail-fast: false
@@ -37,43 +40,190 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y $LINUX_DEPS
       - name: Configure Unix
         if: runner.os != 'Windows'
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DFENGINE_WARNINGS_AS_ERRORS=ON
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DFENGINE_DEV=ON -DFENGINE_WARNINGS_AS_ERRORS=ON
       - name: Configure Windows
         if: runner.os == 'Windows'
-        run: cmake -S . -B build -A x64 -DFENGINE_WARNINGS_AS_ERRORS=ON
+        run: cmake -S . -B build -A x64 -DFENGINE_DEV=ON -DFENGINE_WARNINGS_AS_ERRORS=ON
       - name: Build
         run: cmake --build build --config Release --parallel 4
-      - name: Tests (C++, Lua library, samples, boundary and API checks)
+      - name: Tests (C++, Lua library, samples, headless replays, boundary and API checks)
         run: ctest --test-dir build -C Release --output-on-failure
-      - name: Install distribution
-        run: cmake --install build --prefix build/package --config Release
-      - name: Package
-        run: cpack --config build/CPackConfig.cmake -C Release -G ZIP -B build/dist
+
+  # What players get: FENGINE_DEV=OFF (no editor, no source-tree fallbacks),
+  # packaged with tools/package_game.py into .pak archives and checked from
+  # the unpacked ZIP.
+  ship:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            bin: build
+            tools: build/tools/assetc
+            shaderc: build/_deps/bgfx_cmake-build/cmake/bgfx/shaderc
+            exe: ""
+          - os: macos-latest
+            bin: build
+            tools: build/tools/assetc
+            shaderc: build/_deps/bgfx_cmake-build/cmake/bgfx/shaderc
+            exe: ""
+          - os: windows-latest
+            bin: build/Release
+            tools: build/tools/assetc/Release
+            shaderc: build/_deps/bgfx_cmake-build/cmake/bgfx/Release/shaderc
+            exe: .exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@v4
+        with:
+          path: .cache/CPM
+          key: cpm-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/CPM.cmake') }}
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y $LINUX_DEPS
+      - name: Configure Unix
+        if: runner.os != 'Windows'
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DFENGINE_DEV=OFF -DFENGINE_WARNINGS_AS_ERRORS=ON
+      - name: Configure Windows
+        if: runner.os == 'Windows'
+        # Static C runtime: the package needs no Visual C++ redistributable.
+        run: cmake -S . -B build -A x64 -DFENGINE_DEV=OFF -DFENGINE_WARNINGS_AS_ERRORS=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+      - name: Tests
+        run: ctest --test-dir build -C Release --output-on-failure -LE windowed
+      - name: Package a sample
+        shell: bash
+        run: >-
+          python tools/package_game.py --runtime ${{ matrix.bin }}/fengine${{ matrix.exe }}
+          --assetc ${{ matrix.tools }}/fengine_assetc${{ matrix.exe }}
+          --shaders build/shaders --validator ${{ matrix.bin }}/fengine_headless${{ matrix.exe }}
+          --shaderc ${{ matrix.shaderc }}${{ matrix.exe }} --shader-include build/shader-include
+          --licenses build/licenses --game samples/vale --output dist/vale --zip --self-check
+      - name: Check the unpacked package
+        shell: bash
+        run: |
+          mkdir unpacked && python -m zipfile -e dist/vale.zip unpacked
+          if [ "$RUNNER_OS" = macOS ]; then
+            chmod +x unpacked/vale/*.app/Contents/MacOS/fengine
+            app=$(ls -d unpacked/vale/*.app)
+            resources="$app/Contents/Resources"
+            runtime="$app/Contents/MacOS/fengine"
+            game="$resources/game"
+            lualib="$resources/lualib.pak"
+          else
+            chmod +x unpacked/vale/bin/fengine${{ matrix.exe }}
+            runtime=unpacked/vale/bin/fengine${{ matrix.exe }}
+            game=unpacked/vale/game
+            lualib=unpacked/vale/bin/lualib.pak
+          fi
+          # The game and lualib ship only as archives holding what they should.
+          fail() { echo "::error::$1"; exit 1; }
+          [ ! -e "$game/main.lua" ] || fail "loose game files next to game.pak"
+          [ ! -d "${lualib%.pak}" ] || fail "loose lualib next to lualib.pak"
+          assetc=${{ matrix.tools }}/fengine_assetc${{ matrix.exe }}
+          "$assetc" list "$game.pak" | cut -f1 | tr -d '\r' > game-entries.txt
+          "$assetc" list "$lualib" | cut -f1 | tr -d '\r' > lualib-entries.txt
+          for entry in game.json main.lua; do grep -qx "$entry" game-entries.txt || fail "game.pak lacks $entry"; done
+          grep -qx fe/init.lua lualib-entries.txt || fail "lualib.pak lacks fe/init.lua"
+          if grep -E '^(tests|replays|saves)/' game-entries.txt lualib-entries.txt; then fail "development files packed"; fi
+          "$runtime" --check "$game"
+      - name: Install and engine ZIP
+        run: |
+          cmake --install build --prefix build/package --config Release
+          cpack --config build/CPackConfig.cmake -C Release -G ZIP -B build/dist
       - uses: actions/upload-artifact@v4
         with:
           name: fengine-${{ runner.os }}
-          path: build/dist/fengine-*.zip
+          path: |
+            build/dist/fengine-*.zip
+            dist/vale.zip
 
+  # macOS universal binaries (FENGINE_UNIVERSAL: arm64 and x86_64), as a
+  # macOS release is built: both slices must be present in every executable,
+  # and the headless tests run on the runner's native slice.
+  universal:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@v4
+        with:
+          path: .cache/CPM
+          key: cpm-universal-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/CPM.cmake') }}
+      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DFENGINE_DEV=OFF -DFENGINE_UNIVERSAL=ON -DFENGINE_WARNINGS_AS_ERRORS=ON
+      - run: cmake --build build --parallel 4
+      - name: Both architectures in every executable
+        run: |
+          for exe in build/fengine build/fengine_headless build/tools/assetc/fengine_assetc; do
+            archs=$(lipo -archs "$exe")
+            echo "$exe: $archs"
+            for arch in arm64 x86_64; do
+              case " $archs " in *" $arch "*) ;; *) echo "::error::$exe lacks $arch"; exit 1 ;; esac
+            done
+          done
+      - run: ctest --test-dir build --output-on-failure -LE windowed
+
+  # Windowed replays. Every capture must be a rendered frame (not black or a
+  # single colour), and captures with reference images for the backend are
+  # compared with them. Linux uses Xvfb with Mesa (lavapipe Vulkan, falling
+  # back to OpenGL), compares with the Vulkan and OpenGL 4.3 references
+  # captured there, and must pass: a capture with no reference for the
+  # backend fails it, so a backend change cannot skip the comparison. macOS
+  # compares with the Metal references, which were captured on Apple GPU
+  # hardware: the hosted runners' virtual Metal device is not guaranteed to
+  # match it within tolerance, and Windows (D3D11 on the basic render driver)
+  # is not always available on hosted runners, so both are reported without
+  # failing the workflow. The same replays always run headless in `desktop`.
   replays:
-    # Windowed input replays on a virtual display with Mesa's software drivers.
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os != 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
         with:
           path: .cache/CPM
           key: cpm-${{ runner.os }}-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/CPM.cmake') }}
-      - run: sudo apt-get update && sudo apt-get install -y $LINUX_DEPS mesa-vulkan-drivers xvfb xauth
-      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DFENGINE_RUN_REPLAYS=ON
-      - run: cmake --build build --parallel 4
-      - run: xvfb-run -a -s "-screen 0 1280x720x24" ctest --test-dir build --output-on-failure -R '^replay_'
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y $LINUX_DEPS mesa-vulkan-drivers xvfb xauth
+      - name: Configure Unix
+        if: runner.os != 'Windows'
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DFENGINE_DEV=ON -DFENGINE_RUN_REPLAYS=ON
+      - name: Configure Windows
+        if: runner.os == 'Windows'
+        run: cmake -S . -B build -A x64 -DFENGINE_DEV=ON -DFENGINE_RUN_REPLAYS=ON
+      - run: cmake --build build --config Release --parallel 4
+      - name: Replays (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          xvfb-run -a -s "-screen 0 1280x720x24" ctest --test-dir build --output-on-failure -V -L windowed | tee replays.log
+          if grep "No reference image" replays.log; then
+            echo "::error::captures were not compared: no Linux reference images for this backend"; exit 1
+          fi
+      - name: Replays
+        if: runner.os != 'Linux'
+        run: ctest --test-dir build -C Release --output-on-failure -L windowed
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: replay-screenshots
+          name: replay-screenshots-${{ runner.os }}
           path: build/**/replay-out/*.png
           if-no-files-found: ignore
 
+  # Address and undefined-behaviour sanitizers over every test that needs no
+  # display: the core, the runtime services (audio, input) and headless replays.
   sanitizers:
     runs-on: ubuntu-latest
     steps:
@@ -82,7 +232,7 @@ jobs:
         with:
           path: .cache/CPM
           key: cpm-sanitizers-${{ hashFiles('cmake/Dependencies.cmake', 'cmake/CPM.cmake') }}
-      - run: sudo apt-get update && sudo apt-get install -y ninja-build
-      - run: cmake -S . -B build -G Ninja -DFENGINE_BUILD_RUNTIME=OFF -DFENGINE_ENABLE_SANITIZERS=ON
+      - run: sudo apt-get update && sudo apt-get install -y $LINUX_DEPS
+      - run: cmake -S . -B build -G Ninja -DFENGINE_ENABLE_SANITIZERS=ON
       - run: cmake --build build --parallel 4
-      - run: ctest --test-dir build --output-on-failure
+      - run: ctest --test-dir build --output-on-failure -LE windowed

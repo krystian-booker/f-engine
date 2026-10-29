@@ -2,6 +2,8 @@
 #include "engine/text/TextSystem.h"
 #include <array>
 #include <glm/glm.hpp>
+#include <map>
+#include <string_view>
 #include <vector>
 
 namespace fe {
@@ -27,6 +29,11 @@ struct CanvasQuad {
     Rect clip{0, 0, -1, -1};          // w < 0 = no clip
     int layer = 0;
     bool additive = false;
+    // Text glyphs only: the markup effect (a TextEffect: 0 none, 1 shake,
+    // 2 wave) and the glyph's phase (its unit index), so the renderer can
+    // offset each glyph out of step with its neighbours.
+    std::uint8_t effect = 0;
+    float phase = 0;
 };
 
 struct ImageOptions {
@@ -60,6 +67,10 @@ public:
     glm::vec2 text(const std::string& markup, glm::vec2 position, const TextOptions& options);
     [[nodiscard]] TextLayout measure(const std::string& markup, const TextOptions& options);
     [[nodiscard]] glm::ivec2 imageSize(const std::string& path);
+    // Render targets ("rt:<name>" images): world:draw{target} records each
+    // one's size in canvas pixels; fe.canvas.image shows what was drawn there.
+    static constexpr std::string_view TargetPrefix = "rt:";
+    void defineTarget(const std::string& name, glm::ivec2 size) { targets_[name] = size; }
 
     void pushClip(Rect area);
     void popClip();
@@ -92,6 +103,7 @@ private:
     std::vector<CanvasQuad> quads_;
     std::vector<Rect> clips_;
     std::vector<std::pair<glm::mat3, float>> transforms_;
+    std::map<std::string, glm::ivec2, std::less<>> targets_;
 };
 
 std::uint32_t multiplyAlpha(std::uint32_t rgba, float alpha);

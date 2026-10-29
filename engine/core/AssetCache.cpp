@@ -5,15 +5,20 @@
 
 namespace fe {
 namespace {
+constexpr std::string_view UserPrefix = "user://";
+
 bool endsWith(const std::string& value, const std::string& suffix) {
     return value.size() >= suffix.size() &&
            value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 } // namespace
 
-AssetCache::AssetCache(std::filesystem::path root, std::filesystem::path libraryRoot)
+AssetCache::AssetCache(std::filesystem::path root, std::filesystem::path libraryRoot,
+                       std::filesystem::path userRoot)
     : root_(std::filesystem::weakly_canonical(root)),
-      libraryRoot_(std::filesystem::weakly_canonical(libraryRoot)), thread_([this] { worker(); }) {
+      libraryRoot_(std::filesystem::weakly_canonical(libraryRoot)),
+      userRoot_(userRoot.empty() ? userRoot : std::filesystem::weakly_canonical(userRoot)),
+      thread_([this] { worker(); }) {
 }
 
 AssetCache::~AssetCache() {
@@ -28,6 +33,12 @@ AssetCache::~AssetCache() {
 std::filesystem::path AssetCache::file(const std::string& relative) const {
     if (relative.starts_with("@fe/")) {
         return resolveInside(libraryRoot_ / "fe", relative.substr(4));
+    }
+    if (relative.starts_with(UserPrefix)) {
+        if (userRoot_.empty()) {
+            throw std::runtime_error("No user data folder for " + relative);
+        }
+        return resolveInside(userRoot_, relative.substr(UserPrefix.size()));
     }
     return resolveInside(root_, relative);
 }
@@ -67,8 +78,37 @@ std::shared_ptr<const SpriteAnimation> AssetCache::sprite(const std::string& pat
     return value;
 }
 
+void AssetCache::refreshUserImage(const std::string& path) {
+    if (!path.starts_with(UserPrefix)) {
+        return;
+    }
+    std::filesystem::path absolute;
+    try {
+        absolute = file(path);
+    } catch (const std::exception&) {
+        return; // the load itself reports the bad path
+    }
+    Stamp stamp;
+    std::error_code error;
+    const auto time = std::filesystem::last_write_time(absolute, error);
+    if (!error) {
+        const auto size = std::filesystem::file_size(absolute, error);
+        if (!error) {
+            stamp.emplace(time, size);
+        }
+    }
+    const auto [found, added] = userStamps_.try_emplace(path, stamp);
+    if (!added && found->second != stamp) {
+        found->second = stamp;
+        images_.erase(path);
+        failed_.erase(path);
+        ++generation_;
+    }
+}
+
 std::shared_ptr<const Image> AssetCache::image(const std::string& path) {
     collect();
+    refreshUserImage(path);
     if (const auto found = images_.find(path); found != images_.end()) {
         return found->second;
     }
@@ -98,6 +138,9 @@ std::shared_ptr<const SpriteAnimation> AssetCache::trySprite(const std::string& 
     return tryLoad<SpriteAnimation>(failed_, path, [this](const std::string& p) { return sprite(p); });
 }
 std::shared_ptr<const Image> AssetCache::tryImage(const std::string& path) {
+    if (failed_.contains(path)) {
+        refreshUserImage(path);
+    }
     return tryLoad<Image>(failed_, path, [this](const std::string& p) { return image(p); });
 }
 
@@ -121,7 +164,11 @@ void AssetCache::defineFont(const std::string& name, const Json& spec) {
         }
     }
     fontSpecs_[name] = spec;
-    fonts_[name] = std::make_shared<FontSet>(std::move(faces));
+    auto& slot = fonts_[name];
+    if (slot) {
+        retiredFonts_.push_back(std::move(slot));
+    }
+    slot = std::make_shared<FontSet>(std::move(faces));
     ++generation_;
 }
 
@@ -178,15 +225,20 @@ void AssetCache::worker() {
         }
         std::lock_guard lock(mutex_);
         finished_.emplace_back(job.second, std::move(decoded));
+        hasFinished_.store(true, std::memory_order_release);
         ++tickets_[job.first].done;
     }
 }
 
 void AssetCache::collect() {
+    if (!hasFinished_.load(std::memory_order_acquire)) {
+        return;
+    }
     std::vector<std::pair<std::string, Decoded>> ready;
     {
         std::lock_guard lock(mutex_);
         ready.swap(finished_);
+        hasFinished_.store(false, std::memory_order_relaxed);
     }
     for (auto& [path, value] : ready) {
         if (auto* m = std::get_if<std::shared_ptr<const Model>>(&value)) {
@@ -209,6 +261,7 @@ bool AssetCache::reload(const std::filesystem::path& absolute) {
         }
         relative = "@fe/" + relative;
     }
+    ++fileChanges_;
     failed_.erase(relative);
     bool changed = false;
     try {

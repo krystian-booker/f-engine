@@ -10,7 +10,9 @@
 ---   end,
 --- }
 --- ```
---- Tests run as tasks, so they can wait on gameplay.
+--- Tests run as tasks, so they can wait on gameplay. Tasks still running
+--- when a test ends (including ones it started) are cancelled before the
+--- next test.
 local task = require("fe.task")
 
 local test = {}
@@ -59,23 +61,31 @@ local function helpers()
   function t.tick(count)
     for _ = 1, count or 1 do task.frame() end
   end
-  --- Wait (ticking) until predicate is true; fails after `ticks`.
-  function t.wait_until(predicate, ticks, message)
-    for _ = 1, ticks or 600 do
-      if predicate() then return end
+  --- Wait (ticking) until predicate is true; fails once `ticks` ticks have
+  --- passed and at least `wall_seconds` (default 10) of real time, so work on
+  --- engine worker threads (background world loads) gets time to finish
+  --- however fast the build ticks.
+  function t.wait_until(predicate, ticks, message, wall_seconds)
+    local deadline = fe.dev.clock() + (wall_seconds or 10)
+    local count = 0
+    while not predicate() do
+      if count >= (ticks or 600) and fe.dev.clock() >= deadline then
+        error(message or "condition not reached in time", 2)
+      end
       task.frame()
+      count = count + 1
     end
-    error(message or "condition not reached in time", 2)
   end
   return t
 end
 
 local function step()
   fe.harness.tick(1)
-  if not require("fe.game").started then
-    -- Drive tasks and scenes the way fe.game does for a running game.
-    task.update(1 / 60)
-    require("fe.scene").update(1 / 60)
+  local game = require("fe.game")
+  if not game.started then
+    -- Drive both phases the way a running game's entry module does.
+    game.update(1 / 60)
+    game.post_update(1 / 60)
   end
 end
 
@@ -96,6 +106,7 @@ function test.run(modules, filter)
       for _, name in ipairs(names) do
         if not filter or filter == "" or name:find(filter, 1, true) or module_name:find(filter, 1, true) then
           local errors_before = fe.harness.errors()
+          fe.harness.begin_test()
           local result
           local runner = task.named(name, function()
             local success, err = xpcall(cases[name], function(m) return fe.dev.traceback(nil, tostring(m)) end, helpers())
@@ -106,6 +117,7 @@ function test.run(modules, filter)
             step()
             ticks = ticks + 1
           end
+          task.cancel_all()
           if result == true and fe.harness.errors() > errors_before then
             result = "script errors were reported during the test (see log)"
           end
@@ -113,7 +125,6 @@ function test.run(modules, filter)
             passed = passed + 1
           else
             failed = failed + 1
-            runner:cancel()
             print("FAIL " .. module_name .. " :: " .. name .. "\n  " .. tostring(result or "timed out"))
           end
         end

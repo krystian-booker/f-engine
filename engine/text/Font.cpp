@@ -1,6 +1,6 @@
 #include "engine/text/Font.h"
+#include "engine/core/Paths.h"
 #include <cstring>
-#include <fstream>
 #include <optional>
 #include <regex>
 #include <sstream>
@@ -13,10 +13,7 @@ namespace {
 class BitmapFont final : public Font {
 public:
     explicit BitmapFont(const std::filesystem::path& file) {
-        std::ifstream stream(file);
-        if (!stream) {
-            throw std::runtime_error("Cannot open bitmap font " + file.string());
-        }
+        std::istringstream stream(readFile(file));
         const std::regex field(R"re(([A-Za-z]+)=("[^"]*"|[^\s]+))re");
         std::map<int, std::string> pageFiles;
         std::string line;
@@ -38,6 +35,7 @@ public:
             };
             if (type == "common") {
                 lineHeight_ = static_cast<float>(integer("lineHeight"));
+                baseline_ = fields.contains("base") ? static_cast<float>(integer("base")) : lineHeight_;
             } else if (type == "page") {
                 pageFiles[integer("id")] = fields.at("file");
             } else if (type == "char") {
@@ -63,7 +61,7 @@ public:
             if (id != static_cast<int>(pages_.size())) {
                 throw std::runtime_error("BMFont pages must be numbered from zero: " + file.string());
             }
-            pages_.push_back(Image::load(file.parent_path() / name));
+            pages_.push_back(Image::load(resolveInside(file.parent_path(), name)));
         }
         for (const auto& [codepoint, g] : glyphs_) {
             const bool inside = g.page >= 0 && g.page < static_cast<int>(pages_.size()) && g.x >= 0 &&
@@ -75,6 +73,7 @@ public:
         }
     }
     [[nodiscard]] float lineHeight() const override { return lineHeight_; }
+    [[nodiscard]] float baseline() const override { return baseline_; }
     [[nodiscard]] const FontGlyph* glyph(char32_t codepoint) override {
         const auto found = glyphs_.find(codepoint);
         return found == glyphs_.end() ? nullptr : &found->second;
@@ -88,7 +87,7 @@ public:
     [[nodiscard]] bool pixel() const override { return true; }
 
 private:
-    float lineHeight_ = 0;
+    float lineHeight_ = 0, baseline_ = 0;
     std::map<char32_t, FontGlyph> glyphs_;
     std::map<std::pair<char32_t, char32_t>, float> kernings_;
     std::vector<Image> pages_;
@@ -97,11 +96,8 @@ private:
 class TrueTypeFont final : public Font {
 public:
     TrueTypeFont(const std::filesystem::path& file, float size, bool pixel) : pixel_(pixel) {
-        std::ifstream stream(file, std::ios::binary);
-        if (!stream) {
-            throw std::runtime_error("Cannot open font " + file.string());
-        }
-        bytes_.assign(std::istreambuf_iterator<char>(stream), {});
+        const auto bytes = readFile(file);
+        bytes_.assign(bytes.begin(), bytes.end());
         if (size < 4 || size > 256 ||
             !stbtt_InitFont(&info_, bytes_.data(), stbtt_GetFontOffsetForIndex(bytes_.data(), 0))) {
             throw std::runtime_error("Invalid TrueType font or size: " + file.string());
@@ -114,6 +110,7 @@ public:
         addPage();
     }
     [[nodiscard]] float lineHeight() const override { return lineHeight_; }
+    [[nodiscard]] float baseline() const override { return ascent_; }
     [[nodiscard]] const FontGlyph* glyph(char32_t codepoint) override {
         if (const auto found = glyphs_.find(codepoint); found != glyphs_.end()) {
             return found->second ? &*found->second : nullptr;
@@ -217,12 +214,13 @@ FontSet::FontSet(std::vector<std::shared_ptr<Font>> faces) : faces_(std::move(fa
 }
 
 FontSet::Hit FontSet::find(char32_t codepoint) const {
+    const auto& primary = faces_.front();
     for (const auto& face : faces_) {
         if (const auto* glyph = face->glyph(codepoint)) {
-            return {face.get(), glyph, faces_.front()->lineHeight() / face->lineHeight()};
+            const float scale = primary->lineHeight() / face->lineHeight();
+            return {face.get(), glyph, scale, primary->baseline() - face->baseline() * scale};
         }
     }
-    const auto& primary = faces_.front();
-    return {primary.get(), primary->glyph(U'?'), 1};
+    return {primary.get(), primary->glyph(U'?'), 1, 0};
 }
 } // namespace fe

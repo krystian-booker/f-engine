@@ -26,13 +26,34 @@ public:
     }
     // Uniform in [0, 1).
     double unit() { return next() * (1.0 / 4294967296.0); }
-    // Uniform integer in [low, high].
+    // Uniform integer in [low, high] (low when high < low), for any two
+    // 64-bit integers: the span is computed unsigned, so it cannot overflow.
+    // Spans of up to 2^32 values scale one 32-bit draw (the sequence seeded
+    // streams have always produced); wider ones draw 64 bits, rejecting the
+    // few values that would bias the result.
     std::int64_t range(std::int64_t low, std::int64_t high) {
         if (high <= low) {
             return low;
         }
-        const auto span = static_cast<std::uint64_t>(high - low) + 1;
-        return low + static_cast<std::int64_t>(unit() * static_cast<double>(span));
+        const std::uint64_t span = static_cast<std::uint64_t>(high) - static_cast<std::uint64_t>(low) + 1;
+        std::uint64_t offset = 0;
+        if (span != 0 && span <= (std::uint64_t{1} << 32u)) {
+            offset = static_cast<std::uint64_t>(unit() * static_cast<double>(span));
+        } else if (span == 0) {
+            offset = next64(); // the whole 64-bit range
+        } else {
+            const std::uint64_t threshold = (0 - span) % span; // 2^64 mod span
+            std::uint64_t draw = next64();
+            while (draw < threshold) {
+                draw = next64();
+            }
+            offset = draw % span;
+        }
+        return static_cast<std::int64_t>(static_cast<std::uint64_t>(low) + offset);
+    }
+    std::uint64_t next64() {
+        const std::uint64_t high = next();
+        return (high << 32u) | next();
     }
     [[nodiscard]] std::uint64_t state() const { return state_; }
 

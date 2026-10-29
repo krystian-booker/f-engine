@@ -2,6 +2,7 @@
 local data = require("fe.data")
 local signal = require("fe.signal")
 local state = require("fe.state")
+local tablex = require("fe.tablex")
 
 local inventory = {
   settings = { currency = "Gold", max_money = 9999999 },
@@ -23,7 +24,7 @@ function inventory.add(id, count)
   count = count or 1
   local item = data.get("items", id)
   local current = inventory.count(id)
-  local added = math.max(0, math.min(count, item.stack - current))
+  local added = tablex.clamp(count, 0, item.stack - current)
   if added > 0 then
     record.items[id] = current + added
     inventory.changed:emit(id, record.items[id])
@@ -62,7 +63,7 @@ function inventory.money()
 end
 
 function inventory.add_money(amount)
-  record.money = math.max(0, math.min(inventory.settings.max_money, record.money + amount))
+  record.money = tablex.clamp(record.money + amount, 0, inventory.settings.max_money)
   inventory.changed:emit(nil, record.money)
   return record.money
 end

@@ -65,6 +65,10 @@ void Canvas::line(glm::vec2 from, glm::vec2 to, std::uint32_t color, float thick
 }
 
 glm::ivec2 Canvas::imageSize(const std::string& path) {
+    if (path.starts_with(TargetPrefix)) {
+        const auto found = targets_.find(std::string_view(path).substr(TargetPrefix.size()));
+        return found == targets_.end() ? glm::ivec2(0) : found->second;
+    }
     const auto image = text_.assets().tryImage(path);
     return image ? glm::ivec2(image->width, image->height) : glm::ivec2(0);
 }
@@ -157,8 +161,16 @@ void Canvas::glyphs(const TextLayout& layout, glm::vec2 origin, const TextOption
                            glyph.source->y / static_cast<float>(page.height),
                            (glyph.source->x + glyph.source->width) / static_cast<float>(page.width),
                            (glyph.source->y + glyph.source->height) / static_cast<float>(page.height));
-        quad({CanvasTexture::Kind::FontPage, {}, glyph.font, glyph.source->page, !glyph.font->pixel()}, area,
-             uv, color);
+        const CanvasTexture texture{
+            CanvasTexture::Kind::FontPage, {}, glyph.font, glyph.source->page, !glyph.font->pixel()};
+        const auto first = quads_.size();
+        for (int copy = 0; copy < (glyph.syntheticBold ? 2 : 1); ++copy) {
+            quad(texture, {area.x + static_cast<float>(copy), area.y, area.w, area.h}, uv, color);
+        }
+        for (auto i = first; i < quads_.size(); ++i) {
+            quads_[i].effect = static_cast<std::uint8_t>(glyph.effect);
+            quads_[i].phase = glyph.phase;
+        }
     }
 }
 
@@ -221,8 +233,7 @@ void Canvas::popClip() {
 void Canvas::pushTransform(const Transform2D& t) {
     const float c = std::cos(t.rotation), s = std::sin(t.rotation);
     // translate * (origin) * rotate * scale * (-origin)
-    glm::mat3 local(1);
-    local = glm::mat3(1, 0, 0, 0, 1, 0, -t.origin.x, -t.origin.y, 1);
+    glm::mat3 local(1, 0, 0, 0, 1, 0, -t.origin.x, -t.origin.y, 1);
     local = glm::mat3(t.scale.x, 0, 0, 0, t.scale.y, 0, 0, 0, 1) * local;
     local = glm::mat3(c, s, 0, -s, c, 0, 0, 0, 1) * local;
     local = glm::mat3(1, 0, 0, 0, 1, 0, t.origin.x + t.translate.x, t.origin.y + t.translate.y, 1) * local;

@@ -7,11 +7,27 @@
 ---   new_game = function() ... field.start("town", "entry") end,
 --- }
 --- ```
---- It loads settings, input, sounds, the RPG database and quests, connects
---- the field to the RPG kit and main menu, shows the title screen and wires
---- Continue to the save system. Every step is optional or replaceable;
---- skip this module entirely for a different structure.
+--- It loads settings and input, localisation, sounds, quests (when
+--- data/quests.json exists) and the RPG kit when the game uses it, wires
+--- the field's menu button, shows the title screen and connects Continue to
+--- the save system. New Game and Continue cancel running tasks and reset
+--- field locks, event holds, pauses, time scales and toasts before
+--- starting. New Game is also `fe.devtools.new_game` (the editor's "Play
+--- from here").
+---
+--- Options: `title`, `subtitle`, `title_background`, `language` (used until
+--- the player picks one; otherwise the system language when the game ships
+--- it),
+--- `new_game` (required), `continue(slot)` (default `field.resume()`),
+--- `setup()` (after loading, before the title; define game actions here),
+--- `skip_title`, `validate()`, `rpg` (default: true when data/actors.json
+--- exists; installs fe.rpg and resets party and inventory on new games) and
+--- `menu` (false, or a function run in a task when the menu button is
+--- pressed; default: the fe.ui.screens.menu screen when the RPG kit is on).
+--- Every step is optional or replaceable; skip this module entirely for a
+--- different structure.
 local config = require("fe.config")
+local devtools = require("fe.devtools")
 local field = require("fe.field")
 local game = require("fe.game")
 local i18n = require("fe.i18n")
@@ -22,20 +38,38 @@ local task = require("fe.task")
 
 local starter = {}
 
----@param options {title?: string, subtitle?: string, new_game: fun(), continue?: fun(slot: string), setup?: fun(), menu?: boolean, skip_title?: boolean, language?: string, validate?: fun(), title_background?: fun()}
+---@param options {title?: string, subtitle?: string, new_game: fun(), continue?: fun(slot: string), setup?: fun(), menu?: boolean|fun(), rpg?: boolean, skip_title?: boolean, language?: string, validate?: fun(), title_background?: fun()}
 function starter.main(options)
-  local function begin_new_game()
+  local rpg = options.rpg
+  if rpg == nil then rpg = fe.fs.exists("data/actors.json") end
+  local menu = options.menu
+  if menu == nil or menu == true then
+    menu = rpg and function() require("fe.ui.screens.menu").open() end
+  end
+
+  local function start_over()
     task.cancel_all()
+    field.reset()
+    game.reset_time()
+    require("fe.ui").clear_toasts()
+  end
+
+  local function begin_new_game()
+    start_over()
     state.reset()
-    require("fe.rpg.party").reset()
-    require("fe.rpg.inventory").reset()
+    if rpg then
+      require("fe.rpg.party").reset()
+      require("fe.rpg.inventory").reset()
+    end
     options.new_game()
   end
 
   --- Exposed for tests and tools: start over from scratch.
   starter.new_game = begin_new_game
+  devtools.new_game = begin_new_game
 
   local function continue(slot)
+    start_over()
     if options.continue then
       options.continue(slot)
     elseif not field.resume() then
@@ -45,24 +79,26 @@ function starter.main(options)
   end
 
   local function load_everything()
-    config.load()
-    i18n.set_language(options.language or config.get("language"))
+    config.load({ language = options.language })
     i18n.install()
     sound.load()
-    require("fe.rpg.database").load()
-    require("fe.quest").load()
-    require("fe.rpg").install()
+    if rpg then
+      require("fe.rpg.database").load()
+      require("fe.rpg").install()
+    end
+    if fe.fs.exists("data/quests.json") then require("fe.quest").load() end
   end
 
   return game.main({
     start = function()
       load_everything()
-      if options.menu ~= false then
+      if menu then
         field.menu_requested:connect(function()
-          task.named("menu", require("fe.ui.screens.menu").open)
-        end)
+          task.named("menu", menu)
+        end, 0, "fe.starter.menu")
       end
       if options.setup then options.setup() end
+      config.apply_bindings(true)
       if options.skip_title then
         begin_new_game()
         return

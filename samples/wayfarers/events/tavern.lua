@@ -16,6 +16,6 @@ return function(ev)
     dialogue.say("Barkeep", "Morning already! Safe roads.")
   elseif answer == 2 then
     dialogue.close()
-    require("fe.ui.screens.menu").pages[5].run()
+    require("fe.ui.screens.menu").page("formation").run()
   end
 end

@@ -2,22 +2,41 @@
 #include "engine/assets/Image.h"
 #include "engine/core/Log.h"
 #include "engine/platform/Window.h"
+#include "engine/render/FrameRenderer.h"
 #include <bx/allocator.h>
 #include <cstdarg>
+#include <cstdio>
 #include <cstring>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 #include <stdexcept>
 
 namespace fe {
-// bgfx callbacks: screenshots become PNG files; everything else is quiet.
+namespace {
+constexpr std::uint32_t ResetFlags = BGFX_RESET_MAXANISOTROPY;
+}
+
+// bgfx callbacks: screenshots become PNG files; debug builds log bgfx traces
+// (including its warnings).
 struct Renderer::Callback final : bgfx::CallbackI {
     void fatal(const char* file, std::uint16_t line, bgfx::Fatal::Enum, const char* message) override {
         log(LogLevel::Error,
             std::string("bgfx fatal at ") + file + ":" + std::to_string(line) + ": " + message);
         std::abort();
     }
+#ifdef NDEBUG
     void traceVargs(const char*, std::uint16_t, const char*, va_list) override {}
+#else
+    void traceVargs(const char* file, std::uint16_t line, const char* format, va_list arguments) override {
+        char message[1024];
+        std::vsnprintf(message, sizeof(message), format, arguments);
+        std::string text = message;
+        while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) {
+            text.pop_back();
+        }
+        log(LogLevel::Debug, std::string("bgfx ") + file + ":" + std::to_string(line) + ": " + text);
+    }
+#endif
     void profilerBegin(const char*, std::uint32_t, const char*, std::uint16_t) override {}
     void profilerBeginLiteral(const char*, std::uint32_t, const char*, std::uint16_t) override {}
     void profilerEnd() override {}
@@ -26,7 +45,12 @@ struct Renderer::Callback final : bgfx::CallbackI {
     void cacheWrite(std::uint64_t, const void*, std::uint32_t) override {}
     void screenShot(const char* path, std::uint32_t width, std::uint32_t height, std::uint32_t pitch,
                     bgfx::TextureFormat::Enum format, const void* data, std::uint32_t, bool flip) override {
-        const bool bgra = format != bgfx::TextureFormat::RGBA8;
+        if (format != bgfx::TextureFormat::RGBA8 && format != bgfx::TextureFormat::BGRA8) {
+            log(LogLevel::Error, "Screenshot skipped: unsupported back buffer format " +
+                                     std::to_string(static_cast<int>(format)));
+            return;
+        }
+        const bool bgra = format == bgfx::TextureFormat::BGRA8;
         Image image;
         image.width = static_cast<int>(width);
         image.height = static_cast<int>(height);
@@ -65,11 +89,15 @@ Renderer::Renderer(Window& window, const std::filesystem::path& root)
     width_ = width;
     height_ = height;
     bgfx::Init init;
+    init.platformData.type = window.handleType();
     init.swapChain = window.swapChain();
     init.swapChain.width = static_cast<std::uint32_t>(width);
     init.swapChain.height = static_cast<std::uint32_t>(height);
-    init.reset = BGFX_RESET_VSYNC;
+    init.reset = ResetFlags | BGFX_RESET_VSYNC;
     init.callback = callback_.get();
+    // Sprites, particles and overlays stream through transient buffers.
+    init.limits.maxTransientVbSize = 32u << 20u;
+    init.limits.maxTransientIbSize = 8u << 20u;
 #if defined(__APPLE__)
     const bgfx::RendererType::Enum preferred[] = {bgfx::RendererType::Metal};
 #elif defined(_WIN32)
@@ -119,6 +147,11 @@ Renderer::~Renderer() {
     bgfx::shutdown();
 }
 
+void Renderer::setVsync(bool on) {
+    resetPending_ = resetPending_ || on != vsync_;
+    vsync_ = on;
+}
+
 void Renderer::processEvent(const SDL_Event& event) {
     ImGui_ImplSDL3_ProcessEvent(&event);
 }
@@ -128,13 +161,14 @@ bool Renderer::beginFrame() {
     if (width <= 0 || height <= 0 || window_.minimized()) {
         return false;
     }
-    if (width != width_ || height != height_) {
+    if (width != width_ || height != height_ || resetPending_) {
         width_ = width;
         height_ = height;
+        resetPending_ = false;
         auto swapChain = window_.swapChain();
         swapChain.width = static_cast<std::uint32_t>(width);
         swapChain.height = static_cast<std::uint32_t>(height);
-        bgfx::reset(BGFX_RESET_VSYNC, &swapChain);
+        bgfx::reset(ResetFlags | (vsync_ ? BGFX_RESET_VSYNC : 0u), &swapChain);
     }
     bgfx::setViewRect(0, 0, 0, static_cast<std::uint16_t>(width), static_cast<std::uint16_t>(height));
     bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x000000ff, 1.0f, 0);
@@ -144,10 +178,10 @@ bool Renderer::beginFrame() {
     return true;
 }
 
-void Renderer::endFrame() {
+std::uint32_t Renderer::endFrame() {
     ImGui::Render();
-    imgui_->render(ImGui::GetDrawData(), 255);
-    bgfx::frame();
+    imgui_->render(ImGui::GetDrawData(), static_cast<std::uint16_t>(bgfx::getCaps()->limits.maxViews - 1));
+    return bgfx::frame();
 }
 
 void Renderer::capture(const std::filesystem::path& file) {
@@ -163,6 +197,9 @@ const char* Renderer::name() const {
 
 void Renderer::reloadShaders() {
     imgui_->reload(shaderRoot_);
-    log(LogLevel::Info, "UI shaders reloaded");
+    if (frame_) {
+        frame_->reload();
+    }
+    log(LogLevel::Info, "Shaders reloaded");
 }
 } // namespace fe

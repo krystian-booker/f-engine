@@ -22,7 +22,8 @@ struct TextOptions {
     std::uint32_t outline = 0;                          // rgba, 0 = none
 };
 
-// Shared text services: colors, icons and the script tag resolver.
+// Shared text services: colors, icons and the script tag resolver. A font
+// named "<name>.bold", when defined, is the {b} face of font "<name>".
 class TextSystem {
 public:
     explicit TextSystem(AssetCache& assets) : assets_(assets) {}
@@ -42,6 +43,6 @@ private:
     ColorPalette palette_;
     std::map<std::string, IconDef> icons_;
     MarkupResolver resolver_;
-    std::shared_ptr<FontSet> current_;
+    std::shared_ptr<FontSet> current_, currentBold_;
 };
 } // namespace fe

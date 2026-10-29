@@ -12,12 +12,12 @@ local party = {
 local record = state.section("party", function() return { roster = {}, active = {} } end)
 local cache = {}
 
-state.reloaded:connect(function() cache = {} end)
-
---- The Actor object for an id.
+--- The Actor object for an id. Objects are cached while their saved
+--- record is current; after a load, reset or mock battle a fresh one wraps
+--- the restored record.
 function party.actor(id)
   local actor = cache[id]
-  if not actor then
+  if not actor or not actor:current() then
     actor = Actor(id)
     cache[id] = actor
   end

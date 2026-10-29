@@ -1,10 +1,17 @@
 --- The UI theme: window skin, colours, font and sounds used by fe.ui and
 --- the default screens. Games change it with `theme.set{...}`.
+---
+--- Presets: `theme.use("high_contrast")` switches to plain black windows
+--- with white borders and brighter text (fe.ui applies it for the
+--- `high_contrast` setting); `theme.use("default")` restores the values
+--- the theme had before the first switch, including the game's own
+--- `theme.set` changes. Add presets to `theme.presets`.
 local theme = {
-  skin = "@fe/assets/ui/window.png",
+  skin = "@fe/assets/ui/window.png",   -- false: plain windows (window_fill, window_border)
   skin_border = 4,
   cursor = "@fe/assets/ui/cursor.png",
   font = "default",
+  text_size = 10,          -- the font's size; text scaling multiplies it
   padding = 6,
   row_height = 12,
   text = 0xe8ecf4ff,
@@ -16,17 +23,67 @@ local theme = {
   heading = 0xffd27aff,
   good = 0x8ff0a4ff,
   bad = 0xff8a7aff,
+  window_fill = 0x101a34ee,
+  window_border = 0x101a34ee,
   gauge_back = 0x0a1024ff,
   gauges = { hp = 0x6fd49fff, mp = 0x7fa6f6ff, sp = 0xf0c46cff, tp = 0xd99cf2ff, exp = 0xf2e36cff },
   sounds = { move = "cursor", confirm = "confirm", cancel = "cancel", buzzer = "buzzer" },
   open_time = 0.12,
+  current = "default",
+  presets = {
+    high_contrast = {
+      skin = false, window_fill = 0x000000ff, window_border = 0xffffffff, text = 0xffffffff, muted = 0xd8d8d8ff,
+      highlight = 0xffff40ff, heading = 0xffff40ff, disabled = 0xa0a0a0ff, shadow = 0x000000ff,
+      good = 0x60ff80ff, bad = 0xff6060ff, gauge_back = 0x000000ff,
+    },
+  },
 }
 
---- Override theme values.
+--- Theme colours usable in markup as {color:name}.
+theme.markup_colors = { "highlight", "muted", "good", "bad", "heading" }
+
+--- Register the markup colours with fe.text (theme.set does this).
+function theme.apply()
+  for _, name in ipairs(theme.markup_colors) do
+    fe.text.color(name, theme[name])
+  end
+end
+
+--- Override theme values and re-register the markup colours.
 function theme.set(values)
   for key, value in pairs(values) do
     theme[key] = value
   end
+  theme.apply()
 end
+
+--- Switch to a preset by name ("default" restores the values replaced by
+--- the first switch away from it).
+---@param name string
+function theme.use(name)
+  if name == theme.current then return end
+  local presets = theme.presets
+  if theme.current == "default" then
+    local saved = {}
+    for preset, values in pairs(presets) do
+      if preset ~= "default" then
+        for key in pairs(values) do saved[key] = theme[key] end
+      end
+    end
+    presets.default = saved
+  end
+  local values = presets[name]
+  if not values then error("unknown theme preset '" .. tostring(name) .. "'", 2) end
+  if theme.current ~= "default" and name ~= "default" then theme.set(presets.default) end
+  theme.set(values)
+  theme.current = name
+end
+
+--- Re-register the markup colours after a hot reload.
+function theme.__reload()
+  theme.apply()
+end
+
+theme.apply()
 
 return theme

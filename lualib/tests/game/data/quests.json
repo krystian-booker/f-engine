@@ -1,0 +1,11 @@
+[
+  {
+    "id": "relics",
+    "name": "Lost Relics",
+    "stages": [
+      {"id": "search", "text": "Search the ruins.",
+       "objectives": [{"id": "shards", "text": "Collect shards", "count": 3}, {"id": "key", "text": "Find the key"}]},
+      {"id": "return", "text": "Return to the elder."}
+    ]
+  }
+]

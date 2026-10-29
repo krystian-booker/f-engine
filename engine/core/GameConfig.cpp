@@ -16,6 +16,7 @@ GameConfig GameConfig::load(const std::filesystem::path& folder) {
         config.virtualWidth = resolution.value("width", config.virtualWidth);
         config.virtualHeight = resolution.value("height", config.virtualHeight);
         config.pixelsPerUnit = data.value("pixels_per_unit", config.pixelsPerUnit);
+        config.pauseOnFocusLoss = data.value("pause_on_focus_loss", config.pauseOnFocusLoss);
         const bool valid =
             !config.title.empty() && !config.entry.empty() && config.pixelsPerUnit >= 1 &&
             config.pixelsPerUnit <= 4096 && config.windowWidth >= 64 && config.windowHeight >= 64 &&

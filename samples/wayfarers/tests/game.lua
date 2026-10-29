@@ -71,15 +71,110 @@ return {
     t.ok(broken >= before * 2 - 2, "broken targets take double damage")
   end,
 
-  ["boosting spends BP for extra hits"] = function(t)
+  ["boosting commits BP for extra hits, paid when the action happens"] = function(t)
     new_game(t)
     local b = battle_with("wolves")
     local rook = b.battlers[1]
     rook:set_resource("bp", 3)
     local action = { kind = "skill", user = rook, skill = "attack", targets = { b.battlers[2] } }
     require("fe.battle.sideview").modifier.apply(action, 2)
+    t.eq(action.hits, nil, "nothing changes while choosing")
+    t.eq(rook:resource("bp"), 3, "nothing is spent while choosing")
+    local results = b:perform(action)
     t.eq(action.hits, 3)
+    t.eq(#results, 3)
     t.eq(rook:resource("bp"), 1)
+    b:notify("on_round", 2)
+    t.eq(rook:resource("bp"), 1, "no BP gained in a round spent boosting")
+    b:notify("on_round", 3)
+    t.eq(rook:resource("bp"), 2)
+  end,
+
+  ["break wears off under round order and shields recover"] = function(t)
+    new_game(t)
+    local b = battle_with("wolves")
+    local rook, wolf, other = b.battlers[1], b.battlers[2], b.battlers[3]
+    rook.auto = true
+    local orders, expired, restored = {}, false, false
+    b.events:connect(function(name, payload)
+      if name == "order" then orders[#orders + 1] = payload end
+      if name == "states_expired" and payload.battler == wolf then expired = true end
+      if name == "shield_restored" and payload == wolf then restored = true end
+    end)
+    b:add_rules({
+      on_start = function(battle)
+        wolf.data.shield = 1
+        effects.resolve({ user = rook, targets = { wolf }, source = data.get("skills", "true_shot"), battle = battle,
+          random = fe.random.new(1) })
+      end,
+      before_action = function(_, action) action.cancelled = true end,
+      outcome = function(battle) if battle.round > 3 then return "victory" end end,
+    })
+    b:run()
+    t.ok(orders[1][#orders[1]] == wolf, "broken enemies act last")
+    t.ok(orders[1][1] == other or orders[1][1] == rook)
+    t.ok(expired, "break wears off after two turns")
+    t.ok(not wolf:has_state("broken"))
+    t.ok(restored, "shields recover")
+    t.eq(wolf.data.shield, wolf.data.max_shield)
+  end,
+
+  ["turns come in Octopath order: chosen on the turn, with the next round previewed"] = function(t)
+    new_game(t)
+    local scheduler = require("fe.battle").settings.scheduler()
+    t.eq(scheduler.settings.choose, "turn")
+    local rules = require("battle.rules")
+    local b = Battle({ rules = rules, scheduler = scheduler, troop = "wolves", random = fe.random.new(4) })
+    b:populate(party.members(), "wolves")
+    local on_turn, predicted, actual = true, nil, nil
+    b:add_rules({
+      player_controller = function(battle, me)
+        on_turn = on_turn and battle.current == me
+        return { kind = "defend", user = me }
+      end,
+      on_turn_start = function(battle)
+        if battle.round == 1 and not predicted then predicted = select(2, scheduler.preview(battle)) end
+      end,
+      before_action = function(_, action) if action.kind ~= "defend" then action.cancelled = true end end,
+      outcome = function(battle) if battle.round > 2 then return "victory" end end,
+    })
+    b.events:connect(function(name, payload) if name == "order" and b.round == 2 then actual = payload end end)
+    b:run()
+    t.ok(on_turn, "Rook chose on his own turn")
+    t.eq(#actual, #predicted)
+    for i = 1, #actual do t.ok(actual[i] == predicted[i], "preview slot " .. i) end
+  end,
+
+  ["the Bandit Chief acts twice a turn, three times once badly hurt"] = function(t)
+    new_game(t)
+    local b = battle_with("bandits")
+    local chief = b.battlers[2]
+    t.eq(chief.id:match("^[%w_]+"), "bandit_chief")
+    local acted = 0
+    b.events:connect(function(name, payload) if name == "action" and payload.user == chief then acted = acted + 1 end end)
+    b:turn(chief)
+    t.eq(acted, 2)
+    chief:set_resource("hp", chief:max_resource("hp") // 2)
+    b:turn(chief)
+    t.eq(acted, 5)
+    chief:add_state("broken", 1)
+    b:turn(chief)
+    t.eq(acted, 5, "a broken chief loses every action")
+  end,
+
+  ["divine skills need a full LP gauge, filled by taking hits"] = function(t)
+    new_game(t)
+    local b = battle_with("wolves")
+    local rook, wolf = b.battlers[1], b.battlers[2]
+    rook:set_resource("lp", 0)
+    local volley = { kind = "skill", user = rook, skill = "hunters_volley", targets = b:opponents(rook) }
+    t.eq(b:perform(volley), nil, "an empty gauge pays for nothing")
+    for _ = 1, 3 do b:perform({ kind = "skill", user = wolf, skill = "bite", targets = { rook } }) end
+    t.ok(require("fe.battle.limit").ready(rook))
+    local results = b:perform({ kind = "skill", user = rook, skill = "hunters_volley", targets = b:opponents(rook) })
+    t.ok(results ~= nil and #results == 4, "two hits on both wolves")
+    t.ok(b.battlers[2]:has_state("broken") and b.battlers[3]:has_state("broken"), "two bow hits break each wolf")
+    t.eq(rook:resource("lp"), 2, "the gauge was spent, then each break gave a point back")
   end,
 
   ["Selene joins and both chapters progress"] = function(t)

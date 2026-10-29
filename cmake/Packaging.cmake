@@ -23,6 +23,9 @@ if(FENGINE_BUILD_RUNTIME)
   fengine_license(bimg "${BIMG_DIR}/LICENSE")
   fengine_license(ImGui "${imgui_SOURCE_DIR}/LICENSE.txt")
   fengine_license(miniaudio "${miniaudio_SOURCE_DIR}/LICENSE")
+  # bgfx's shader header, for game shaders compiled by tools/package_game.py
+  # (--shader-include <build>/shader-include).
+  configure_file("${BGFX_DIR}/src/bgfx_shader.sh" "${PROJECT_BINARY_DIR}/shader-include/bgfx_shader.sh" COPYONLY)
   foreach(dependency IN ITEMS BGFX BX BIMG)
     file(GLOB_RECURSE notices CONFIGURE_DEPENDS
       "${${dependency}_DIR}/3rdparty/*LICENSE*" "${${dependency}_DIR}/3rdparty/*license*"
@@ -46,7 +49,9 @@ install(DIRECTORY "${PROJECT_SOURCE_DIR}/samples/" DESTINATION games
 install(DIRECTORY "${FENGINE_LICENSE_DIR}/" DESTINATION licenses)
 install(FILES "${PROJECT_SOURCE_DIR}/README.md" DESTINATION share/doc/fengine)
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/docs/" DESTINATION share/doc/fengine)
-if(MSVC)
+# The Visual C++ runtime DLLs ship only when the engine links the DLL runtime
+# (MultiThreaded and MultiThreadedDebug link it statically).
+if(MSVC AND NOT CMAKE_MSVC_RUNTIME_LIBRARY MATCHES "^MultiThreaded(Debug)?$")
   set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION bin)
   include(InstallRequiredSystemLibraries)
 endif()

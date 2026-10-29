@@ -17,18 +17,18 @@ ImGuiRenderer::ImGuiRenderer(const std::filesystem::path& root) {
         .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
         .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
         .end();
-    program_ = loadProgram(root, "vs_ui", "fs_ui");
-    sampler_ = bgfx::createUniform("s_texture", bgfx::UniformType::Sampler);
+    program_ = Program(loadProgram(root, "vs_ui", "fs_ui"));
+    sampler_ = Uniform(bgfx::createUniform("s_texture", bgfx::UniformType::Sampler));
     unsigned char* pixels;
     int width, height;
     ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
-    font_ = bgfx::createTexture2D(static_cast<std::uint16_t>(width), static_cast<std::uint16_t>(height),
-                                  false, 1, bgfx::TextureFormat::RGBA8,
-                                  BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT | BGFX_SAMPLER_U_CLAMP |
-                                      BGFX_SAMPLER_V_CLAMP,
-                                  bgfx::copy(pixels, static_cast<std::uint32_t>(width * height * 4)));
+    font_ = Texture(bgfx::createTexture2D(
+        static_cast<std::uint16_t>(width), static_cast<std::uint16_t>(height), false, 1,
+        bgfx::TextureFormat::RGBA8,
+        BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP,
+        bgfx::copy(pixels, static_cast<std::uint32_t>(width * height * 4))));
     ImGuiIO& io = ImGui::GetIO();
-    io.Fonts->SetTexID(static_cast<ImTextureID>(font_.idx + 1));
+    io.Fonts->SetTexID(static_cast<ImTextureID>(font_.get().idx + 1));
     io.BackendRendererName = "fengine_bgfx";
     io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
 }
@@ -37,18 +37,9 @@ ImGuiRenderer::~ImGuiRenderer() {
     io.Fonts->SetTexID(0);
     io.BackendRendererName = nullptr;
     io.BackendFlags &= ~ImGuiBackendFlags_RendererHasVtxOffset;
-    if (bgfx::isValid(font_))
-        bgfx::destroy(font_);
-    if (bgfx::isValid(sampler_))
-        bgfx::destroy(sampler_);
-    if (bgfx::isValid(program_))
-        bgfx::destroy(program_);
 }
 void ImGuiRenderer::reload(const std::filesystem::path& root) {
-    auto replacement = loadProgram(root, "vs_ui", "fs_ui");
-    if (bgfx::isValid(program_))
-        bgfx::destroy(program_);
-    program_ = replacement;
+    program_ = Program(loadProgram(root, "vs_ui", "fs_ui"));
 }
 void ImGuiRenderer::render(ImDrawData* data, std::uint16_t view) {
     const auto width = static_cast<int>(data->DisplaySize.x * data->FramebufferScale.x);
@@ -98,10 +89,10 @@ void ImGuiRenderer::render(ImDrawData* data, std::uint16_t view) {
             bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
                            BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA));
             const bgfx::TextureHandle texture{static_cast<std::uint16_t>(command.GetTexID() - 1)};
-            bgfx::setTexture(0, sampler_, texture);
+            bgfx::setTexture(0, sampler_.get(), texture);
             bgfx::setVertexBuffer(0, &vb, command.VtxOffset, vertices - command.VtxOffset);
             bgfx::setIndexBuffer(&ib, command.IdxOffset, command.ElemCount);
-            bgfx::submit(view, program_);
+            bgfx::submit(view, program_.get());
         }
     }
 }

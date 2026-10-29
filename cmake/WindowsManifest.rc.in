@@ -1,1 +1,1 @@
-1 24 "@PROJECT_SOURCE_DIR@/apps/runtime/fengine.manifest"
+1 24 "@PROJECT_BINARY_DIR@/fengine.manifest"

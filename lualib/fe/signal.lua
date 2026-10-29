@@ -5,7 +5,11 @@
 --- local disconnect = on_hit:connect(function(amount) print(amount) end)
 --- on_hit:emit(12)
 --- disconnect()
+--- on_hit:connect(show_damage, 0, "hud.damage")   -- keyed: connecting again replaces it
 --- ```
+--- Module top-level code runs again on hot reload, so kits connect their
+--- listeners with a key; a second connect with the same key replaces the
+--- first instead of adding another.
 local signal = {}
 
 ---@class Signal
@@ -14,16 +18,27 @@ Signal.__index = Signal
 
 ---@return Signal
 function signal.new()
-  return setmetatable({ listeners = {}, emitting = 0 }, Signal)
+  return setmetatable({ listeners = {} }, Signal)
 end
 
---- Add a listener; returns a function that removes it.
+--- Add a listener; returns a function that removes it. With a `key`, an
+--- earlier listener connected with the same key is removed first.
 ---@param fn function
 ---@param priority? number listeners with higher priority run first
+---@param key? any
 ---@return fun()
-function Signal:connect(fn, priority)
-  local entry = { fn = fn, priority = priority or 0 }
+function Signal:connect(fn, priority, key)
+  local entry = { fn = fn, priority = priority or 0, key = key }
   local list = self.listeners
+  if key ~= nil then
+    for i, other in ipairs(list) do
+      if other.key == key then
+        other.removed = true
+        table.remove(list, i)
+        break
+      end
+    end
+  end
   local index = #list + 1
   for i, other in ipairs(list) do
     if entry.priority > other.priority then

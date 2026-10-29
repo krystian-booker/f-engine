@@ -3,7 +3,8 @@
 ---
 --- A scene is any table with optional methods:
 ---   enter(self, ...), leave(self), pause(self), resume(self),
----   update(self, dt), draw(self)
+---   update(self, dt), post_update(self, dt), draw(self)
+--- (`post_update` runs after the worlds moved this tick; see fe.game)
 --- and optional fields:
 ---   name, opaque (hides scenes below when drawing),
 ---   blocks_update (default true: scenes below stop updating).
@@ -105,7 +106,7 @@ function scene.find(name)
   end
 end
 
-function scene.update(dt)
+local function run_updates(method, dt)
   flush()
   walking = true
   local first = 1
@@ -116,10 +117,21 @@ function scene.update(dt)
   local snapshot = { table.unpack(stack) }
   for i = first, #snapshot do
     local s = snapshot[i]
-    if s.update then s:update(dt) end
+    if s[method] then s[method](s, dt) end
   end
   walking = false
   flush()
+end
+
+--- Update the top scene and the scenes it does not block.
+function scene.update(dt)
+  run_updates("update", dt)
+end
+
+--- Call `post_update` on the same scenes `update` reaches, after the
+--- worlds moved (fe.game does this in the entry module's post_update).
+function scene.post_update(dt)
+  run_updates("post_update", dt)
 end
 
 function scene.draw()

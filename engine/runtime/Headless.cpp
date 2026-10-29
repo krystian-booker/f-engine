@@ -2,40 +2,84 @@
 #include "engine/core/Log.h"
 #include "engine/core/Paths.h"
 #include "engine/runtime/Engine.h"
-#include <algorithm>
 #include <cstring>
 #include <iostream>
+#include <random>
 
 namespace fe {
 std::filesystem::path findLibraryRoot(const std::filesystem::path& executable) {
-    auto folder = std::filesystem::weakly_canonical(executable).parent_path();
-    for (int depth = 0; depth < 6 && !folder.empty(); ++depth) {
-        for (const auto& candidate : {folder / "lualib", folder / "share" / "fengine" / "lualib"}) {
-            if (std::filesystem::is_regular_file(candidate / "fe" / "init.lua")) {
+    const auto folder = std::filesystem::weakly_canonical(executable).parent_path();
+    const auto isLibrary = [](const std::filesystem::path& candidate) {
+        mountFolderPack(candidate);
+        return isFile(candidate / "fe" / "init.lua");
+    };
+    for (const auto& candidate : {folder / "lualib", folder.parent_path() / "Resources" / "lualib",
+                                  folder / "share" / "fengine" / "lualib"}) {
+        if (isLibrary(candidate)) {
+            return candidate;
+        }
+    }
+#if FENGINE_DEV
+    // Development builds also run from build trees next to the sources.
+    auto parent = folder;
+    for (int depth = 0; depth < 6 && parent != parent.parent_path(); ++depth) {
+        parent = parent.parent_path();
+        for (const auto& candidate : {parent / "lualib", parent / "share" / "fengine" / "lualib"}) {
+            if (isLibrary(candidate)) {
                 return candidate;
             }
         }
-        if (folder == folder.parent_path()) {
-            break;
-        }
-        folder = folder.parent_path();
     }
 #ifdef FENGINE_SOURCE_LUALIB
     return FENGINE_SOURCE_LUALIB;
-#else
-    throw std::runtime_error("Cannot find the engine's lualib folder");
 #endif
+#endif
+    throw std::runtime_error("Cannot find the engine's lualib folder next to " + folder.string());
 }
 
 namespace {
-std::unique_ptr<Engine> headlessEngine(const std::filesystem::path& game,
-                                       const std::filesystem::path& lualib) {
+// A fresh user-data folder for one headless run, removed afterwards. Runs
+// never share one, so parallel test processes cannot wipe each other's saves.
+class ScratchFolder {
+public:
+    explicit ScratchFolder(const std::filesystem::path& game) {
+        auto name = std::filesystem::weakly_canonical(game).filename().string();
+        if (name.empty()) {
+            name = "game";
+        }
+        const auto base = std::filesystem::temp_directory_path() / "fengine-headless";
+        std::filesystem::create_directories(base);
+        std::random_device entropy;
+        for (int attempt = 0; attempt < 16 && path_.empty(); ++attempt) {
+            const auto candidate = base / (name + "-" + std::to_string(entropy()));
+            if (std::filesystem::create_directory(candidate)) {
+                path_ = candidate;
+            }
+        }
+        if (path_.empty()) {
+            throw std::runtime_error("Cannot create a user data folder in " + base.string());
+        }
+    }
+    ~ScratchFolder() {
+        std::error_code ec;
+        std::filesystem::remove_all(path_, ec);
+    }
+    ScratchFolder(const ScratchFolder&) = delete;
+    ScratchFolder& operator=(const ScratchFolder&) = delete;
+    [[nodiscard]] const std::filesystem::path& path() const { return path_; }
+
+private:
+    std::filesystem::path path_;
+};
+
+std::unique_ptr<Engine> headlessEngine(const std::filesystem::path& game, const std::filesystem::path& lualib,
+                                       const ScratchFolder& userData) {
     EngineOptions options;
     options.gameRoot = game;
     options.libraryRoot = lualib;
-    options.userData = std::filesystem::temp_directory_path() / "fengine-headless" / game.filename();
-    std::filesystem::remove_all(options.userData);
+    options.userData = userData.path();
     options.development = true;
+    options.testHooks = true;
     options.seed = 1234;
     auto engine = std::make_unique<Engine>(std::move(options));
     engine->setViewport(engine->config().windowWidth, engine->config().windowHeight);
@@ -43,43 +87,73 @@ std::unique_ptr<Engine> headlessEngine(const std::filesystem::path& game,
 }
 
 void bindHarness(Engine& engine) {
-    ModuleBinder(engine.lua(), engine.docs(), "fe.harness", "Test-only controls (available under --test).")
+    ModuleBinder(engine.lua(), engine.docs(), "fe.harness",
+                 "Test-only controls. They exist only while `fengine_headless --test` runs a game's tests; "
+                 "games never see them.")
         .fn(
             "start", [&engine] { return engine.start(); }, "fun(): boolean",
             "Load and initialise the entry module.")
         .fn(
             "tick",
             [&engine](sol::optional<int> ticks) {
-                for (int i = 0; i < ticks.value_or(1); ++i) {
+                // Each tick restarts the watchdog's clock, so the count is bounded instead.
+                const int count = ticks.value_or(1);
+                if (count < 0 || count > 36000) {
+                    throw std::runtime_error("fe.harness.tick takes 0 to 36000 ticks, got " +
+                                             std::to_string(count));
+                }
+                for (int i = 0; i < count; ++i) {
                     engine.tick(1.0 / 60.0);
                     engine.draw(1.0);
                 }
             },
-            "fun(ticks?: integer)", "Advance the engine by fixed ticks, drawing each one.")
+            "fun(ticks?: integer)",
+            "Advance the engine by fixed ticks (default 1, at most 36000), drawing each one.")
         .fn(
             "errors", [&engine] { return engine.lua().errors().size(); }, "fun(): integer",
-            "Recorded script errors.");
+            "Recorded script errors.")
+        .fn(
+            "begin_test", [&engine] { engine.lua().beginFrame(); }, "fun()",
+            "Restart the script watchdog's clock. fe.test calls it before each test, so every test (like "
+            "every tick) gets the whole watchdog limit.")
+        .fn(
+            "reload",
+            [&engine](const std::string& target) {
+                auto& lua = engine.lua();
+                if (!target.ends_with(".lua")) {
+                    const auto file = lua.resolve(target);
+                    return file.has_value() && lua.reloadFile(*file);
+                }
+                return lua.reloadFile(target.starts_with("@fe/")
+                                          ? resolveInside(lua.libraryRoot() / "fe", target.substr(4))
+                                          : resolveInside(lua.gameRoot(), target));
+            },
+            "fun(target: string): boolean",
+            "Hot-reload a loaded module, named as for require or by its Lua file ('@fe/...' for lualib), as "
+            "a "
+            "file change does in development builds; false when no loaded module comes from it.");
 }
 } // namespace
 
 int runTests(const std::filesystem::path& game, const std::filesystem::path& lualib,
-             const std::string& filter) {
-    auto engine = headlessEngine(game, lualib);
+             const std::string& filter, double watchdog) {
+    const ScratchFolder userData(game);
+    auto engine = headlessEngine(game, lualib, userData);
+    engine->lua().setWatchdog(watchdog);
     bindHarness(*engine);
     std::vector<std::string> modules;
-    std::error_code ec;
-    for (const auto& entry : std::filesystem::directory_iterator(game / "tests", ec)) {
-        if (entry.path().extension() == ".lua") {
-            modules.push_back("tests." + entry.path().stem().string());
+    for (const auto& name : listFolder(game / "tests")) {
+        if (name.size() > 4 && name.ends_with(".lua")) {
+            modules.push_back("tests." + name.substr(0, name.size() - 4));
         }
     }
-    std::sort(modules.begin(), modules.end());
     if (modules.empty()) {
         std::cerr << "No tests found in " << (game / "tests").string() << "\n";
         return 1;
     }
     auto& lua = engine->lua();
     try {
+        lua.beginFrame();
         sol::table test = lua.require("fe.test");
         auto result = lua.invoke(test["run"], sol::as_table(modules), filter);
         if (!result.valid()) {
@@ -97,15 +171,14 @@ int runTests(const std::filesystem::path& game, const std::filesystem::path& lua
 
 int checkGame(const std::filesystem::path& game, const std::filesystem::path& lualib) {
     int problems = 0;
-    auto engine = headlessEngine(game, lualib);
-    std::error_code ec;
+    const ScratchFolder userData(game);
+    auto engine = headlessEngine(game, lualib, userData);
     std::vector<std::string> maps;
-    for (const auto& entry : std::filesystem::directory_iterator(game / "maps", ec)) {
-        if (std::filesystem::is_regular_file(entry.path() / "map.json")) {
-            maps.push_back(entry.path().filename().string());
+    for (const auto& name : listFolder(game / "maps")) {
+        if (name.ends_with('/') && isFile(game / "maps" / name / "map.json")) {
+            maps.push_back(name.substr(0, name.size() - 1));
         }
     }
-    std::sort(maps.begin(), maps.end());
     for (const auto& id : maps) {
         try {
             const auto world = engine->loadWorld("check_" + id, id);
@@ -122,10 +195,9 @@ int checkGame(const std::filesystem::path& game, const std::filesystem::path& lu
             ++problems;
         }
     }
-    for (const auto& entry : std::filesystem::recursive_directory_iterator(game, ec)) {
-        const auto name = entry.path().filename().string();
+    for (const auto& relative : listFilesBelow(game)) {
+        const auto name = std::filesystem::path(relative).filename().string();
         if (name.size() > 10 && name.ends_with(".anim.json")) {
-            const auto relative = relativeTo(game, entry.path());
             try {
                 const auto sprite = engine->assets().sprite(relative);
                 engine->assets().image(
@@ -157,7 +229,9 @@ int checkGame(const std::filesystem::path& game, const std::filesystem::path& lu
 }
 
 int writeApi(const std::filesystem::path& lualib, const std::filesystem::path& folder) {
-    auto engine = headlessEngine(lualib / "tests" / "game", lualib);
+    const auto game = lualib / "tests" / "game";
+    const ScratchFolder userData(game);
+    auto engine = headlessEngine(game, lualib, userData);
     bindHarness(*engine);
     engine->writeApi(folder / "fengine.d.lua", folder / "api.md");
     std::cout << "Wrote fengine.d.lua and api.md to " << folder.string() << "\n";
@@ -186,6 +260,9 @@ int runHeadlessCommand(int argc, char** argv) {
     }
     if (command.empty()) {
         return -1;
+    }
+    if (!target.empty()) {
+        target = openGame(target).string();
     }
     const auto lualib = findLibraryRoot(argv[0]);
     if (command == "--test") {

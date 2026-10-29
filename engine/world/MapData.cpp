@@ -1,14 +1,30 @@
 #include "engine/world/MapData.h"
+#include "engine/assets/Model.h"
 #include <cmath>
+#include <limits>
 #include <set>
 #include <stdexcept>
+#include <type_traits>
 
 namespace fe {
+namespace {
+// A JSON number as a float. Settings tables from scripts reach these readers
+// as JSON, so a value beyond the float range is an error rather than an
+// undefined conversion.
+float jsonFloat(const Json& j) {
+    const double value = j.get<double>();
+    if (!std::isfinite(value) || std::abs(value) > static_cast<double>(std::numeric_limits<float>::max())) {
+        throw std::runtime_error("Expected a finite number, got " + j.dump());
+    }
+    return static_cast<float>(value);
+}
+} // namespace
+
 glm::vec2 jsonVec2(const Json& j) {
     if (!j.is_array() || j.size() != 2) {
         throw std::runtime_error("Expected [x, y]");
     }
-    const glm::vec2 v(j[0].get<float>(), j[1].get<float>());
+    const glm::vec2 v(jsonFloat(j[0]), jsonFloat(j[1]));
     if (!std::isfinite(v.x) || !std::isfinite(v.y)) {
         throw std::runtime_error("Non-finite coordinates");
     }
@@ -19,7 +35,7 @@ glm::vec3 jsonVec3(const Json& j) {
     if (!j.is_array() || j.size() != 3) {
         throw std::runtime_error("Expected [x, y, z]");
     }
-    const glm::vec3 v(j[0].get<float>(), j[1].get<float>(), j[2].get<float>());
+    const glm::vec3 v(jsonFloat(j[0]), jsonFloat(j[1]), jsonFloat(j[2]));
     if (!std::isfinite(v.x) || !std::isfinite(v.y) || !std::isfinite(v.z)) {
         throw std::runtime_error("Non-finite coordinates");
     }
@@ -30,8 +46,7 @@ glm::vec4 jsonVec4(const Json& j) {
     if (!j.is_array() || (j.size() != 3 && j.size() != 4)) {
         throw std::runtime_error("Expected [r, g, b] or [r, g, b, a]");
     }
-    return {j[0].get<float>(), j[1].get<float>(), j[2].get<float>(),
-            j.size() == 4 ? j[3].get<float>() : 1.0f};
+    return {jsonFloat(j[0]), jsonFloat(j[1]), jsonFloat(j[2]), j.size() == 4 ? jsonFloat(j[3]) : 1.0f};
 }
 
 Json toJson(glm::vec2 v) {
@@ -45,10 +60,40 @@ Json toJson(glm::vec4 v) {
 }
 
 namespace {
+// Numbers are range-checked: a whole number outside an integer field's type,
+// or a fraction, is an error instead of wrapping or truncating.
 template<class T> void read(const Json& j, const char* key, T& value) {
-    if (j.contains(key)) {
-        value = j.at(key).get<T>();
+    if (!j.contains(key)) {
+        return;
     }
+    const auto& v = j.at(key);
+    if constexpr (std::is_floating_point_v<T>) {
+        if (v.is_number()) {
+            value = jsonFloat(v);
+            return;
+        }
+    } else if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
+        if (v.is_number()) {
+            const double number = v.get<double>();
+            const bool fits =
+                v.is_number_unsigned()
+                    ? v.get<std::uint64_t>() <= static_cast<std::uint64_t>(std::numeric_limits<T>::max())
+                : v.is_number_integer()
+                    ? v.get<std::int64_t>() >= static_cast<std::int64_t>(std::numeric_limits<T>::min()) &&
+                          v.get<std::int64_t>() <= static_cast<std::int64_t>(std::numeric_limits<T>::max())
+                    : std::floor(number) == number &&
+                          number >= static_cast<double>(std::numeric_limits<T>::min()) &&
+                          number <= static_cast<double>(std::numeric_limits<T>::max());
+            if (!fits) {
+                throw std::runtime_error(std::string("'") + key + "' must be an integer from " +
+                                         std::to_string(std::numeric_limits<T>::min()) + " to " +
+                                         std::to_string(std::numeric_limits<T>::max()) + ", got " + v.dump());
+            }
+            value = v.is_number_float() ? static_cast<T>(number) : v.get<T>();
+            return;
+        }
+    }
+    value = v.get<T>();
 }
 void readVec(const Json& j, const char* key, glm::vec3& value) {
     if (j.contains(key)) {
@@ -67,7 +112,70 @@ void requireFinite(std::initializer_list<float> values, const char* what) {
         }
     }
 }
+
+float noise(double t, float seed) {
+    return static_cast<float>(std::sin(t * 1.7 + seed) * 0.5 + std::sin(t * 4.3 + seed * 2.1) * 0.3 +
+                              std::sin(t * 9.1 + seed * 0.7) * 0.2);
+}
+
+float sampleCurve(const std::vector<glm::vec2>& keys, double time) {
+    const double period = keys.back().x;
+    const auto t = static_cast<float>(period > 0 ? std::fmod(time, period) : 0.0);
+    if (t <= keys.front().x) {
+        return keys.front().y;
+    }
+    for (std::size_t i = 1; i < keys.size(); ++i) {
+        if (t <= keys[i].x) {
+            const auto& a = keys[i - 1];
+            const auto& b = keys[i];
+            return glm::mix(a.y, b.y, (t - a.x) / std::max(1e-6f, b.x - a.x));
+        }
+    }
+    return keys.back().y;
+}
 } // namespace
+
+const char* blendModeName(BlendMode mode) {
+    switch (mode) {
+    case BlendMode::Alpha:
+        return "alpha";
+    case BlendMode::Additive:
+        return "additive";
+    case BlendMode::Multiply:
+        return "multiply";
+    case BlendMode::Premultiplied:
+        return "premultiplied";
+    case BlendMode::Opaque:
+        break;
+    }
+    return "opaque";
+}
+
+BlendMode blendModeFromName(const std::string& name) {
+    for (const auto mode : {BlendMode::Opaque, BlendMode::Alpha, BlendMode::Additive, BlendMode::Multiply,
+                            BlendMode::Premultiplied}) {
+        if (name == blendModeName(mode)) {
+            return mode;
+        }
+    }
+    throw std::runtime_error("Unknown blend mode '" + name +
+                             "' (alpha, additive, multiply, premultiplied or opaque)");
+}
+
+BlendMode blendModeFromJson(const Json& value) {
+    if (value.is_boolean()) {
+        return value.get<bool>() ? BlendMode::Alpha : BlendMode::Opaque;
+    }
+    return blendModeFromName(value.get<std::string>());
+}
+
+float LightSettings::flickerScale(double time, float seed) const {
+    float scale = flickerCurve.empty() ? 1.0f : sampleCurve(flickerCurve, time);
+    if (flicker > 0) {
+        scale *= std::max(0.0f, 1 + flicker * noise(time * flickerSpeed, seed));
+    }
+    return scale;
+}
 
 LightSettings LightSettings::fromJson(const Json& j) {
     LightSettings light;
@@ -81,15 +189,32 @@ LightSettings LightSettings::fromJson(const Json& j) {
     read(j, "outer_cone", light.outerCone);
     read(j, "flicker", light.flicker);
     read(j, "flicker_speed", light.flickerSpeed);
+    for (const auto& key : j.value("flicker_curve", Json::array())) {
+        const auto k = jsonVec2(key);
+        if (k.x < 0 || k.y < 0 || (!light.flickerCurve.empty() && k.x <= light.flickerCurve.back().x)) {
+            throw std::runtime_error("flicker_curve keys are [seconds, scale] with increasing times and "
+                                     "non-negative values");
+        }
+        light.flickerCurve.push_back(k);
+    }
     read(j, "shadows", light.castShadows);
     requireFinite({light.radius, light.intensity, light.innerCone, light.outerCone, light.flicker}, "light");
-    if (light.radius <= 0 || light.intensity < 0 || glm::length(light.direction) < 1e-4f) {
-        throw std::runtime_error("Invalid light radius, intensity or direction");
+    if (light.radius <= 0 || light.radius > MaxLightRadius || light.intensity < 0 ||
+        glm::length(light.direction) < 1e-4f) {
+        throw std::runtime_error("Invalid light radius (above 0, at most 1000), intensity or direction");
+    }
+    if (light.type == LightType::Spot &&
+        !(light.innerCone >= 0 && light.innerCone < light.outerCone && light.outerCone <= 90)) {
+        throw std::runtime_error("A spot light needs 0 <= inner_cone < outer_cone <= 90 (degrees)");
     }
     return light;
 }
 
 Json LightSettings::toJson() const {
+    Json curve = Json::array();
+    for (const auto& key : flickerCurve) {
+        curve.push_back(fe::toJson(key));
+    }
     return {{"type", type == LightType::Spot ? "spot" : "point"},
             {"position", fe::toJson(position)},
             {"color", fe::toJson(color)},
@@ -100,6 +225,7 @@ Json LightSettings::toJson() const {
             {"outer_cone", outerCone},
             {"flicker", flicker},
             {"flicker_speed", flickerSpeed},
+            {"flicker_curve", curve},
             {"shadows", castShadows}};
 }
 
@@ -121,12 +247,16 @@ EmitterSettings EmitterSettings::fromJson(const Json& j) {
     read(j, "stretch", e.stretch);
     readVec(j, "color", e.color);
     readVec(j, "color_end", e.colorEnd);
+    if (j.contains("blend")) {
+        e.blend = blendModeFromJson(j.at("blend"));
+    }
     read(j, "unlit", e.unlit);
     read(j, "world_space", e.worldSpace);
+    read(j, "distort", e.distort);
     read(j, "max", e.maxParticles);
-    requireFinite({e.rate, e.lifetime, e.size, e.sizeEnd, e.drag}, "emitter");
-    if (e.rate < 0 || e.rate > 5000 || e.lifetime <= 0 || e.lifetime > 120 || e.size <= 0 || e.burst < 0 ||
-        e.burst > 4096 || e.maxParticles < 1 || e.maxParticles > 16384) {
+    requireFinite({e.rate, e.lifetime, e.size, e.sizeEnd, e.drag, e.distort}, "emitter");
+    if (e.distort < 0 || e.rate < 0 || e.rate > 5000 || e.lifetime <= 0 || e.lifetime > 120 || e.size <= 0 ||
+        e.burst < 0 || e.burst > 4096 || e.maxParticles < 1 || e.maxParticles > 16384) {
         throw std::runtime_error("Invalid emitter settings");
     }
     return e;
@@ -148,8 +278,10 @@ Json EmitterSettings::toJson() const {
             {"stretch", stretch},
             {"color", fe::toJson(color)},
             {"color_end", fe::toJson(colorEnd)},
+            {"blend", blendModeName(blend)},
             {"unlit", unlit},
             {"world_space", worldSpace},
+            {"distort", distort},
             {"max", maxParticles}};
 }
 
@@ -162,10 +294,39 @@ Environment Environment::fromJson(const Json& j) {
     read(j, "fog_density", env.fogDensity);
     read(j, "fog_height", env.fogHeight);
     read(j, "fog_height_falloff", env.fogHeightFalloff);
+    read(j, "fog_max", env.fogMax);
     read(j, "shadows", env.shadows);
     read(j, "shadow_distance", env.shadowDistance);
-    if (glm::length(env.sunDirection) < 1e-4f || env.fogDensity < 0 || env.shadowDistance <= 0) {
-        throw std::runtime_error("Invalid sun direction, fog density or shadow distance");
+    read(j, "shadow_strength", env.shadowStrength);
+    read(j, "shadow_bias", env.shadowBias);
+    read(j, "sprite_light_height", env.spriteLightHeight);
+    read(j, "anisotropic", env.anisotropic);
+    read(j, "pixel_snap", env.pixelSnap);
+    requireFinite({env.fogDensity, env.fogMax, env.shadowDistance, env.shadowStrength, env.shadowBias,
+                   env.spriteLightHeight},
+                  "environment");
+    if (glm::length(env.sunDirection) < 1e-4f || env.fogDensity < 0 || env.shadowDistance <= 0 ||
+        env.fogMax < 0 || env.fogMax > 1 || env.shadowStrength < 0 || env.shadowStrength > 1 ||
+        env.shadowBias < 0) {
+        throw std::runtime_error(
+            "Invalid sun direction, fog density, fog_max, shadow distance, strength or bias");
+    }
+    const auto water = j.value("water", Json::object());
+    read(water, "wave_scale", env.water.waveScale);
+    read(water, "wave_speed", env.water.waveSpeed);
+    read(water, "fresnel", env.water.fresnel);
+    read(water, "specular", env.water.specular);
+    readVec(water, "deep_color", env.water.deepColor);
+    read(water, "depth_falloff", env.water.depthFalloff);
+    read(water, "reflection", env.water.reflection);
+    read(water, "refraction", env.water.refraction);
+    requireFinite({env.water.waveScale, env.water.waveSpeed, env.water.fresnel, env.water.specular,
+                   env.water.depthFalloff, env.water.reflection, env.water.refraction},
+                  "water settings");
+    if (env.water.depthFalloff < 0 || env.water.reflection < 0 || env.water.reflection > 1 ||
+        env.water.refraction < 0) {
+        throw std::runtime_error("Water depth_falloff and refraction must not be negative and reflection "
+                                 "lies in 0..1");
     }
     const auto sky = j.value("sky", Json::object());
     read(sky, "mode", env.sky.mode);
@@ -202,26 +363,75 @@ Environment Environment::fromJson(const Json& j) {
     read(post, "color_grade", p.colorGrade);
     read(post, "bloom_strength", p.bloomStrength);
     read(post, "bloom_threshold", p.bloomThreshold);
+    read(post, "bloom_knee", p.bloomKnee);
+    read(post, "bloom_radius", p.bloomRadius);
+    read(post, "bloom_levels", p.bloomLevels);
+    read(post, "dof_mode", p.dofMode);
+    read(post, "dof_radius", p.dofRadius);
+    read(post, "ssao", p.ssao);
+    read(post, "ssao_radius", p.ssaoRadius);
+    read(post, "ssao_strength", p.ssaoStrength);
+    read(post, "ssao_bias", p.ssaoBias);
+    read(post, "antialias", p.antialias);
+    read(post, "chromatic_aberration", p.chromaticAberration);
+    read(post, "distortion", p.distortion);
     read(post, "focus", p.focus);
     read(post, "focus_range", p.focusRange);
     read(post, "focus_distance", p.focusDistance);
     read(post, "aperture", p.aperture);
     read(post, "exposure", p.exposure);
     read(post, "vignette_strength", p.vignetteStrength);
+    read(post, "tonemap", p.tonemap);
     read(post, "lut", p.lut);
     read(post, "lut_blend_target", p.lutBlendTarget);
     read(post, "lut_blend", p.lutBlend);
     read(post, "pixel_scale", p.pixelScale);
-    requireFinite(
-        {p.bloomStrength, p.focus, p.focusRange, p.focusDistance, p.aperture, p.exposure, p.lutBlend},
-        "post settings");
+    for (const auto& c : post.value("custom", Json::array())) {
+        CustomPost custom;
+        read(c, "shader", custom.shader);
+        if (c.contains("params") && !c.at("params").empty()) { // Lua turns {} into an object
+            read(c, "params", custom.params);
+        }
+        if (!isShaderName(custom.shader)) {
+            throw std::runtime_error("post.custom shader names use a-z, 0-9, _ and - (at most 64)");
+        }
+        if (custom.params.size() > 16) {
+            throw std::runtime_error("post.custom params take at most 16 numbers");
+        }
+        for (const float value : custom.params) {
+            requireFinite({value}, "post.custom params");
+        }
+        p.custom.push_back(std::move(custom));
+    }
+    requireFinite({p.bloomStrength, p.bloomThreshold, p.bloomKnee, p.bloomRadius, p.focus, p.focusRange,
+                   p.focusDistance, p.aperture, p.dofRadius, p.ssaoRadius, p.ssaoStrength, p.ssaoBias,
+                   p.chromaticAberration, p.distortion, p.exposure, p.lutBlend},
+                  "post settings");
     if (p.exposure <= 0 || p.pixelScale < 1 || p.pixelScale > 8) {
         throw std::runtime_error("Invalid exposure or pixel_scale");
+    }
+    if (p.bloomLevels < 1 || p.bloomLevels > 8 || p.bloomRadius < 0 || p.bloomRadius > 1 || p.bloomKnee < 0 ||
+        p.bloomKnee > 1 || p.dofRadius < 0 || p.dofRadius > 32 || p.ssaoRadius <= 0 || p.custom.size() > 8) {
+        throw std::runtime_error("Invalid bloom_levels (1-8), bloom_radius or bloom_knee (0-1), dof_radius "
+                                 "(0-32), ssao_radius or custom pass count (at most 8)");
+    }
+    if (p.tonemap != "aces" && p.tonemap != "none") {
+        throw std::runtime_error("post.tonemap must be \"aces\" or \"none\"");
+    }
+    if (p.dofMode != "depth" && p.dofMode != "tilt" && p.dofMode != "both") {
+        throw std::runtime_error("post.dof_mode must be \"depth\", \"tilt\" or \"both\"");
+    }
+    if (p.antialias != "auto" && p.antialias != "fxaa" && p.antialias != "none") {
+        throw std::runtime_error("post.antialias must be \"auto\", \"fxaa\" or \"none\"");
     }
     return env;
 }
 
 Json Environment::toJson() const {
+    Json custom = Json::array();
+    for (const auto& c : post.custom) {
+        custom.push_back({{"shader", c.shader}, {"params", c.params}});
+    }
     Json backdrops = Json::array();
     for (const auto& b : sky.backdrops) {
         backdrops.push_back({{"image", b.image},
@@ -240,8 +450,23 @@ Json Environment::toJson() const {
             {"fog_density", fogDensity},
             {"fog_height", fogHeight},
             {"fog_height_falloff", fogHeightFalloff},
+            {"fog_max", fogMax},
             {"shadows", shadows},
             {"shadow_distance", shadowDistance},
+            {"shadow_strength", shadowStrength},
+            {"shadow_bias", shadowBias},
+            {"sprite_light_height", spriteLightHeight},
+            {"anisotropic", anisotropic},
+            {"pixel_snap", pixelSnap},
+            {"water",
+             {{"wave_scale", water.waveScale},
+              {"wave_speed", water.waveSpeed},
+              {"fresnel", water.fresnel},
+              {"specular", water.specular},
+              {"deep_color", fe::toJson(water.deepColor)},
+              {"depth_falloff", water.depthFalloff},
+              {"reflection", water.reflection},
+              {"refraction", water.refraction}}},
             {"sky",
              {{"mode", sky.mode},
               {"top", fe::toJson(sky.top)},
@@ -265,12 +490,26 @@ Json Environment::toJson() const {
               {"color_grade", post.colorGrade},
               {"bloom_strength", post.bloomStrength},
               {"bloom_threshold", post.bloomThreshold},
+              {"bloom_knee", post.bloomKnee},
+              {"bloom_radius", post.bloomRadius},
+              {"bloom_levels", post.bloomLevels},
+              {"dof_mode", post.dofMode},
+              {"dof_radius", post.dofRadius},
+              {"ssao", post.ssao},
+              {"ssao_radius", post.ssaoRadius},
+              {"ssao_strength", post.ssaoStrength},
+              {"ssao_bias", post.ssaoBias},
+              {"antialias", post.antialias},
+              {"chromatic_aberration", post.chromaticAberration},
+              {"distortion", post.distortion},
+              {"custom", custom},
               {"focus", post.focus},
               {"focus_range", post.focusRange},
               {"focus_distance", post.focusDistance},
               {"aperture", post.aperture},
               {"exposure", post.exposure},
               {"vignette_strength", post.vignetteStrength},
+              {"tonemap", post.tonemap},
               {"lut", post.lut},
               {"lut_blend_target", post.lutBlendTarget},
               {"lut_blend", post.lutBlend},
@@ -306,8 +545,7 @@ MapData MapData::fromJson(const Json& j) {
         if (p.contains("facing")) {
             point.facing = jsonVec2(p.at("facing"));
         }
-        if (!m.grid.contains(static_cast<int>(std::floor(point.position.x)),
-                             static_cast<int>(std::floor(point.position.z)), point.layer)) {
+        if (!m.grid.contains(floorCell(point.position.x), floorCell(point.position.z), point.layer)) {
             throw std::runtime_error("Point '" + name + "' lies outside the grid");
         }
         m.points[name] = point;
@@ -326,6 +564,9 @@ MapData MapData::fromJson(const Json& j) {
         if (placement.id.empty() || !ids.insert(placement.id).second) {
             throw std::runtime_error("Duplicate or empty placement id: " + placement.id);
         }
+        if (placement.layer < 0 || placement.layer >= m.grid.layerCount()) {
+            throw std::runtime_error("Placement '" + placement.id + "' uses a layer the grid does not have");
+        }
         m.placements.push_back(std::move(placement));
     }
     for (const auto& z : j.value("zones", Json::array())) {
@@ -338,6 +579,9 @@ MapData MapData::fromJson(const Json& j) {
         zone.props = z.value("props", Json::object());
         if (zone.min.x > zone.max.x || zone.min.y > zone.max.y) {
             throw std::runtime_error("Zone '" + zone.id + "' has min greater than max");
+        }
+        if (zone.layer < -1 || zone.layer >= m.grid.layerCount()) {
+            throw std::runtime_error("Zone '" + zone.id + "' uses a layer the grid does not have (-1 = all)");
         }
         m.zones.push_back(std::move(zone));
     }

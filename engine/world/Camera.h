@@ -16,14 +16,18 @@ public:
     [[nodiscard]] glm::vec3 position(double alpha = 1) const;
     [[nodiscard]] glm::vec3 focus(double alpha = 1) const;
     [[nodiscard]] glm::mat4 view(double alpha = 1) const;
-    [[nodiscard]] glm::mat4 projection(float aspect, bool homogeneousDepth) const;
+    [[nodiscard]] glm::mat4 projection(float aspect, bool homogeneousDepth, double alpha = 1) const;
     [[nodiscard]] glm::vec3 right(double alpha = 1) const;
     [[nodiscard]] glm::vec3 forward(double alpha = 1) const;
     [[nodiscard]] float interpolatedYaw(double alpha = 1) const;
-    // Normalized device coords (-1..1, y up) for a world point; z > 1 means behind.
-    [[nodiscard]] glm::vec3 project(glm::vec3 point, float aspect) const;
-    // World-space ray through normalized device coords.
-    void ray(glm::vec2 ndc, float aspect, glm::vec3& origin, glm::vec3& direction) const;
+    [[nodiscard]] float interpolatedFov(double alpha = 1) const;
+    [[nodiscard]] float interpolatedDistance(double alpha = 1) const;
+    // Normalized device coords (-1..1, y up) for a world point; z > 1 means
+    // behind. `alpha` selects the interpolated camera, so passing the frame's
+    // draw alpha matches what the renderer shows.
+    [[nodiscard]] glm::vec3 project(glm::vec3 point, float aspect, double alpha = 1) const;
+    // World-space ray through normalized device coords (same `alpha` rule).
+    void ray(glm::vec2 ndc, float aspect, glm::vec3& origin, glm::vec3& direction, double alpha = 1) const;
 
 private:
     struct State {

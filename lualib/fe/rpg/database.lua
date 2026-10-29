@@ -3,7 +3,8 @@
 --- `database.load()` reads the standard files when they exist:
 ---   data/classes.json, data/actors.json, data/skills.json, data/items.json,
 ---   data/states.json, data/enemies.json, data/troops.json, data/shops.json,
----   data/encounters.json, data/quests.json
+---   data/encounters.json
+--- (`fe.quest.load()` reads data/quests.json.)
 --- Schemas are open (extra fields are kept), so games can add their own
 --- fields (shield points, weapon types, conviction values) and read them in
 --- Lua. `schema.extend(name, fields)` adds validation for them.
@@ -18,6 +19,7 @@ local modifier = { record = {
   add = { type = "number", optional = true },
   mul = { type = "number", optional = true },
   set = { type = "number", optional = true },
+  priority = { type = "number", optional = true, doc = "Which `set` wins when several apply (highest)" },
 } }
 local effect = "table" -- validated by fe.effects handlers at use time
 local area = { record = {
@@ -39,7 +41,9 @@ schema.define("class", {
   } } }, default = {} },
   equip = { type = { list = "string" }, default = {}, doc = "Equipment types this class can use" },
   commands = { type = { list = "string" }, optional = true, doc = "Battle commands" },
-  passives = { type = { list = { ref = "skills" } }, default = {} },
+  passives = { type = { list = { ref = "skills" } }, default = {}, doc = "Always-active passive skills" },
+  support_slots = { type = "integer", min = 0, optional = true,
+    doc = "Slots for equipped support abilities (skills with support = true)" },
   modifiers = { type = { list = modifier }, default = {} },
 }, { doc = "A class or job." })
 
@@ -55,6 +59,7 @@ schema.define("actor", {
   skills = { type = { list = { ref = "skills" } }, default = {} },
   equipment = { type = { map = "string" }, default = {} },
   slots = { type = { list = "string" }, optional = true, doc = "Equipment slots (default: database.slots)" },
+  support_slots = { type = "integer", min = 0, optional = true, doc = "Support ability slots (overrides the class)" },
 }, { doc = "A party member." })
 
 schema.define("skill", {
@@ -74,6 +79,8 @@ schema.define("skill", {
   area = { type = area, optional = true, doc = "Tactical area of effect" },
   scope = { type = { enum = { "battle", "field", "both" } }, default = "battle" },
   passive = { type = "boolean", default = false },
+  support = { type = "boolean", default = false,
+    doc = "A passive that must be equipped in a support slot when the actor has slots" },
   modifiers = { type = { list = modifier }, default = {}, doc = "Passive stat modifiers" },
   priority = { type = "number", default = 0 },
   tags = { type = { list = "string" }, default = {} },
@@ -126,6 +133,8 @@ schema.define("enemy", {
   stats = { type = { map = "number" } },
   skills = { type = { list = { ref = "skills" } }, default = {} },
   ai = { type = "string", optional = true, doc = "AI function: module.function" },
+  actions = { type = "any", optional = true,
+    doc = "Actions per turn: an integer, or a function path module.function(battle, battler) -> integer" },
   rewards = { type = { record = {
     exp = { type = "number", default = 0 },
     money = { type = "number", default = 0 },
@@ -134,7 +143,13 @@ schema.define("enemy", {
   } }, default = {} },
   resist = { type = { map = "number" }, default = {}, doc = "Damage multipliers by element or damage type" },
   scale = { type = "number", default = 1 },
-}, { doc = "An enemy." })
+  shield = { type = "integer", min = 0, optional = true, doc = "Shield points (fe.battle.break)" },
+  weak = { type = { list = "string" }, default = {}, doc = "Weaknesses: elements or damage types (fe.battle.break)" },
+  obstacle = { type = "boolean", default = false,
+    doc = "A destructible that never acts (tactics: blocks movement and line of sight)" },
+  destroyed = { type = "table", optional = true,
+    doc = "Terrain reaction on its cell when an obstacle is destroyed: {add, remove, walkable}" },
+}, { doc = "An enemy, obstacle or battle companion." })
 
 schema.define("troop", {
   id = "string",

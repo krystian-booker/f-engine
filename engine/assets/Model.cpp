@@ -1,9 +1,13 @@
 #include "engine/assets/Model.h"
+#include "engine/core/Log.h"
+#include "engine/core/Paths.h"
 #define CGLTF_IMPLEMENTATION
 #include <algorithm>
 #include <array>
 #include <cgltf.h>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -13,11 +17,40 @@
 #include <string_view>
 
 namespace fe {
+bool isShaderName(std::string_view name) {
+    return !name.empty() && name.size() <= 64 &&
+           name.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789_-") == std::string_view::npos;
+}
+
 namespace {
 using GltfData = std::unique_ptr<cgltf_data, decltype(&cgltf_free)>;
 
+// glTF files and their buffers may come from a pak archive.
+cgltf_result readGltfFile(const cgltf_memory_options*, const cgltf_file_options*, const char* path,
+                          cgltf_size* size, void** data) {
+    try {
+        const auto bytes = readFile(std::filesystem::path(path));
+        void* copy = std::malloc(std::max<std::size_t>(bytes.size(), 1));
+        if (!copy) {
+            return cgltf_result_out_of_memory;
+        }
+        std::memcpy(copy, bytes.data(), bytes.size());
+        *size = bytes.size();
+        *data = copy;
+        return cgltf_result_success;
+    } catch (const std::exception&) {
+        return cgltf_result_file_not_found;
+    }
+}
+
+void releaseGltfFile(const cgltf_memory_options*, const cgltf_file_options*, void* data) {
+    std::free(data);
+}
+
 GltfData parse(const std::filesystem::path& path) {
     cgltf_options options{};
+    options.file.read = readGltfFile;
+    options.file.release = releaseGltfFile;
     cgltf_data* raw = nullptr;
     if (cgltf_parse_file(&options, path.string().c_str(), &raw) != cgltf_result_success) {
         throw std::runtime_error("Cannot parse glTF " + path.string());
@@ -32,8 +65,8 @@ GltfData parse(const std::filesystem::path& path) {
 
 struct ImageCache {
     const std::filesystem::path& path;
-    std::map<const cgltf_image*, std::shared_ptr<Image>> images;
-    std::shared_ptr<Image> operator()(const cgltf_texture_view& view) {
+    std::map<const cgltf_image*, ModelImage> images;
+    ModelImage operator()(const cgltf_texture_view& view) {
         if (!view.texture || !view.texture->image) {
             return {};
         }
@@ -41,15 +74,19 @@ struct ImageCache {
         if (const auto found = images.find(source); found != images.end()) {
             return found->second;
         }
-        std::shared_ptr<Image> result;
+        ModelImage result;
         if (source->buffer_view) {
             const auto* bytes = static_cast<const std::uint8_t*>(cgltf_buffer_view_data(source->buffer_view));
             if (!bytes) {
                 throw std::runtime_error("Missing glTF embedded image buffer");
             }
-            result = std::make_shared<Image>(Image::decode({bytes, source->buffer_view->size}));
+            result.image = std::make_shared<Image>(Image::decode({bytes, source->buffer_view->size}));
         } else if (source->uri && !std::string_view(source->uri).starts_with("data:")) {
-            result = std::make_shared<Image>(Image::load(path.parent_path() / source->uri));
+            std::string uri = source->uri;
+            cgltf_decode_uri(uri.data());
+            uri.resize(std::strlen(uri.c_str()));
+            result.file = path.parent_path() / uri;
+            result.image = std::make_shared<Image>(Image::load(result.file));
         } else {
             throw std::runtime_error("glTF images must use a file URI or a GLB buffer view");
         }
@@ -57,6 +94,52 @@ struct ImageCache {
         return result;
     }
 };
+
+TextureSampler::Wrap wrapMode(cgltf_wrap_mode mode) {
+    switch (mode) {
+    case cgltf_wrap_mode_clamp_to_edge:
+        return TextureSampler::Wrap::Clamp;
+    case cgltf_wrap_mode_mirrored_repeat:
+        return TextureSampler::Wrap::Mirror;
+    case cgltf_wrap_mode_repeat:
+        break;
+    }
+    return TextureSampler::Wrap::Repeat;
+}
+
+TextureSampler readSampler(const cgltf_texture_view& view) {
+    TextureSampler out;
+    if (!view.texture || !view.texture->sampler) {
+        return out;
+    }
+    const auto& sampler = *view.texture->sampler;
+    out.wrapU = wrapMode(sampler.wrap_s);
+    out.wrapV = wrapMode(sampler.wrap_t);
+    out.nearestMag = sampler.mag_filter == cgltf_filter_type_nearest;
+    switch (sampler.min_filter) {
+    case cgltf_filter_type_nearest:
+        out.nearestMin = true;
+        out.mips = TextureSampler::Mips::None;
+        break;
+    case cgltf_filter_type_linear:
+        out.mips = TextureSampler::Mips::None;
+        break;
+    case cgltf_filter_type_nearest_mipmap_nearest:
+        out.nearestMin = true;
+        out.mips = TextureSampler::Mips::Nearest;
+        break;
+    case cgltf_filter_type_linear_mipmap_nearest:
+        out.mips = TextureSampler::Mips::Nearest;
+        break;
+    case cgltf_filter_type_nearest_mipmap_linear:
+        out.nearestMin = true;
+        break;
+    case cgltf_filter_type_undefined:
+    case cgltf_filter_type_linear_mipmap_linear:
+        break;
+    }
+    return out;
+}
 
 Material readMaterial(const cgltf_material* source, ImageCache& images, const Json& nodeProperties) {
     Material material;
@@ -66,9 +149,15 @@ Material readMaterial(const cgltf_material* source, ImageCache& images, const Js
     if (source->has_pbr_metallic_roughness) {
         material.color = glm::make_vec4(source->pbr_metallic_roughness.base_color_factor);
         material.albedo = images(source->pbr_metallic_roughness.base_color_texture);
+        material.albedoSampler = readSampler(source->pbr_metallic_roughness.base_color_texture);
     }
-    material.emissive = glm::make_vec3(source->emissive_factor);
+    material.emissive = glm::make_vec3(source->emissive_factor) *
+                        (source->has_emissive_strength ? source->emissive_strength.emissive_strength : 1.0f);
+    material.emission = images(source->emissive_texture);
+    material.emissionSampler = readSampler(source->emissive_texture);
     material.normal = images(source->normal_texture);
+    material.normalSampler = readSampler(source->normal_texture);
+    material.normalScale = source->normal_texture.scale;
     material.transparent = source->alpha_mode == cgltf_alpha_mode_blend;
     material.alphaCutoff = source->alpha_mode == cgltf_alpha_mode_mask ? source->alpha_cutoff : 0.01f;
     material.doubleSided = source->double_sided;
@@ -76,11 +165,21 @@ Material readMaterial(const cgltf_material* source, ImageCache& images, const Js
         material.kind = MaterialKind::Unlit;
     }
     std::string kind = nodeProperties.value("material", std::string{});
+    Json shader = nodeProperties.value("shader", Json());
     if (source->extras.data) {
         const auto extras = Json::parse(source->extras.data, nullptr, false);
         if (extras.is_object()) {
-            kind = extras.value("fengine", extras).value("material", kind);
+            const auto& properties = extras.value("fengine", extras);
+            kind = properties.value("material", kind);
+            shader = properties.value("shader", shader);
         }
+    }
+    if (shader.is_string() && isShaderName(shader.get<std::string>())) {
+        material.shader = shader.get<std::string>();
+    } else if (!shader.is_null()) {
+        log(LogLevel::Error, "Material '" + std::string(source->name ? source->name : "") +
+                                 "' names an invalid shader " + shader.dump() +
+                                 " (use a-z, 0-9, _ and -); the engine's shader is used");
     }
     if (kind == "water") {
         material.kind = MaterialKind::Water;
@@ -105,12 +204,15 @@ ModelPart readPrimitive(const cgltf_primitive& primitive, ImageCache& images, co
     const cgltf_accessor* normals = nullptr;
     const cgltf_accessor* uvs = nullptr;
     const cgltf_accessor* colors = nullptr;
+    const cgltf_accessor* tangents = nullptr;
     for (std::size_t a = 0; a < primitive.attributes_count; ++a) {
         const auto& attribute = primitive.attributes[a];
         if (attribute.type == cgltf_attribute_type_position) {
             positions = attribute.data;
         } else if (attribute.type == cgltf_attribute_type_normal) {
             normals = attribute.data;
+        } else if (attribute.type == cgltf_attribute_type_tangent) {
+            tangents = attribute.data;
         } else if (attribute.type == cgltf_attribute_type_texcoord && attribute.index == 0) {
             uvs = attribute.data;
         } else if (attribute.type == cgltf_attribute_type_color && attribute.index == 0) {
@@ -122,7 +224,7 @@ ModelPart readPrimitive(const cgltf_primitive& primitive, ImageCache& images, co
     }
     const auto count = positions->count;
     if ((normals && normals->count != count) || (uvs && uvs->count != count) ||
-        (colors && colors->count != count)) {
+        (colors && colors->count != count) || (tangents && tangents->count != count)) {
         throw std::runtime_error("glTF vertex attributes disagree in length");
     }
     ModelPart part;
@@ -139,6 +241,10 @@ ModelPart readPrimitive(const cgltf_primitive& primitive, ImageCache& images, co
         if (normals) {
             readAccessor(normals, v, values.data(), 3);
             vertex.normal = glm::normalize(glm::vec3(values[0], values[1], values[2]));
+        }
+        if (tangents && normals) {
+            readAccessor(tangents, v, values.data(), 4);
+            vertex.tangent = glm::make_vec4(values.data());
         }
         if (uvs) {
             readAccessor(uvs, v, values.data(), 2);
@@ -180,6 +286,10 @@ ModelPart readPrimitive(const cgltf_primitive& primitive, ImageCache& images, co
                 glm::length(vertex.normal) > 1e-5f ? glm::normalize(vertex.normal) : glm::vec3(0, 1, 0);
         }
     }
+    // Authored tangents only match authored normals.
+    if (!tangents || !normals) {
+        generateTangents(part.vertices, part.indices);
+    }
     part.material = readMaterial(primitive.material, images, properties);
     part.hidden = properties.value("visible", true) == false;
     return part;
@@ -193,14 +303,19 @@ Json nodeProperties(const cgltf_node& node) {
             properties = extras.value("fengine", extras);
         }
     }
-    if (node.light) {
+    if (node.light && node.light->type != cgltf_light_type_directional) {
         const auto* light = node.light;
         Json config{{"color", {light->color[0], light->color[1], light->color[2]}},
                     {"intensity", light->intensity},
                     {"radius", light->range > 0 ? light->range : 5}};
-        config["type"] = light->type == cgltf_light_type_directional ? "directional"
-                         : light->type == cgltf_light_type_spot      ? "spot"
-                                                                     : "point";
+        config["type"] = light->type == cgltf_light_type_spot ? "spot" : "point";
+        if (light->type == cgltf_light_type_spot) {
+            // Engine spots need inner < outer <= 90 degrees; a hard-edged
+            // glTF cone (inner == outer, Blender's blend 0) keeps a half-degree edge.
+            const float outer = std::clamp(glm::degrees(light->spot_outer_cone_angle), 0.5f, 90.0f);
+            config["inner_cone"] = std::clamp(glm::degrees(light->spot_inner_cone_angle), 0.0f, outer - 0.5f);
+            config["outer_cone"] = outer;
+        }
         properties["light"] = std::move(config);
     }
     return properties;
@@ -269,6 +384,41 @@ glm::vec4 sample(const AnimationChannel& channel, float time) {
 }
 } // namespace
 
+void generateTangents(std::vector<MeshVertex>& vertices, const std::vector<std::uint32_t>& indices) {
+    std::vector<glm::vec3> tangents(vertices.size(), glm::vec3(0)), bitangents(vertices.size(), glm::vec3(0));
+    for (std::size_t i = 0; i + 2 < indices.size(); i += 3) {
+        const auto ia = indices[i], ib = indices[i + 1], ic = indices[i + 2];
+        const auto &a = vertices[ia], &b = vertices[ib], &c = vertices[ic];
+        const glm::vec3 e1 = b.position - a.position, e2 = c.position - a.position;
+        const glm::vec2 d1 = b.uv - a.uv, d2 = c.uv - a.uv;
+        const float det = d1.x * d2.y - d2.x * d1.y;
+        if (std::abs(det) < 1e-12f) {
+            continue;
+        }
+        // Scaled by the triangle's area (|e1 x e2|) relative to its UV area, so
+        // bigger triangles weigh more.
+        const float area = glm::length(glm::cross(e1, e2));
+        const float r = area / det;
+        const glm::vec3 t = (e1 * d2.y - e2 * d1.y) * r, bt = (e2 * d1.x - e1 * d2.x) * r;
+        for (const auto index : {ia, ib, ic}) {
+            tangents[index] += t;
+            bitangents[index] += bt;
+        }
+    }
+    for (std::size_t v = 0; v < vertices.size(); ++v) {
+        auto& vertex = vertices[v];
+        const auto n = vertex.normal;
+        glm::vec3 t = tangents[v] - n * glm::dot(n, tangents[v]);
+        if (glm::length(t) < 1e-6f) {
+            const auto axis = std::abs(n.x) < 0.9f ? glm::vec3(1, 0, 0) : glm::vec3(0, 1, 0);
+            t = axis - n * glm::dot(n, axis);
+        }
+        t = glm::normalize(t);
+        const float handedness = glm::dot(glm::cross(n, t), bitangents[v]) < 0 ? -1.0f : 1.0f;
+        vertex.tangent = glm::vec4(t, handedness);
+    }
+}
+
 Model Model::load(const std::filesystem::path& path) {
     const auto data = parse(path);
     Model model;
@@ -312,7 +462,7 @@ Model Model::load(const std::filesystem::path& path) {
             }
         }
     }
-    // Only the selected scene is shown; unused helper nodes stay hidden.
+    // Only the selected scene is shown; nodes outside it are hidden.
     std::function<void(int)> visit = [&](int n) {
         model.order.push_back(n);
         const auto& source = data->nodes[static_cast<std::size_t>(n)];
@@ -332,6 +482,13 @@ Model Model::load(const std::filesystem::path& path) {
             }
         }
     }
+    std::vector<bool> shown(model.nodes.size(), false);
+    for (const int n : model.order) {
+        shown[static_cast<std::size_t>(n)] = true;
+    }
+    for (auto& part : model.parts) {
+        part.hidden = part.hidden || !shown[static_cast<std::size_t>(part.node)];
+    }
     readAnimations(*data, model);
     std::vector<glm::mat4> matrices;
     model.pose(-1, 0, matrices);
@@ -343,6 +500,11 @@ Model Model::load(const std::filesystem::path& path) {
         marker.name = node.name;
         marker.position = glm::vec3(matrices[static_cast<std::size_t>(n)][3]);
         marker.properties = node.properties;
+        if (marker.properties.contains("light") && marker.properties["light"].value("type", "") == "spot") {
+            // glTF lights shine down the node's local -Z axis.
+            const auto forward = -glm::normalize(glm::vec3(matrices[static_cast<std::size_t>(n)][2]));
+            marker.properties["light"]["direction"] = {forward.x, forward.y, forward.z};
+        }
         marker.min = glm::vec3(std::numeric_limits<float>::max());
         marker.max = -marker.min;
         for (const auto& part : model.parts) {

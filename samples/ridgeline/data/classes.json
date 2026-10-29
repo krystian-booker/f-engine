@@ -1,6 +1,7 @@
 [
   {"id": "vanguard", "name": "Vanguard", "growth": {"max_hp": 26, "attack": 3, "defense": 3, "speed": 1},
-   "skills": [{"skill": "shove", "level": 1}, {"skill": "rally_cry", "level": 2}], "equip": ["sword", "armor"]},
+   "skills": [{"skill": "shove", "level": 1}, {"skill": "rally_cry", "level": 2}, {"skill": "steadfast", "level": 1}], "equip": ["sword", "armor"],
+   "passives": ["riposte"]},
   {"id": "archer", "name": "Archer", "growth": {"max_hp": 18, "attack": 3, "defense": 1, "speed": 2},
    "skills": [{"skill": "longshot", "level": 1}, {"skill": "firebrand", "level": 1}], "equip": ["bow", "leather"]},
   {"id": "mender", "name": "Mender", "growth": {"max_hp": 16, "max_mp": 5, "magic": 3, "spirit": 3, "speed": 1},

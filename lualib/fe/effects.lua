@@ -15,11 +15,28 @@
 --- effects.formula("physical", function(ctx) ... end)   -- replace a formula
 --- effects.handler("steal", function(ctx) ... end)        -- a new effect type
 --- ```
---- Phases, in order, per effect and target: before (may set ctx.cancelled),
---- hit (may set ctx.missed), calculate (formula -> ctx.amount), modify
---- (multipliers, critical), apply (handler changes the target), after.
+--- Phases, in order, per effect and target:
+---   before    may set ctx.cancelled
+---   hit       accuracy: sets ctx.hit_chance, and ctx.missed when rolled
+---   calculate formula -> ctx.amount (damage and heal effects)
+---   modify    multipliers (affinity, critical, guard, terrain...)
+---   apply     last hooks before the change; then the effect's handler
+---             changes the target
+---   after     sees ctx.result (not run for previews)
+--- Any hook may set ctx.cancelled; later phases and the handler are then
+--- skipped and the result is {cancelled = true}. Within a phase hooks run by
+--- priority (higher first), then in registration order.
+---
+--- Hooks are global (`effects.hook`, idempotent when given an id, so module
+--- reloads replace rather than duplicate them) or belong to one battle
+--- (`battle:effect_hook`), merged by priority while that battle resolves.
+--- Reloading this module re-registers its own hooks by id and keeps every
+--- other module's.
+--- Effects resolved with `environmental = true` (state ticks, terrain
+--- hazards) always hit, never crit and skip positional bonuses.
 local data = require("fe.data")
 local signal = require("fe.signal")
+local tablex = require("fe.tablex")
 
 local effects = {
   handlers = {},
@@ -30,11 +47,16 @@ local effects = {
   settings = { variance = 0.1, critical_multiplier = 1.5, minimum_damage = 1 },
 }
 
---- Add a phase hook; higher priority runs first. Returns a remover.
-function effects.hook(phase, fn, priority)
-  local list = effects.hooks[phase]
-  assert(list, "unknown effect phase '" .. tostring(phase) .. "'")
-  local entry = { fn = fn, priority = priority or 0 }
+--- Insert a hook entry into a phase list (higher priority first, then
+--- registration order); an entry with the same id is replaced. Returns a
+--- remover.
+function effects.insert_hook(list, fn, priority, id)
+  if id then
+    for i, other in ipairs(list) do
+      if other.id == id then table.remove(list, i) break end
+    end
+  end
+  local entry = { fn = fn, priority = priority or 0, id = id }
   local index = #list + 1
   for i, other in ipairs(list) do
     if entry.priority > other.priority then index = i break end
@@ -47,11 +69,40 @@ function effects.hook(phase, fn, priority)
   end
 end
 
+--- Add a global phase hook; higher priority runs first. With `id`,
+--- registering again replaces the earlier hook (safe across hot reloads).
+--- Returns a remover.
+function effects.hook(phase, fn, priority, id)
+  local list = effects.hooks[phase]
+  assert(list, "unknown effect phase '" .. tostring(phase) .. "'")
+  return effects.insert_hook(list, fn, priority, id)
+end
+
 function effects.handler(type_name, fn) effects.handlers[type_name] = fn end
 function effects.formula(name, fn) effects.formulas[name] = fn end
 
+-- Global hooks merged with the battle's own (by priority; globals first on ties).
+local function phase_hooks(phase, battle)
+  local global = effects.hooks[phase]
+  local own = battle and battle.effect_hooks and battle.effect_hooks[phase]
+  if not own or #own == 0 then return global end
+  local merged, i, j = {}, 1, 1
+  while i <= #global or j <= #own do
+    local a, b = global[i], own[j]
+    if b == nil or (a ~= nil and a.priority >= b.priority) then
+      merged[#merged + 1] = a
+      i = i + 1
+    else
+      merged[#merged + 1] = b
+      j = j + 1
+    end
+  end
+  return merged
+end
+
 local function run_hooks(phase, ctx)
-  for _, entry in ipairs(effects.hooks[phase]) do
+  if ctx.cancelled then return end
+  for _, entry in ipairs(phase_hooks(phase, ctx.battle)) do
     entry.fn(ctx)
     if ctx.cancelled then return end
   end
@@ -96,27 +147,34 @@ local function vary(ctx, amount)
   return amount
 end
 
--- Hit check: user accuracy against target evasion (percent points).
-effects.hook("hit", function(ctx)
-  if ctx.effect.always_hit or ctx.source.always_hit or ctx.user == ctx.target or not ctx.random then return end
-  if ctx.effect.type ~= "damage" and ctx.effect.type ~= "add_state" then return end
+--- Chance (0..1) that an effect lands, from the user's accuracy against the
+--- target's evasion (percent points). Effects that cannot miss return 1.
+function effects.hit_chance(ctx)
+  if ctx.effect.always_hit or ctx.source.always_hit or ctx.user == ctx.target or ctx.environmental then return 1 end
+  if ctx.effect.type ~= "damage" and ctx.effect.type ~= "add_state" then return 1 end
   local chance = (ctx.effect.accuracy or ctx.source.accuracy or 100) / 100
   chance = chance * (1 + ctx.user:stat("accuracy") / 100) - ctx.target:stat("evasion") / 100
-  ctx.hit_chance = math.max(0, math.min(1, chance))
-  if ctx.preview then return end
-  if ctx.random:float() >= chance then ctx.missed = true end
-end, -100)
+  return tablex.clamp(chance, 0, 1)
+end
+
+-- Hit check. Previews and resolves without a random stream report the
+-- chance without rolling (and without consuming randomness).
+effects.hook("hit", function(ctx)
+  ctx.hit_chance = effects.hit_chance(ctx)
+  if ctx.preview or not ctx.random or ctx.hit_chance >= 1 then return end
+  if ctx.random:float() >= ctx.hit_chance then ctx.missed = true end
+end, -100, "fe.effects.hit")
 
 -- Critical hits from the user's critical stat (percent chance).
 effects.hook("modify", function(ctx)
-  if ctx.effect.type ~= "damage" or ctx.effect.no_critical or not ctx.random then return end
+  if ctx.effect.type ~= "damage" or ctx.effect.no_critical or ctx.environmental then return end
   ctx.critical_chance = ctx.user:stat("critical") / 100
-  if ctx.preview then return end
+  if ctx.preview or not ctx.random then return end
   if ctx.random:float() * 100 < ctx.user:stat("critical") then
     ctx.critical = true
     ctx.multiplier = ctx.multiplier * effects.settings.critical_multiplier
   end
-end, 100)
+end, 100, "fe.effects.critical")
 
 -- Elemental and damage-type affinities.
 effects.hook("modify", function(ctx)
@@ -124,7 +182,7 @@ effects.hook("modify", function(ctx)
   local affinity = ctx.target:resist(ctx.element) * ctx.target:resist(ctx.damage_type)
   ctx.affinity = affinity
   ctx.multiplier = ctx.multiplier * affinity
-end, 90)
+end, 90, "fe.effects.affinity")
 
 effects.handler("damage", function(ctx)
   local amount = math.floor(math.max(0, (ctx.preview and ctx.amount or vary(ctx, ctx.amount)) * ctx.multiplier) + 0.5)
@@ -176,6 +234,15 @@ effects.handler("remove_state", function(ctx)
   return { removed = ctx.target:remove_state(ctx.effect.state) and { ctx.effect.state } or {} }
 end)
 
+--- {"type": "buff", "stat": "attack", "mul": 1.5, "turns": 3, "id"?, "cap"?}:
+--- a temporary modifier on a battler (see Battler:buff for stacking).
+effects.handler("buff", function(ctx)
+  if not ctx.target.buff or not ctx.target:alive() then return { applied = false } end
+  local e = ctx.effect
+  local entry = ctx.target:buff({ stat = e.stat, add = e.add, mul = e.mul, id = e.id, cap = e.cap }, e.turns)
+  return { applied = entry ~= nil, stat = e.stat, stacks = entry and entry.stacks, capped = entry and entry.capped }
+end)
+
 effects.handler("revive", function(ctx)
   if ctx.target:alive() then return { amount = 0 } end
   local life = require("fe.rpg.combatant").life
@@ -196,7 +263,8 @@ local calculated = { damage = "physical", heal = "heal" }
 --- Resolve a skill or item use.
 --- With `preview = true` nothing changes: damage and healing report the
 --- expected amount and `hit_chance` (forecast panels).
----@param spec {user: table, targets: table[], source: table, effects?: table[], battle?: table, random?: RandomStream, hits?: integer, multiplier?: number, preview?: boolean}
+--- Without `random`, effects always land and never crit (deterministic).
+---@param spec {user: table, targets: table[], source: table, effects?: table[], battle?: table, random?: RandomStream, hits?: integer, multiplier?: number, preview?: boolean, environmental?: boolean}
 ---@return table[] results {target, type, missed?, critical?, amount?, ...}
 function effects.resolve(spec)
   local results = {}
@@ -209,28 +277,30 @@ function effects.resolve(spec)
         local ctx = {
           user = spec.user, target = target, source = spec.source, effect = effect, battle = spec.battle,
           random = spec.random, hit = hit, multiplier = spec.multiplier or 1, amount = 0, preview = spec.preview,
+          environmental = spec.environmental,
           element = effect.element or spec.source.element or (spec.source.uses_weapon and weapon and weapon.equip.element),
           damage_type = effect.damage_type or spec.source.damage_type
             or (spec.source.uses_weapon and weapon and (weapon.equip.damage_type or weapon.equip.type)),
         }
+        local alive_before = target:alive()
+        local handler = effects.handlers[effect.type]
+        if not handler then error("unknown effect type '" .. tostring(effect.type) .. "'") end
         run_hooks("before", ctx)
-        if not ctx.cancelled then
-          run_hooks("hit", ctx)
-        end
-        local result
-        if ctx.cancelled then
-          result = { cancelled = true }
-        elseif ctx.missed then
-          result = { missed = true }
-        else
+        run_hooks("hit", ctx)
+        if not ctx.cancelled and not ctx.missed then
           if calculated[effect.type] then
             ctx.amount = formula(ctx, calculated[effect.type])
             run_hooks("calculate", ctx)
           end
           run_hooks("modify", ctx)
-          local handler = effects.handlers[effect.type]
-          if not handler then error("unknown effect type '" .. tostring(effect.type) .. "'") end
           run_hooks("apply", ctx)
+        end
+        local result
+        if ctx.cancelled then
+          result = { cancelled = true }
+        elseif ctx.missed then
+          result = { missed = true, hit_chance = ctx.hit_chance }
+        else
           if ctx.preview and effect.type ~= "damage" and effect.type ~= "heal" then
             result = { chance = effect.chance or 1 } -- other effects are not simulated
           else
@@ -246,7 +316,7 @@ function effects.resolve(spec)
         result.user = spec.user
         result.type = effect.type
         result.hit = hit
-        result.knocked_out = not target:alive()
+        result.knocked_out = alive_before and not target:alive()
         ctx.result = result
         if not spec.preview then
           run_hooks("after", ctx)
@@ -257,6 +327,20 @@ function effects.resolve(spec)
     end
   end
   return results
+end
+
+--- Hot reload: hook lists merge by position, which can mix up entries, so
+--- this module's hooks (all registered with ids) are put back by id.
+function effects.__reload(live, fresh)
+  for phase, list in pairs(fresh.hooks) do
+    local own = {}
+    for _, entry in ipairs(list) do own[entry.id] = entry end
+    local current = live.hooks[phase]
+    for i = #current, 1, -1 do
+      if current[i].id and own[current[i].id] then table.remove(current, i) end
+    end
+    for _, entry in ipairs(list) do effects.insert_hook(current, entry.fn, entry.priority, entry.id) end
+  end
 end
 
 --- Whether `source` (skill or item) does anything useful to `target` out of

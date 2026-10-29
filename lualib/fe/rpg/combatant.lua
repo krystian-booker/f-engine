@@ -6,6 +6,7 @@
 ---   self.state_turns   -> table state id -> remaining turns (0 = lasting)
 local data = require("fe.data")
 local stats = require("fe.rpg.stats")
+local tablex = require("fe.tablex")
 
 local Combatant = {}
 
@@ -20,10 +21,10 @@ function Combatant.mixin(class)
   end
 end
 
---- Modifiers from active states.
+--- Modifiers from active states (in sorted state id order).
 function Combatant:state_modifiers()
   local out = {}
-  for id in pairs(self.state_turns) do
+  for _, id in ipairs(self:states()) do
     local def = data.find("states", id)
     if def then
       for _, m in ipairs(def.modifiers) do out[#out + 1] = m end
@@ -55,7 +56,7 @@ end
 --- Set a resource, clamped to 0..max. Returns the new value.
 function Combatant:set_resource(id, value)
   local max = self:max_resource(id)
-  value = math.max(0, math.min(max, math.floor(value + 0.5)))
+  value = tablex.clamp(math.floor(value + 0.5), 0, max)
   self.resources[id] = value
   if id == Combatant.life and value <= 0 then
     self:on_knocked_out()
@@ -87,7 +88,7 @@ end
 function Combatant:on_knocked_out()
   for id in pairs(self.state_turns) do
     local def = data.find("states", id)
-    if def and require("fe.tablex").contains(def.removed_by, "death") then
+    if def and tablex.contains(def.removed_by, "death") then
       self.state_turns[id] = nil
     end
   end
@@ -121,7 +122,7 @@ function Combatant:remove_states_tagged(tag)
   local removed = {}
   for id in pairs(self.state_turns) do
     local def = data.find("states", id)
-    if def and require("fe.tablex").contains(def.tags, tag) then
+    if def and tablex.contains(def.tags, tag) then
       self.state_turns[id] = nil
       removed[#removed + 1] = id
     end
@@ -137,11 +138,13 @@ function Combatant:states()
   return ids
 end
 
---- Count down states with a duration; returns ids that expired.
-function Combatant:tick_states()
+--- Count down states with a duration; returns ids that expired. States in
+--- `skip` (a set of ids) keep their count this time.
+---@param skip? table<string, boolean>
+function Combatant:tick_states(skip)
   local expired = {}
   for id, turns in pairs(self.state_turns) do
-    if turns > 0 then
+    if turns > 0 and not (skip and skip[id]) then
       if turns == 1 then
         expired[#expired + 1] = id
       else
@@ -158,7 +161,7 @@ end
 function Combatant:clear_states(occasion)
   for id in pairs(self.state_turns) do
     local def = data.find("states", id)
-    if not def or require("fe.tablex").contains(def.removed_by, occasion) then
+    if not def or tablex.contains(def.removed_by, occasion) then
       self.state_turns[id] = nil
     end
   end

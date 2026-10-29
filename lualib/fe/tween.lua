@@ -55,22 +55,24 @@ local function easing(name)
   return fn
 end
 
---- Call `step(eased_t)` every tick for `duration` seconds. Waits (call it
---- from a task); ends with step(1).
+--- Call `step(eased_t)` every tick for `duration` seconds of the task's
+--- clock (`task.clock`), so a tween in a task bound to a world follows its
+--- pause and time scale. Waits (call it from a task); ends with step(1),
+--- at once when the task is skipping.
 ---@param duration number
 ---@param step fun(t: number)
 ---@param ease? string|fun(t: number): number
 function tween.run(duration, step, ease)
   local fn = easing(ease)
-  local start = task.time()
-  if duration <= 0 then
+  local start = task.clock()
+  if duration <= 0 or task.skipping() then
     step(1)
     return
   end
   step(fn(0))
   while true do
     task.frame()
-    local t = math.min(1, (task.time() - start) / duration)
+    local t = task.skipping() and 1 or math.min(1, (task.clock() - start) / duration)
     step(fn(t))
     if t >= 1 then
       return

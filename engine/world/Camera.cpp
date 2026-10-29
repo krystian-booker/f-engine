@@ -6,8 +6,14 @@
 
 namespace fe {
 namespace {
+// Interpolates along the shorter arc, whatever the winding of a and b.
 float lerpAngle(float a, float b, float t) {
-    float delta = std::fmod(b - a + 540.0f, 360.0f) - 180.0f;
+    float delta = std::fmod(b - a, 360.0f);
+    if (delta > 180) {
+        delta -= 360;
+    } else if (delta < -180) {
+        delta += 360;
+    }
     return a + delta * t;
 }
 } // namespace
@@ -39,6 +45,14 @@ float Camera::interpolatedYaw(double alpha) const {
     return blend(alpha).yaw;
 }
 
+float Camera::interpolatedFov(double alpha) const {
+    return blend(alpha).fov;
+}
+
+float Camera::interpolatedDistance(double alpha) const {
+    return blend(alpha).distance;
+}
+
 glm::vec3 Camera::focus(double alpha) const {
     return blend(alpha).target + shake;
 }
@@ -58,8 +72,8 @@ glm::mat4 Camera::view(double alpha) const {
     return glm::lookAtRH(eye, at, up);
 }
 
-glm::mat4 Camera::projection(float aspect, bool homogeneousDepth) const {
-    const float f = glm::radians(std::clamp(fov, 1.0f, 170.0f));
+glm::mat4 Camera::projection(float aspect, bool homogeneousDepth, double alpha) const {
+    const float f = glm::radians(std::clamp(blend(alpha).fov, 1.0f, 170.0f));
     return homogeneousDepth ? glm::perspectiveRH_NO(f, aspect, nearPlane, farPlane)
                             : glm::perspectiveRH_ZO(f, aspect, nearPlane, farPlane);
 }
@@ -73,16 +87,16 @@ glm::vec3 Camera::forward(double alpha) const {
     return glm::normalize(focus(alpha) - position(alpha));
 }
 
-glm::vec3 Camera::project(glm::vec3 point, float aspect) const {
-    const auto clip = projection(aspect, true) * view() * glm::vec4(point, 1);
+glm::vec3 Camera::project(glm::vec3 point, float aspect, double alpha) const {
+    const auto clip = projection(aspect, true, alpha) * view(alpha) * glm::vec4(point, 1);
     if (clip.w <= 1e-6f) {
         return {0, 0, 2};
     }
     return glm::vec3(clip) / clip.w;
 }
 
-void Camera::ray(glm::vec2 ndc, float aspect, glm::vec3& origin, glm::vec3& direction) const {
-    const auto inverse = glm::inverse(projection(aspect, true) * view());
+void Camera::ray(glm::vec2 ndc, float aspect, glm::vec3& origin, glm::vec3& direction, double alpha) const {
+    const auto inverse = glm::inverse(projection(aspect, true, alpha) * view(alpha));
     auto nearPoint = inverse * glm::vec4(ndc, -1, 1);
     auto farPoint = inverse * glm::vec4(ndc, 1, 1);
     nearPoint /= nearPoint.w;

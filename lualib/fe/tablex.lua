@@ -29,6 +29,9 @@ function tablex.merge(target, source)
   return target
 end
 
+--- The keys of `t`, sorted by `tostring`. Meant for string keys: object
+--- keys (tables, userdata, functions) sort by address, which changes
+--- between runs.
 function tablex.keys(t)
   local out = {}
   for k in pairs(t) do out[#out + 1] = k end

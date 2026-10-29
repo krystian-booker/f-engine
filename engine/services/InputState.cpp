@@ -2,8 +2,39 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <utility>
 
 namespace fe {
+namespace {
+// The gamepad number of "pad3:a" (3), 0 for "pad:a", -1 for other inputs.
+int padNumber(std::string_view input) {
+    if (!input.starts_with("pad")) {
+        return -1;
+    }
+    const auto colon = input.find(':');
+    if (colon == std::string_view::npos) {
+        return -1;
+    }
+    int number = 0;
+    for (std::size_t i = 3; i < colon; ++i) {
+        if (input[i] < '0' || input[i] > '9' || number > 1000) {
+            return -1;
+        }
+        number = number * 10 + (input[i] - '0');
+    }
+    return colon == 3 ? 0 : number;
+}
+
+// Stick axes rest at a position rather than being pressed.
+bool stickAxis(std::string_view input) {
+    if (padNumber(input) < 0) {
+        return false;
+    }
+    const auto control = input.substr(input.find(':') + 1);
+    return control == "leftx" || control == "lefty" || control == "rightx" || control == "righty";
+}
+} // namespace
+
 void InputState::define(const std::string& action, std::vector<std::string> inputs, float threshold) {
     if (action.empty()) {
         throw std::invalid_argument("Input actions need a name");
@@ -43,24 +74,25 @@ void InputState::feed(const std::string& input, float value) {
     if (!std::isfinite(value)) {
         return;
     }
-    const float previous = raw(input);
-    raw_[input] = std::clamp(value, -1.0f, 1.0f);
-    const bool analog =
-        input == "pad:leftx" || input == "pad:lefty" || input == "pad:rightx" || input == "pad:righty";
-    const bool wasDown = std::abs(previous) >= 0.5f;
-    const bool isDown = std::abs(value) >= 0.5f;
-    if (isDown && !wasDown) {
-        downEdges_.insert(input);
-        if (!analog) {
-            pendingInputs_.push_back(input);
+    // Consecutive values on the same side of the threshold collapse into one;
+    // a flood of up/down changes keeps only the oldest and newest few.
+    auto& queue = pending_[input];
+    const float clamped = std::clamp(value, -1.0f, 1.0f);
+    if (!queue.empty() && (std::abs(queue.back()) >= 0.5f) == (std::abs(clamped) >= 0.5f)) {
+        queue.back() = clamped;
+    } else {
+        queue.push_back(clamped);
+        if (queue.size() > 8) {
+            queue.erase(queue.end() - 3, queue.end() - 1);
         }
-    } else if (!isDown && wasDown) {
-        upEdges_.insert(input);
     }
+    const int pad = padNumber(input);
     if (input.starts_with("key:")) {
         setDevice("keyboard");
-    } else if (input.starts_with("pad:") && std::abs(value) > 0.3f) {
-        setDevice("gamepad", deviceName_);
+    } else if (pad > 0 && std::abs(value) > 0.3f) {
+        usePad(pad);
+    } else if (pad == 0 && std::abs(value) > 0.3f) {
+        setDevice("gamepad");
     } else if (input.starts_with("mouse:")) {
         setDevice("mouse");
     }
@@ -80,29 +112,127 @@ void InputState::setDevice(const std::string& device, const std::string& name) {
     }
 }
 
+void InputState::usePad(int number) {
+    lastDevice_ = "gamepad";
+    if (const auto found = pads_.find(number); found != pads_.end()) {
+        deviceName_ = found->second.name;
+        deviceType_ = found->second.type;
+    }
+}
+
+void InputState::connectPad(Pad pad) {
+    pads_[pad.number] = std::move(pad);
+}
+
+void InputState::disconnectPad(int number) {
+    pads_.erase(number);
+}
+
+std::string InputState::deviceType() const {
+    return lastDevice_ == "gamepad" ? deviceType_ : "keyboard";
+}
+
+void InputState::feedText(std::string_view utf8) {
+    if (pendingText_.size() + utf8.size() <= 4096) {
+        pendingText_ += utf8;
+    }
+}
+
+void InputState::feedComposition(std::string text, int cursor) {
+    pendingComposition_.emplace(std::move(text), cursor);
+}
+
+void InputState::beginText(std::optional<glm::vec4> rect, std::string kind) {
+    textEntry_ = {true, rect, std::move(kind)};
+    textEntryChanged_ = true;
+}
+
+void InputState::endText() {
+    if (!textEntry_.active) {
+        return;
+    }
+    textEntry_ = {};
+    textEntryChanged_ = true;
+    pendingComposition_.reset();
+    composition_.clear();
+    compositionCursor_ = 0;
+}
+
+std::optional<InputState::TextEntry> InputState::takeTextEntryChange() {
+    if (!textEntryChanged_) {
+        return std::nullopt;
+    }
+    textEntryChanged_ = false;
+    return textEntry_;
+}
+
+void InputState::rumble(Rumble request) {
+    request.low = std::clamp(request.low, 0.0f, 1.0f);
+    request.high = std::clamp(request.high, 0.0f, 1.0f);
+    request.seconds = std::isfinite(request.seconds) ? std::clamp(request.seconds, 0.0, 60.0) : 0.0;
+    rumble_.push_back(request);
+}
+
+std::vector<InputState::Rumble> InputState::takeRumble() {
+    return std::exchange(rumble_, {});
+}
+
 void InputState::focusLost() {
-    for (auto& [input, value] : raw_) {
-        if (std::abs(value) >= 0.5f) {
-            upEdges_.insert(input);
+    pendingComposition_.emplace(std::string(), 0);
+    for (auto& [input, queue] : pending_) {
+        queue.assign(1, 0.0f);
+    }
+    for (const auto& [input, value] : raw_) {
+        if (value != 0) {
+            pending_[input].assign(1, 0.0f);
         }
-        value = 0;
+    }
+}
+
+void InputState::applyPending() {
+    pressedInputs_.clear();
+    for (auto it = pending_.begin(); it != pending_.end();) {
+        auto& [input, queue] = *it;
+        float& state = raw_[input];
+        bool changed = false;
+        while (!queue.empty()) {
+            const float value = queue.front();
+            const bool down = std::abs(value) >= 0.5f;
+            if (down != (std::abs(state) >= 0.5f)) {
+                if (changed) {
+                    break;
+                }
+                changed = true;
+                if (down && !stickAxis(input)) {
+                    pressedInputs_.push_back(input);
+                }
+            }
+            state = value;
+            queue.pop_front();
+        }
+        it = queue.empty() ? pending_.erase(it) : std::next(it);
+    }
+    text_ = std::exchange(pendingText_, {});
+    if (pendingComposition_) {
+        composition_ = std::move(pendingComposition_->first);
+        compositionCursor_ = pendingComposition_->second;
+        pendingComposition_.reset();
     }
 }
 
 void InputState::tick(double dt) {
+    applyPending();
     for (auto& [name, action] : actions_) {
-        bool held = false, down = false, up = false;
+        bool held = false;
         for (const auto& input : action.inputs) {
             const float value = raw(input);
             const bool negative = input.ends_with("-");
             const auto base = negative || input.ends_with("+") ? input.substr(0, input.size() - 1) : input;
             const float directed = input == base ? std::abs(value) : (negative ? -raw(base) : raw(base));
             held = held || directed >= action.threshold;
-            down = down || downEdges_.contains(input);
-            up = up || upEdges_.contains(input);
         }
-        action.pressed = (held && !action.held) || (down && !action.held);
-        action.released = (!held && action.held) || (up && !held && !action.pressed);
+        action.pressed = held && !action.held;
+        action.released = !held && action.held;
         action.held = held;
         action.previousHeldTime = action.heldTime;
         action.heldTime = held ? action.heldTime + dt : 0;
@@ -123,10 +253,6 @@ void InputState::tick(double dt) {
         }
         axis.value = std::clamp(value, -1.0f, 1.0f);
     }
-    pressedInputs_ = std::move(pendingInputs_);
-    pendingInputs_.clear();
-    downEdges_.clear();
-    upEdges_.clear();
     mouseMoved_ = glm::length(mouse_ - previousMouse_) > 0.01f;
     previousMouse_ = mouse_;
     wheelTick_ = wheel_;

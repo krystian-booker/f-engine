@@ -3,5 +3,6 @@
    "skills": [{"skill": "cleave", "level": 3}, {"skill": "guard_up", "jp": 30}], "equip": ["sword", "armor"]},
   {"id": "mage", "name": "Mage", "growth": {"max_hp": 12, "max_mp": 5, "magic": 4},
    "skills": [{"skill": "fire", "level": 1}, {"skill": "heal", "level": 1}], "equip": ["staff"],
-   "commands": ["attack", "magic", "item", "defend", "flee"]}
+   "commands": ["attack", "magic", "item", "defend", "flee"], "modifiers": [{"stat": "spirit", "add": 4}]},
+  {"id": "monk", "name": "Monk", "growth": {"max_hp": 18, "attack": 2}, "commands": ["attack"], "support_slots": 1}
 ]

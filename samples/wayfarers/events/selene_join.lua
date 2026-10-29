@@ -4,6 +4,7 @@ local dialogue = require("fe.dialogue")
 local party = require("fe.rpg.party")
 local quest = require("fe.quest")
 local state = require("fe.state")
+local story = require("fe.story")
 
 return function(ev)
   local selene = cutscene.actor(ev.self)
@@ -15,7 +16,7 @@ return function(ev)
     party.join("selene")
     state.set_flag("selene_joined")
     quest.start("selene_1")
-    quest.set_chapter("selene", 1)
+    story.recruit("selene")
   else
     dialogue.say("Selene", "Suit yourself. I'll be here.", { portrait = "portraits/selene.png" })
   end

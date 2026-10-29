@@ -1,0 +1,6 @@
+{
+  "fe": {
+    "settings": { "title": "Options" },
+    "field": { "found_item": "Trouvé : {item}." }
+  }
+}

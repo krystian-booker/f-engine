@@ -1,6 +1,7 @@
 [
   {"id": "potion", "name": "Potion", "price": 30, "use": {"target": "ally", "effects": [{"type": "heal", "formula": "fixed", "power": 50}]}},
   {"id": "ether", "name": "Ether", "price": 80, "use": {"target": "ally", "effects": [{"type": "resource", "resource": "mp", "amount": 20}]}},
+  {"id": "charm", "name": "Healing Charm", "price": 500, "use": {"target": "ally", "consume": false, "effects": [{"type": "heal", "formula": "fixed", "power": 10}]}},
   {"id": "bronze_sword", "name": "Bronze Sword", "kind": "equipment", "price": 100,
    "equip": {"slot": "weapon", "type": "sword", "modifiers": [{"stat": "attack", "add": 8}]}},
   {"id": "oak_staff", "name": "Oak Staff", "kind": "equipment", "price": 90,

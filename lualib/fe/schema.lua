@@ -4,7 +4,8 @@
 --- {list = T}, {map = T}, {enum = {...}}, {ref = "table_name"},
 --- {record = {field = spec, ...}} or the name of another schema.
 --- A field spec is a type or {type = T, optional = true, default = v,
---- min = n, max = n, doc = "..."}.
+--- min = n, max = n, doc = "..."}; table types may carry the field keys
+--- directly ({enum = {...}, optional = true}). Lists must have no holes.
 ---
 --- ```lua
 --- schema.define("item", {
@@ -14,17 +15,29 @@
 --- })
 --- local ok, errors = schema.validate("item", entry)
 --- ```
---- `schema.export()` describes every schema for the editor's form inspectors.
+--- `schema.export()` describes every schema, placement type and zone type
+--- for the editor's form inspectors.
 local schema = {}
 
 local definitions = {}
 local entity_types = {}
+local zone_types = {}
+
+local field_keys = { optional = true, default = true, min = true, max = true, doc = true }
 
 local function field_spec(spec)
-  if type(spec) == "table" and spec.type ~= nil then
+  if type(spec) ~= "table" then
+    return { type = spec }
+  end
+  if spec.type ~= nil then
     return spec
   end
-  return { type = spec }
+  local field, kind = {}, {}
+  for key, value in pairs(spec) do
+    if field_keys[key] then field[key] = value else kind[key] = value end
+  end
+  field.type = kind
+  return field
 end
 
 --- Define (or replace) a named record schema.
@@ -54,6 +67,14 @@ end
 ---@param doc? string
 function schema.entity(type_name, fields, doc)
   entity_types[type_name] = { fields = fields, doc = doc }
+end
+
+--- Describe the props of a zone type (map editor inspector).
+---@param type_name string
+---@param fields table<string, any>
+---@param doc? string
+function schema.zone(type_name, fields, doc)
+  zone_types[type_name] = { fields = fields, doc = doc }
 end
 
 local check
@@ -123,8 +144,20 @@ check = function(f, value, path, errors, refs)
       errors[#errors + 1] = path .. ": expected a list"
       return
     end
-    for i, item in ipairs(value) do
-      check(field_spec(t.list), item, path .. "[" .. i .. "]", errors, refs)
+    local count = 0
+    for key in pairs(value) do
+      count = count + 1
+      if math.type(key) ~= "integer" or key < 1 then
+        errors[#errors + 1] = path .. ": expected a list, found key '" .. tostring(key) .. "'"
+        return
+      end
+    end
+    for i = 1, count do
+      if value[i] == nil then
+        errors[#errors + 1] = path .. "[" .. i .. "]: missing (lists cannot have holes)"
+        return
+      end
+      check(field_spec(t.list), value[i], path .. "[" .. i .. "]", errors, refs)
     end
   elseif t.map then
     if type(value) ~= "table" then
@@ -181,24 +214,28 @@ local function describe(spec)
   return out
 end
 
---- JSON-friendly description of every schema and entity type.
-function schema.export()
-  local out = { schemas = {}, entities = {} }
-  for name, d in pairs(definitions) do
+local function describe_types(types)
+  local out = {}
+  for name, t in pairs(types) do
     local fields = {}
-    for key, spec in pairs(d.fields) do fields[key] = describe(spec) end
-    out.schemas[name] = { doc = d.doc, fields = fields }
-  end
-  for name, e in pairs(entity_types) do
-    local fields = {}
-    for key, spec in pairs(e.fields) do fields[key] = describe(spec) end
-    out.entities[name] = { doc = e.doc, fields = fields }
+    for key, spec in pairs(t.fields) do fields[key] = describe(spec) end
+    out[name] = { doc = t.doc, fields = fields }
   end
   return out
 end
 
+--- JSON-friendly description of every schema, entity type and zone type.
+function schema.export()
+  return { schemas = describe_types(definitions), entities = describe_types(entity_types),
+    zones = describe_types(zone_types) }
+end
+
 function schema.entity_type(name)
   return entity_types[name]
+end
+
+function schema.zone_type(name)
+  return zone_types[name]
 end
 
 return schema

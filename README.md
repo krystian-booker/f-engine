@@ -2,17 +2,17 @@
 
 A C++20 engine for HD-2D role-playing games: pixel-art sprites standing in lit 3D dioramas, with every game rule written in Lua.
 
-The C++ engine provides **services only**: windowing, input action maps, a 3D world of entities (sprites, meshes, lights, particles), grid navigation and tactical queries, 2D canvas drawing, text layout, audio, saves, hot reload, replays and an in-game editor. It contains no JRPG concepts. HP, parties, items, battles, menus, shops, quests and encounters are Lua. `tools/ci/check_boundary.py` enforces this in CI.
+The C++ engine provides **services only**: windowing, input action maps, a 3D world of entities (sprites, meshes, lights, particles) with HD-2D post-processing (mip-chain bloom, depth-aware depth of field, ambient occlusion, distortion, FXAA, game post shaders), several views per frame (screen rects and render targets), freeze-frame transitions, grid navigation and tactical queries, 2D canvas drawing, text layout, audio, saves, hot reload, replays and an in-game editor. It contains no JRPG concepts. HP, parties, items, battles, menus, shops, quests and encounters are Lua. `tools/ci/check_boundary.py` enforces this in CI.
 
-The engine ships a Lua library of replaceable kits in `lualib/fe/`. It covers the field, events, cutscenes, dialogue, UI widgets and default screens, an RPG data model, an effect pipeline, and battle cores with ATB, round-order and initiative schedulers, side-view and grid-tactics presentations. A game can use the kits, extend them through hooks, override any module by adding a file with the same path, or ignore them.
+The engine ships a Lua library of replaceable kits in `lualib/fe/`. It covers the field, events, cutscenes (fast-forward and skip), dialogue (voice-over, lip-flap, auto-advance), UI widgets and default screens with toasts, per-controller button glyphs and accessibility settings, NPC followers, multi-protagonist chapters, an RPG data model, an effect pipeline, and battle cores with ATB, round-order and initiative schedulers, side-view and grid-tactics presentations. A game can use the kits, extend them through hooks, override any module by adding a file with the same path, or ignore them.
 
 Three original samples show the range:
 
 | Sample | Shows |
 | --- | --- |
-| `samples/vale` | Classic town and dungeon, quests, shops, inn, side-view **ATB** battles with scripted enemy AI |
-| `samples/wayfarers` | Round-order battles with turn preview, **weakness shields / break** and a **boost** resource, custom stats, NPC verbs, two protagonists with chapters, a world map, day/night |
-| `samples/ridgeline` | A **council vote** with persuasion and branching flags, then a **grid tactics** battle: deployment, height, facing, terrain reactions (burning grass, freezing or electrified water), knockback and objectives |
+| `samples/vale` | Classic town and dungeon, quests (with update toasts), shops, inn, side-view **ATB** battles with scripted enemy AI |
+| `samples/wayfarers` | Octopath-style round-order battles (commands chosen on each turn, this-round and next-round turn preview), **weakness shields / break** and a **boost** resource (the kit's `fe.battle.break`), **divine skills** paid from a limit gauge (`fe.battle.limit`), custom stats, NPC verbs (including guiding a townsperson as a follower), two protagonists with chapters and a chapter select, a world map, an Octopath II-style day/night switch |
+| `samples/ridgeline` | A **council vote** with persuasion and branching flags, then a **grid tactics** battle: deployment, height, facing, terrain reactions (spreading grass fires, freezing or electrified water), knockback, **destructible barricades**, **reinforcements**, **ripostes** and objectives |
 
 None of the sample mechanics touch `engine/`.
 
@@ -31,18 +31,23 @@ On Windows (Visual Studio 2022), configure with `-A x64` and build with `--confi
 
 ```sh
 sudo apt-get install build-essential cmake ninja-build libx11-dev libxrandr-dev libxi-dev libxcursor-dev \
-  libxinerama-dev libgl1-mesa-dev libasound2-dev libpulse-dev libudev-dev libvulkan-dev
+  libxinerama-dev libgl1-mesa-dev libegl-dev libwayland-dev libxkbcommon-dev wayland-protocols \
+  libasound2-dev libpulse-dev libudev-dev libvulkan-dev
 ```
 
-Renderers are Metal on macOS, D3D11 on Windows and Vulkan on Linux, with OpenGL as a fallback.
+Renderers are Metal on macOS, D3D11 on Windows and Vulkan on Linux (Wayland or X11), with OpenGL as a fallback.
+
+Debug builds include the F1 editor, hot reload and the error overlay; Release builds leave them out. `-DFENGINE_DEV=ON` or `OFF` overrides that (see [verification.md](docs/verification.md)).
 
 | Program | Use |
 | --- | --- |
-| `fengine <game> [--mute] [--replay file] [--seed n] [--frames n] [--user-data dir]` | Play or develop a game. F1 opens the editor (dev builds). |
+| `fengine <game> [--mute] [--replay file] [--record file] [--seed n] [--frames n] [--user-data dir]` | Play or develop a game. F1 opens the editor (dev builds). `--record` saves the session's input as a replay. |
 | `fengine_headless --test <game> [--filter text]` | Run a game's Lua tests (`tests/*.lua`) without a window |
 | `fengine_headless --check <game>` | Validate data tables, maps, scripts and assets |
+| `fengine_headless <game> --replay <file>` | Run a replay without a window or GPU (screenshots skipped) |
 | `fengine_headless --write-api <dir>` | Write the Lua API stubs (`fengine.d.lua`) and `api.md` |
-| `fengine_assetc atlas` / `sheet` | Pack sprite atlases and convert uniform sheets to animations |
+| `fengine_assetc atlas` / `sheet` / `cook` | Pack sprite atlases, convert uniform sheets to animations, and compress world and mesh textures to BC7 `.ktx` |
+| `fengine_assetc pack <folder> <out.pak>` / `list <archive.pak>` | Archive a game or `lualib` folder, list an archive |
 
 The default controls come from `fe.input` and can be rebound on the Config screen. Move with the arrows or WASD, confirm with Enter/Z, cancel with Escape/X, and open the menu with Tab.
 
@@ -72,9 +77,11 @@ Sample art and audio are generated placeholders. `python3 tools/generate_samples
 ## Ship
 
 ```sh
-cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DFENGINE_DEV=OFF
+cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build-release
-python3 tools/package_game.py --runtime build-release/fengine --shaders build-release/shaders \
-  --game path/to/game --validator build-release/fengine_headless --licenses build-release/licenses \
-  --output dist/my-game --zip
+python3 tools/package_game.py --runtime build-release/fengine --assetc build-release/tools/assetc/fengine_assetc \
+  --shaders build-release/shaders --game path/to/game --validator build-release/fengine_headless \
+  --licenses build-release/licenses --output dist/my-game --zip --self-check
 ```
+
+The game and `lualib` ship as `game.pak` and `lualib.pak` archives. Release builds have `FENGINE_DEV` off: no editor, and shaders and `lualib` are found only next to the executable (every build tree carries `lualib`, so this also holds for builds outside the source tree). Signing hooks: `--sign-identity` and `--notarize-profile` (macOS), `--signtool` (Windows); `--appimage` builds a Linux AppImage. See [verification.md](docs/verification.md#package-a-game). On macOS the package is an `.app` bundle (add `-DFENGINE_UNIVERSAL=ON` for arm64 and x86_64); on Windows `fengine.exe` is a GUI program with no console window.

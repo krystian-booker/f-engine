@@ -1,13 +1,13 @@
 #include "engine/runtime/MainLoop.h"
+#include "engine/assets/Image.h"
 #include "engine/audio/MiniAudio.h"
 #include "engine/core/FixedStep.h"
 #include "engine/core/Log.h"
 #include "engine/input/SdlInput.h"
 #include "engine/platform/FileWatcher.h"
 #include "engine/platform/Window.h"
-#include "engine/render/CanvasRenderer.h"
+#include "engine/render/FrameRenderer.h"
 #include "engine/render/Renderer.h"
-#include "engine/render/WorldRenderer.h"
 #include "engine/runtime/Engine.h"
 #include "engine/runtime/ReplayHarness.h"
 #if FENGINE_DEV
@@ -15,11 +15,14 @@
 #endif
 #include <SDL3/SDL.h>
 #include <chrono>
-#include <imgui.h>
 #include <iostream>
+#include <vector>
 
 namespace fe {
 namespace {
+using Clock = std::chrono::steady_clock;
+
+#if FENGINE_DEV
 // Development hot reload: game files, lualib, compiled shaders, and shader
 // sources when running from the build tree (rebuilt in the background).
 class Reloader {
@@ -42,7 +45,7 @@ public:
     Reloader(const Reloader&) = delete;
     Reloader& operator=(const Reloader&) = delete;
 
-    void poll(Engine& engine, Renderer& renderer, WorldRenderer& worlds, CanvasRenderer& canvas) {
+    void poll(Engine& engine, Renderer& renderer) {
         for (auto* watcher : {&game_, &library_}) {
             for (const auto& change : watcher->poll()) {
                 if (change.kind != FileChangeKind::Removed) {
@@ -56,8 +59,6 @@ public:
         }
         if (shadersChanged) {
             try {
-                worlds.reloadPrograms();
-                canvas.reload(renderer.shaderRoot());
                 renderer.reloadShaders();
             } catch (const std::exception& error) {
                 log(LogLevel::Error,
@@ -99,177 +100,386 @@ private:
     SDL_Process* build_ = nullptr;
     bool queued_ = false;
 };
-} // namespace
+#endif
 
-MainLoop::MainLoop(RuntimeOptions options) : options_(std::move(options)) {
+// Replay screenshots: each must look like a rendered frame, and one with a
+// reference image for the running backend must match it. bgfx writes a
+// capture while presenting a later frame, so each one is checked once the
+// file exists. With `write` (--write-references) the capture, at reference
+// size, becomes the reference instead.
+class CaptureChecks {
+public:
+    explicit CaptureChecks(bool write) : write_(write) {}
+    void request(Renderer& renderer, const std::filesystem::path& capture,
+                 std::optional<std::filesystem::path> reference, double tolerance) {
+        std::error_code ec;
+        std::filesystem::remove(capture, ec);
+        renderer.capture(capture);
+        pending_.push_back({capture, std::move(reference), tolerance, 0});
+    }
+    void poll(ReplayHarness& replay) {
+        std::erase_if(pending_, [&](Pending& check) {
+            if (!std::filesystem::exists(check.capture)) {
+                if (++check.frames > 10) {
+                    replay.fail("Screenshot was never written: " + check.capture.string());
+                    return true;
+                }
+                return false;
+            }
+            try {
+                check.verify(replay, write_);
+            } catch (const std::exception& error) {
+                replay.fail(std::string("Screenshot check failed: ") + error.what());
+            }
+            return true;
+        });
+    }
+    [[nodiscard]] bool idle() const { return pending_.empty(); }
+
+private:
+    struct Pending {
+        std::filesystem::path capture;
+        std::optional<std::filesystem::path> reference;
+        double tolerance;
+        int frames;
+
+        void verify(ReplayHarness& replay, bool write) const {
+            const auto image = Image::load(capture);
+            if (const auto problem = blankFrameProblem(image); !problem.empty()) {
+                replay.fail(capture.string() + " is not a rendered frame: " + problem);
+                return;
+            }
+            if (!reference) {
+                return;
+            }
+            if (write) {
+                resizedTo(image, ReferenceWidth).savePng(*reference);
+                log(LogLevel::Info, "Wrote reference image " + reference->string());
+                return;
+            }
+            if (!std::filesystem::exists(*reference)) {
+                log(LogLevel::Info, "No reference image " + reference->string() + " for this backend; " +
+                                        capture.string() + " was only checked for being a rendered frame");
+                return;
+            }
+            const auto difference = compareCapture(image, Image::load(*reference));
+            if (difference.mean > tolerance) {
+                replay.fail(capture.string() + " differs from " + reference->string() + ": mean " +
+                            std::to_string(difference.mean) + " > tolerance " + std::to_string(tolerance) +
+                            " (largest " + std::to_string(difference.max) + ")");
+            }
+        }
+    };
+    bool write_;
+    std::vector<Pending> pending_;
+};
+
+std::optional<ReplayHarness> loadReplay(const RuntimeOptions& options) {
+    if (options.replay.empty()) {
+        return std::nullopt;
+    }
+    return ReplayHarness(options.replay);
 }
 
-int MainLoop::run() {
-    const auto config = GameConfig::load(options_.game);
-    Window window(config);
-    Renderer renderer(window, options_.shaders);
-    EngineOptions engineOptions;
-    engineOptions.gameRoot = options_.game;
-    engineOptions.libraryRoot = options_.lualib;
-    engineOptions.userData = options_.userData;
-    engineOptions.development = FENGINE_DEV != 0;
-    engineOptions.seed = options_.seed;
-    if (!options_.mute) {
-        engineOptions.audio = std::make_unique<MiniAudio>();
+// Replays and recordings are deterministic: a fixed seed unless one is given.
+std::optional<std::uint64_t> sessionSeed(const RuntimeOptions& options,
+                                         const std::optional<ReplayHarness>& replay) {
+    if (options.seed) {
+        return options.seed;
     }
-    Engine engine(std::move(engineOptions));
-    GpuAssets gpu(engine.assets());
-    WorldRenderer worlds(gpu, options_.shaders, config.pixelsPerUnit);
-    CanvasRenderer canvas(gpu, options_.shaders);
-    SdlInput input(engine.input());
-    std::optional<ReplayHarness> replay;
-    if (!options_.replay.empty()) {
-        replay.emplace(options_.replay);
+    if (replay) {
+        return replay->seed().value_or(1);
     }
+    if (!options.record.empty()) {
+        return static_cast<std::uint64_t>(Clock::now().time_since_epoch().count());
+    }
+    return std::nullopt;
+}
+
+// One run of a game in a window: owns every subsystem and splits a frame
+// into event handling, fixed-step ticks, rendering and app requests.
+class Session {
+public:
+    Session(const RuntimeOptions& options, const GameConfig& config)
+        : options_(options), window_(config), renderer_(window_, options.shaders),
+          replay_(loadReplay(options)), engine_(engineOptions(), config),
+          frame_(renderer_, engine_.assets(), config.pixelsPerUnit), input_(engine_.input())
 #if FENGINE_DEV
-    Editor editor(engine);
-    if (options_.tools) {
-        editor.toggle();
-    }
-    Reloader reloader(options_, options_.shaders);
+          ,
+          editor_(engine_), reloader_(options, options.shaders)
 #endif
     {
-        const auto [w, h] = window.pixelSize();
-        engine.setViewport(w, h);
+        if (!options.record.empty()) {
+            recorder_.emplace(engine_.seed());
+            input_.record(&*recorder_);
+        }
+#if FENGINE_DEV
+        if (options.tools) {
+            editor_.toggle();
+        }
+#endif
+        readViewport();
+        auto& display = engine_.display();
+        display.monitors = Window::monitors();
+        window_.describe(display);
+        refresh_ = window_.refreshRate();
     }
-    if (!engine.start() && FENGINE_DEV == 0) {
-        std::cerr << "The game failed to start; see the log above.\n";
-        return 1;
+
+    int run() {
+        if (!engine_.start() && FENGINE_DEV == 0) {
+            std::cerr << "The game failed to start; see the log above.\n";
+            return 1;
+        }
+        auto previous = Clock::now();
+        while (running_) {
+            pumpEvents();
+            const auto now = Clock::now();
+            const double frameSeconds = std::chrono::duration<double>(now - previous).count();
+            previous = now;
+            advance(replay_ && !options_.realtime ? step_.interval() : frameSeconds);
+            if (engine_.display().vsync == VsyncMode::Adaptive) {
+                renderer_.setVsync(adaptive_.update(frameSeconds, refresh_, renderer_.vsync()));
+            }
+            render(frameSeconds * 1000.0);
+            applyRequests();
+            if (options_.realtime && replay_) {
+                const auto spent = std::chrono::duration<double>(Clock::now() - now).count();
+                if (spent < step_.interval()) {
+                    SDL_DelayNS(static_cast<Uint64>((step_.interval() - spent) * 1e9));
+                }
+            }
+        }
+        return finish();
     }
-    FixedStep step;
-    std::uint64_t frames = 0, ticks = 0;
-    double sinceReload = 0, frameMs = 0;
-    bool running = true;
-    auto previous = std::chrono::steady_clock::now();
-    while (running) {
+
+private:
+    EngineOptions engineOptions() {
+        EngineOptions engine;
+        engine.gameRoot = options_.game;
+        engine.libraryRoot = options_.lualib;
+        engine.userData = options_.userData;
+        engine.development = FENGINE_DEV != 0;
+        engine.seed = sessionSeed(options_, replay_);
+        engine.testHooks = !options_.replay.empty() || !options_.record.empty();
+        // Replays and recordings must not depend on the machine's language.
+        engine.locale = engine.testHooks ? "en-US" : preferredLocale();
+        if (options_.platform) {
+            engine.platform = options_.platform(options_.userData);
+        }
+        if (!options_.mute) {
+            auto audio = std::make_unique<MiniAudio>();
+            audio_ = audio.get();
+            engine.audio = std::move(audio);
+        }
+        return engine;
+    }
+
+    void readViewport() {
+        const auto [width, height] = window_.pixelSize();
+        viewport_ = {width, height};
+        engine_.setViewport(width, height);
+    }
+
+    void pumpEvents() {
         SDL_Event event;
-        const auto [width, height] = window.pixelSize();
-        const glm::ivec2 viewport(width, height);
         while (SDL_PollEvent(&event)) {
-            renderer.processEvent(event);
+            renderer_.processEvent(event);
+            activity_.handle(event);
             if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
-                running = false;
+                running_ = false;
+            }
+            if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
+                viewport_ = {event.window.data1, event.window.data2};
+            }
+            if (event.type >= SDL_EVENT_DISPLAY_FIRST && event.type <= SDL_EVENT_DISPLAY_LAST) {
+                monitorsChanged_ = true;
             }
 #if FENGINE_DEV
             if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
                 event.key.scancode == SDL_SCANCODE_F1) {
-                editor.toggle();
+                editor_.toggle();
                 continue;
             }
-            const bool captured = editor.capturesInput();
+            const bool captured = editor_.capturesInput();
 #else
             const bool captured = false;
 #endif
-            if (!replay) { // replays feed their own input for determinism
-                input.process(event, engine.canvas(), viewport, SDL_GetWindowPixelDensity(window.native()),
-                              captured);
+            if (!replay_) { // replays feed their own input for determinism
+                input_.process(event, engine_.canvas(), viewport_,
+                               SDL_GetWindowPixelDensity(window_.native()), captured);
             }
         }
-        const auto now = std::chrono::steady_clock::now();
-        const double elapsed = replay && !options_.realtime
-                                   ? step.interval()
-                                   : std::chrono::duration<double>(now - previous).count();
-        frameMs = std::chrono::duration<double, std::milli>(now - previous).count();
-        previous = now;
-        engine.setViewport(width, height);
-        step.advance(elapsed, [&](double dt) {
-            if (replay) {
-                const auto effects = replay->apply(ticks + 1, engine);
-                if (effects.capture) {
-                    renderer.capture(*effects.capture);
-                }
-                if (effects.resize) {
-                    SDL_SetWindowSize(window.native(), effects.resize->first, effects.resize->second);
-                }
+        readViewport();
+        auto& display = engine_.display();
+        if (monitorsChanged_) {
+            monitorsChanged_ = false;
+            display.monitors = Window::monitors();
+        }
+        window_.describe(display);
+        refresh_ = window_.refreshRate();
+    }
+
+    // Background windows don't advance the game; replays always run.
+    [[nodiscard]] bool suspended() const {
+        return options_.pauseOnFocusLoss && !replay_ && !activity_.foreground();
+    }
+
+    void advance(double elapsed) {
+        const bool pause = suspended();
+        if (pause != wasSuspended_) {
+            wasSuspended_ = pause;
+            if (audio_) {
+                audio_->setPaused(pause);
             }
+            log(LogLevel::Info, pause ? "Window in background: game paused" : "Game resumed");
+        }
 #if FENGINE_DEV
-            if (editor.paused()) {
-                return;
-            }
-#endif
-            engine.tick(dt);
-            ++ticks;
-        });
-#if FENGINE_DEV
-        sinceReload += elapsed;
-        if (sinceReload > 0.25) {
-            sinceReload = 0;
-            reloader.poll(engine, renderer, worlds, canvas);
+        sinceReload_ += elapsed;
+        if (sinceReload_ > 0.25) {
+            sinceReload_ = 0;
+            reloader_.poll(engine_, renderer_);
         }
 #endif
-        if (renderer.beginFrame()) {
-            gpu.sync();
-            engine.draw(step.alpha());
-            int slot = 0;
-            std::uint32_t calls = 0;
-            for (const auto& world : engine.drawList()) {
-                worlds.render(*world, step.alpha(), viewport, engine.screen(), engine.gameTime(), slot++);
-                calls += worlds.drawCalls();
-            }
-            canvas.render(engine.canvas(), engine.screen(), viewport);
-#if FENGINE_DEV
-            editor.drawErrors();
-            editor.draw(frameMs, calls);
-#endif
-            auto& requests = engine.requests();
-            for (const auto& file : requests.captures) {
-                renderer.capture(file);
-            }
-            requests.captures.clear();
-            if (frames + 1 == 30 && !options_.capture.empty()) {
-                renderer.capture(options_.capture);
-            }
-            renderer.endFrame();
-            ++frames;
-        } else {
-            SDL_Delay(16);
+        if (!pause) {
+            step_.advance(elapsed, [&](double dt) { tick(dt); });
         }
-        auto& requests = engine.requests();
+    }
+
+    void tick(double dt) {
+        if (replay_) {
+            const auto effects = replay_->apply(ticks_ + 1, engine_);
+            if (effects.capture) {
+                captures_.request(renderer_, *effects.capture,
+                                  effects.reference
+                                      ? std::optional(referenceFor(*effects.reference, renderer_.name()))
+                                      : std::nullopt,
+                                  effects.tolerance);
+            }
+            if (effects.resize) {
+                SDL_SetWindowSize(window_.native(), effects.resize->first, effects.resize->second);
+            }
+        }
+#if FENGINE_DEV
+        if (editor_.paused()) {
+            return;
+        }
+#endif
+        if (recorder_) {
+            recorder_->stamp(ticks_ + 1);
+        }
+        engine_.tick(dt);
+        ++ticks_;
+    }
+
+    void render([[maybe_unused]] double frameMilliseconds) {
+        if (!renderer_.beginFrame()) {
+            SDL_Delay(16); // minimised
+            return;
+        }
+        engine_.draw(step_.alpha());
+        auto& requests = engine_.requests();
+        for (const auto& file : requests.sceneCaptures) {
+            frame_.captureScene(file);
+        }
+        requests.sceneCaptures.clear();
+        frame_.render(engine_.drawList(), engine_.canvas(), engine_.screen(), viewport_, step_.alpha(),
+                      engine_.gameTime(), engine_.ticks());
+#if FENGINE_DEV
+        editor_.drawErrors();
+        editor_.draw(frameMilliseconds, frame_.drawCalls());
+#endif
+        for (const auto& file : requests.captures) {
+            renderer_.capture(file);
+        }
+        requests.captures.clear();
+        if (frames_ + 1 == 30 && !options_.capture.empty()) {
+            renderer_.capture(options_.capture);
+        }
+        frame_.finishFrame(renderer_.endFrame());
+        ++frames_;
+        if (replay_) {
+            captures_.poll(*replay_);
+        }
+    }
+
+    void applyRequests() {
+        auto& requests = engine_.requests();
         if (requests.title) {
-            SDL_SetWindowTitle(window.native(), requests.title->c_str());
+            SDL_SetWindowTitle(window_.native(), requests.title->c_str());
             requests.title.reset();
         }
-        if (requests.fullscreen) {
-            SDL_SetWindowFullscreen(window.native(), *requests.fullscreen);
-            requests.fullscreen.reset();
+        if (requests.display) {
+            applyDisplay(*requests.display);
+            requests.display.reset();
         }
-        if (requests.quit) {
-            running = false;
-        }
-        if (options_.frameLimit && frames >= options_.frameLimit) {
-            running = false;
-        }
-        if (replay && replay->finished() && ticks > replay->lastTick() + 30) {
-            running = false;
-        }
-        if (options_.realtime && replay) {
-            const auto spent = std::chrono::duration<double>(std::chrono::steady_clock::now() - now).count();
-            if (spent < step.interval()) {
-                SDL_DelayNS(static_cast<Uint64>((step.interval() - spent) * 1e9));
-            }
-        }
+        input_.apply(window_.native(), engine_.canvas(), viewport_,
+                     SDL_GetWindowPixelDensity(window_.native()));
+        running_ = running_ && !requests.quit && !(options_.frameLimit && frames_ >= options_.frameLimit) &&
+                   !(replay_ && replay_->done(ticks_) && captures_.idle());
     }
-    int code = 0;
-    if (replay) {
-        for (const auto& failure : replay->failures()) {
-            std::cerr << "REPLAY FAILURE: " << failure << "\n";
-            code = 1;
+
+    void applyDisplay(const DisplayRequest& request) {
+        auto& display = engine_.display();
+        DisplayState target = display;
+        window_.describe(target);
+        request.applyTo(target);
+        window_.apply(target);
+        if (request.vsync) {
+            adaptive_.reset();
+            renderer_.setVsync(*request.vsync != VsyncMode::Off);
         }
-        if (!replay->finished()) {
-            std::cerr << "REPLAY FAILURE: stopped before every command ran\n";
-            code = 1;
-        }
-        if (!engine.lua().errors().empty()) {
-            std::cerr << "REPLAY FAILURE: " << engine.lua().errors().size() << " script error(s)\n";
-            code = 1;
-        }
+        display.vsync = target.vsync;
+        window_.describe(display);
+        refresh_ = window_.refreshRate();
+        readViewport();
     }
-    log(LogLevel::Info, "Stopped after " + std::to_string(frames) + " frames");
-    return code;
+
+    int finish() {
+        int code = 0;
+        if (replay_) {
+            code = replay_->report(engine_);
+        }
+        if (recorder_) {
+            writeJson(options_.record, recorder_->toJson(ticks_));
+            log(LogLevel::Info,
+                "Recorded " + std::to_string(ticks_) + " ticks to " + options_.record.string());
+        }
+        log(LogLevel::Info, "Stopped after " + std::to_string(frames_) + " frames");
+        return code;
+    }
+
+    const RuntimeOptions& options_;
+    Window window_;
+    Renderer renderer_;
+    std::optional<ReplayHarness> replay_;
+    MiniAudio* audio_ = nullptr; // owned by the engine
+    Engine engine_;
+    FrameRenderer frame_;
+    SdlInput input_;
+    WindowActivity activity_;
+    std::optional<ReplayRecorder> recorder_;
+    CaptureChecks captures_{options_.writeReferences};
+#if FENGINE_DEV
+    Editor editor_;
+    Reloader reloader_;
+    double sinceReload_ = 0;
+#endif
+    FixedStep step_;
+    AdaptiveVsync adaptive_;
+    float refresh_ = 60;
+    bool monitorsChanged_ = false;
+    glm::ivec2 viewport_{1};
+    std::uint64_t frames_ = 0, ticks_ = 0;
+    bool running_ = true, wasSuspended_ = false;
+};
+} // namespace
+
+MainLoop::MainLoop(RuntimeOptions options, GameConfig config)
+    : options_(std::move(options)), config_(std::move(config)) {
+}
+
+int MainLoop::run() {
+    Session session(options_, config_);
+    return session.run();
 }
 } // namespace fe

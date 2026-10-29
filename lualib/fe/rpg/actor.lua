@@ -27,6 +27,7 @@ local function new_record(def)
   return {
     level = def.level, exp = Actor.exp_for_level(def.level), class = def.class, secondary = nil,
     jp = {}, resources = {}, equipment = tablex.copy(def.equipment), learned = {}, states = {}, custom = {},
+    supports = {},
   }
 end
 
@@ -37,9 +38,16 @@ function Actor:init(id)
   local fresh = records[id] == nil
   if fresh then records[id] = new_record(self.def) end
   self.record = records[id]
+  self.record.supports = self.record.supports or {}
   self.resources = self.record.resources
   self.state_turns = self.record.states
   if fresh then self:init_resources(true) end
+end
+
+--- Whether this object still wraps the actor's saved record (false after
+--- a load or reset replaced it).
+function Actor:current()
+  return records[self.id] == self.record
 end
 
 function Actor:name()
@@ -118,18 +126,66 @@ function Actor:skills(skill_type)
   end)
 end
 
+--- Number of support ability slots: the actor's own setting, else its
+--- class's; nil when the game does not use slots (every passive applies).
+function Actor:support_slots()
+  return self.def.support_slots or self:class().support_slots
+end
+
+--- Equipped support abilities by slot (false = empty).
+function Actor:supports()
+  return self.record.supports
+end
+
+--- Put a known support ability in a slot (nil empties it). Returns true on
+--- success. An ability occupies at most one slot.
+function Actor:equip_support(slot, skill_id)
+  local slots = self:support_slots() or 0
+  if slot < 1 or slot > slots then return false end
+  if skill_id then
+    local skill = data.find("skills", skill_id)
+    if not skill or not skill.support or not self:knows(skill_id) then return false end
+    for i = 1, slots do
+      if self.record.supports[i] == skill_id then self.record.supports[i] = false end
+    end
+  end
+  self.record.supports[slot] = skill_id or false
+  return true
+end
+
+--- Active passive skills. Class passives always apply. Support abilities
+--- (skills with `support = true`) apply only while equipped when the actor
+--- has support slots; without slots every known passive applies.
 function Actor:passives()
-  return tablex.filter(known(self), function(s) return s.passive end)
+  local slots = self:support_slots()
+  local innate = {}
+  for _, cls in ipairs({ self:class(), self:secondary() }) do
+    if cls then for _, id in ipairs(cls.passives) do innate[id] = true end end
+  end
+  local equipped = {}
+  for i = 1, slots or 0 do
+    local id = self.record.supports[i]
+    if id then equipped[id] = true end
+  end
+  return tablex.filter(known(self), function(s)
+    if not s.passive then return false end
+    if slots == nil or not s.support or innate[s.id] then return true end
+    return equipped[s.id] == true
+  end)
 end
 
 function Actor:knows(skill_id)
   return tablex.find(known(self), function(s) return s.id == skill_id end) ~= nil
 end
 
+--- Stat modifiers from the class, the secondary class, equipment and
+--- active passives (in that order).
 function Actor:modifiers()
   local out = {}
   local function add_all(list) for _, m in ipairs(list or {}) do out[#out + 1] = m end end
   add_all(self:class().modifiers)
+  local secondary = self:secondary()
+  if secondary then add_all(secondary.modifiers) end
   each_equipment(self, function(item) add_all(item.equip.modifiers) end)
   for _, skill in ipairs(self:passives()) do add_all(skill.modifiers) end
   return out
@@ -204,7 +260,8 @@ function Actor:set_class(class_id)
   self:init_resources(false)
 end
 
---- Secondary class: its skills, passives and equipment types are added.
+--- Secondary class: its skills, passives, stat modifiers and equipment
+--- types are added.
 function Actor:set_secondary(class_id)
   if class_id then data.get("classes", class_id) end
   self.record.secondary = class_id
@@ -238,8 +295,11 @@ function Actor:gain_exp(amount)
     local max_before = {}
     for _, def in ipairs(require("fe.rpg.stats").resource_list) do max_before[def.id] = self:max_resource(def.id) end
     self.record.level = self.record.level + 1
-    for id, max in pairs(max_before) do
-      self:set_resource(id, self:resource(id) + (self:max_resource(id) - max))
+    -- Growth raises current values too, but never revives a knocked-out actor.
+    if self:alive() then
+      for _, def in ipairs(require("fe.rpg.stats").resource_list) do
+        self:set_resource(def.id, self:resource(def.id) + (self:max_resource(def.id) - max_before[def.id]))
+      end
     end
     local learned = {}
     for _, skill in ipairs(self:skills()) do
@@ -263,13 +323,22 @@ function Actor:recover()
   self:init_resources(true)
 end
 
---- Battle commands: class commands or the defaults.
+--- Battle commands: class commands or the defaults. A secondary class's
+--- extra commands go, in order, before the primary list's first "defend"
+--- or "flee" (at the end when it has neither).
 function Actor:commands()
   local commands = tablex.copy(self:class().commands or { "attack", "skill", "item", "defend", "flee" })
   local secondary = self:secondary()
   if secondary and secondary.commands then
+    local at = #commands + 1
+    for i, c in ipairs(commands) do
+      if c == "defend" or c == "flee" then at = i break end
+    end
     for _, c in ipairs(secondary.commands) do
-      if not tablex.contains(commands, c) then table.insert(commands, #commands - 1, c) end
+      if not tablex.contains(commands, c) then
+        table.insert(commands, at, c)
+        at = at + 1
+      end
     end
   end
   return commands

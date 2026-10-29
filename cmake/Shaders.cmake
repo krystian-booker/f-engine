@@ -50,16 +50,21 @@ foreach(backend IN LISTS shader_backends)
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${precompiled}" "${output}"
         DEPENDS "${precompiled}" VERBATIM)
     else()
-    add_custom_command(OUTPUT "${output}"
-      COMMAND "${CMAKE_COMMAND}" -E make_directory "${PROJECT_BINARY_DIR}/shaders/${backend}"
-      COMMAND "${shader_compiler}" -f "${source}" -o "${output}"
-        --type "${stage}" --platform "${shader_platform}" --profile "${profile}"
-        --varyingdef "${PROJECT_SOURCE_DIR}/shaders/varying.def.sc"
-        -i "${BGFX_DIR}/src" -i "${PROJECT_SOURCE_DIR}/shaders"
-      DEPENDS "${source}" ${shader_includes} "${PROJECT_SOURCE_DIR}/shaders/varying.def.sc" ${shader_dependency}
-      VERBATIM)
+      add_custom_command(OUTPUT "${output}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${PROJECT_BINARY_DIR}/shaders/${backend}"
+        COMMAND "${shader_compiler}" -f "${source}" -o "${output}"
+          --type "${stage}" --platform "${shader_platform}" --profile "${profile}"
+          --varyingdef "${PROJECT_SOURCE_DIR}/shaders/varying.def.sc"
+          -i "${BGFX_DIR}/src" -i "${PROJECT_SOURCE_DIR}/shaders"
+        DEPENDS "${source}" ${shader_includes} "${PROJECT_SOURCE_DIR}/shaders/varying.def.sc" ${shader_dependency}
+        VERBATIM)
     endif()
     list(APPEND shader_outputs "${output}")
   endforeach()
 endforeach()
 add_custom_target(fengine_shaders ALL DEPENDS ${shader_outputs})
+
+# Development runtimes compile a game's own shaders (<game>/shaders/fs_*.sc)
+# with the same shaderc and include folders.
+set_source_files_properties("${PROJECT_SOURCE_DIR}/engine/render/CustomShaders.cpp" PROPERTIES COMPILE_DEFINITIONS
+  "$<${FENGINE_DEV_ENABLED}:FENGINE_SHADERC=\"${shader_compiler}\">;$<${FENGINE_DEV_ENABLED}:FENGINE_BGFX_SHADER_INCLUDE=\"${BGFX_DIR}/src\">")

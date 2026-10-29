@@ -21,6 +21,8 @@ class Font {
 public:
     virtual ~Font() = default;
     [[nodiscard]] virtual float lineHeight() const = 0;
+    // Distance from the top of a line to the baseline, in the face's pixels.
+    [[nodiscard]] virtual float baseline() const = 0;
     [[nodiscard]] virtual const FontGlyph* glyph(char32_t codepoint) = 0;
     [[nodiscard]] virtual float kerning(char32_t, char32_t) const { return 0; }
     [[nodiscard]] virtual std::size_t pageCount() const = 0;
@@ -36,14 +38,18 @@ std::shared_ptr<Font> loadTrueTypeFont(const std::filesystem::path& ttfFile, flo
 // A primary face plus fallbacks (e.g. Latin pixel font, then a CJK TTF).
 class FontSet {
 public:
+    // Fallback faces are scaled to the primary line height and shifted so
+    // their baseline sits on the primary face's baseline.
     struct Hit {
         Font* font = nullptr;
         const FontGlyph* glyph = nullptr;
-        float scale = 1; // converts the face's pixels to the set's native size
+        float scale = 1;    // converts the face's pixels to the set's native size
+        float baseline = 0; // vertical shift in the set's pixels
     };
     explicit FontSet(std::vector<std::shared_ptr<Font>> faces);
     [[nodiscard]] Hit find(char32_t codepoint) const;
     [[nodiscard]] float lineHeight() const { return faces_.front()->lineHeight(); }
+    [[nodiscard]] float baseline() const { return faces_.front()->baseline(); }
     [[nodiscard]] const std::vector<std::shared_ptr<Font>>& faces() const { return faces_; }
 
 private:

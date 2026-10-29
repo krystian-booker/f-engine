@@ -81,13 +81,13 @@ return {
     new_game(t)
     local world = fe.world.load("ridge_test", "ridge")
     local b = require("fe.battle.core")({ scheduler = {} })
-    b.tactical = { world = world, occupied = {}, cell_timers = {} }
+    tactical.board(b, world)
     local stream = world:cells_with_tag("water")[1]
     tactical.react(b, "ice", { stream })
-    local cell = world:cell(stream.x, stream.z, 0)
+    local cell = world:cell({ x = stream.x, z = stream.z, layer = 0 })
     t.ok(tablex.contains(cell.tags, "ice") and not tablex.contains(cell.tags, "water"))
     tactical.react(b, "fire", { { x = 3, z = 7, layer = 0 } })
-    t.ok(tablex.contains(world:cell(3, 7, 0).tags, "burning"))
+    t.ok(tablex.contains(world:cell({ x = 3, z = 7, layer = 0 }).tags, "burning"))
     fe.world.unload("ridge_test")
   end,
 
@@ -98,12 +98,89 @@ return {
       for i, id in ipairs({ "cora", "bram", "lio", "wren" }) do
         units[i] = { actor = id, cell = { x = 4 + i * 2, z = 12, layer = 0 }, facing = { x = 0, z = -1 } }
       end
-      local outcome
+      local outcome, fought
+      local arrivals = 0
+      local disconnect = require("fe.battle").started:connect(function(b)
+        fought = b
+        b.events:connect(function(name, payload) if name == "reinforcements" then arrivals = arrivals + #payload.units end end)
+      end)
       local job = task.spawn(function() outcome = ridge_battle.fight(route, { units = units, auto = true }) end)
       t.wait_until(function() return job.status ~= "running" end, 60 * 60 * 15)
+      disconnect()
       t.ok(outcome == "victory" or outcome == "defeat", route .. " ended: " .. tostring(outcome))
+      t.eq(#fought:obstacles(true), 2, route .. ": two barricades")
+      t.ok(fought:rule("reaction") ~= nil, route .. ": ripostes are on")
+      if route == "hold" and fought.round >= 3 then t.eq(arrivals, 2, "the second wave arrived in round 3") end
+      t.eq(arrivals + #fought.tactical.reinforcements, #(route == "hold" and { 1, 2 } or { 1 }),
+        route .. ": every reinforcement either arrived or was still pending")
       t.eq(state.flag("ridge_won"), outcome == "victory")
       state.set_flag("ridge_won", false)
     end
+  end,
+
+  ["barricades block arrows and break into rubble; Cora ripostes"] = function(t)
+    new_game(t)
+    local world = fe.world.load("ridge_test", "ridge")
+    local Battle = require("fe.battle.core")
+    local party = require("fe.rpg.party")
+    local reactions = require("fe.battle.reactions")
+    local b = Battle({ scheduler = {}, random = fe.random.new(3),
+      rules = { reaction = reactions.counter({ requires = "riposte", facing = "not_behind" }) } })
+    tactical.board(b, world)
+    local barricade = tactical.add_obstacle(b, { enemy = "barricade", cell = { x = 7, z = 9, layer = 0 } })
+    local bram = b:add({ actor = party.actor("bram"), side = "party", facing = { x = 0, z = -1 } })
+    local cora = b:add({ actor = party.actor("cora"), side = "party", facing = { x = 0, z = -1 } })
+    local raider = b:add({ enemy = "raider", side = "enemy", facing = { x = 0, z = 1 } })
+    tactical.place(b, bram, { x = 7, z = 11, layer = 0 })
+    tactical.place(b, raider, { x = 7, z = 7, layer = 0 })
+    tactical.place(b, cora, { x = 3, z = 11, layer = 0 })
+    local grid = require("fe.battle.tactical.grid")
+    local longshot = require("fe.data").get("skills", "longshot")
+    t.ok(not grid.contains_cell(tactical.range_cells(b, bram, longshot), raider.cell), "no shot through the barricade")
+    barricade:set_resource("hp", 0)
+    b:settle()
+    t.ok(grid.contains_cell(tactical.range_cells(b, bram, longshot), raider.cell), "the way is clear once it breaks")
+    t.ok(tablex.contains(world:cell({ x = 7, z = 9, layer = 0 }).tags, "rubble"))
+    local reacted = 0
+    b.events:connect(function(name) if name == "reaction" then reacted = reacted + 1 end end)
+    tactical.place(b, raider, { x = 3, z = 10, layer = 0 })
+    b:perform({ kind = "skill", user = raider, skill = "attack", targets = { cora }, cell = cora.cell })
+    t.eq(reacted, 1, "a raider in front is answered")
+    tactical.face(b, cora, { x = 0, z = 1 })
+    b:perform({ kind = "skill", user = raider, skill = "attack", targets = { cora }, cell = cora.cell })
+    t.eq(reacted, 1, "not from behind")
+    b:perform({ kind = "skill", user = cora, skill = "attack", targets = { raider }, cell = raider.cell })
+    t.eq(reacted, 1, "raiders cannot riposte")
+    fe.world.unload("ridge_test")
+  end,
+
+  ["arts cost TP, gained every turn; Cora's quietus works once per battle"] = function(t)
+    new_game(t)
+    local world = fe.world.load("ridge_test", "ridge")
+    local Battle = require("fe.battle.core")
+    local party = require("fe.rpg.party")
+    local tp = require("fe.battle.tp")
+    local b = Battle({ scheduler = {}, random = fe.random.new(3), rules = tp.rules() })
+    tactical.board(b, world)
+    local cora = b:add({ actor = party.actor("cora"), side = "party", facing = { x = 0, z = -1 } })
+    local raider = b:add({ enemy = "raider", side = "enemy", facing = { x = 0, z = 1 } })
+    tactical.place(b, cora, { x = 7, z = 11, layer = 0 })
+    tactical.place(b, raider, { x = 7, z = 10, layer = 0 })
+    cora:reset_battle_resources()
+    t.eq(cora:resource("tp"), 1)
+    b:turn_start(cora)
+    t.eq(cora:resource("tp"), 2)
+    local steadfast = require("fe.data").get("skills", "steadfast")
+    t.ok(tablex.find(cora:skills(), function(s) return s.id == "steadfast" end) ~= nil, "Cora knows her quietus")
+    t.ok(not b:usable(cora, steadfast), "3 TP needed")
+    b:turn_start(cora)
+    t.ok(b:usable(cora, steadfast))
+    t.ok(b:perform({ kind = "skill", user = cora, skill = "steadfast", targets = { raider }, cell = raider.cell }) ~= nil)
+    t.eq(cora:resource("tp"), 0)
+    for _ = 1, 4 do b:turn_start(cora) end
+    t.eq(cora:resource("tp"), 4)
+    t.ok(not b:usable(cora, steadfast), "once per battle")
+    t.ok(b:usable(cora, require("fe.data").get("skills", "shove")), "other arts still work")
+    fe.world.unload("ridge_test")
   end,
 }

@@ -1,0 +1,25 @@
+{
+  "atlas": "barricade.png",
+  "pixels_per_unit": 32,
+  "pivot": [
+    0.5,
+    1
+  ],
+  "clips": {
+    "idle": {
+      "directions": [
+        [
+          {
+            "rect": [
+              0,
+              0,
+              32,
+              48
+            ],
+            "duration": 1
+          }
+        ]
+      ]
+    }
+  }
+}

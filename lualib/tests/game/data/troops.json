@@ -1,4 +1,7 @@
 [
   {"id": "slimes", "members": [{"enemy": "slime"}, {"enemy": "slime"}]},
-  {"id": "golem", "members": [{"enemy": "golem"}], "escapable": false}
+  {"id": "golem", "members": [{"enemy": "golem"}], "escapable": false},
+  {"id": "arena_slimes", "members": [{"enemy": "slime", "position": {"x": 3, "z": 2}}, {"enemy": "slime", "position": {"x": 7, "z": 2}}]},
+  {"id": "wisps", "members": [{"enemy": "wisp"}, {"enemy": "wisp"}]},
+  {"id": "brute", "members": [{"enemy": "brute"}], "escapable": false}
 ]
