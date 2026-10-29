@@ -4,6 +4,15 @@ Recreate the US SNES Final Fantasy III opening in f-engine, through Terra and Lo
 
 The engine has the main services and Lua RPG kits needed. The largest new game systems are the three-party defense, the two-part Whelk encounter, Magitek presentation, and the opening's cinematic choreography. Extraction is complete for the supported native data groups; runtime conversion and the playable recreation are future implementation work.
 
+## Playable slice
+
+A first playable slice now exists in [samples/ff6_narshe](../../samples/ff6_narshe/README.md):
+prologue, overlook, a shortened musical march, Narshe exploration and the
+straight-north route's two-Guard battle. It includes an offline original-ROM
+music/SFX renderer, source asset compiler, four prototype 3D scenes, tests and
+windowed replays. The complete opening described below remains future work;
+the sample README records its current fidelity and art-production limits.
+
 | Deliverable | Location |
 | --- | --- |
 | Implementation specification and acceptance criteria | [SPEC.md](SPEC.md) |

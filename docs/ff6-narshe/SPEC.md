@@ -18,7 +18,7 @@ The supplied ROM is US Rev 1, CRC32 `C0FA0464`, with the full identity in the [e
 
 Facts in the extracted JSON come from the local ROM. Labels, table formats and the narrative order were cross-checked with the pinned [field event disassembly](https://github.com/everything8215/ff6/blob/813013276c952fdd27edcf7b8b86f17291542cbf/src/event/event_main.asm). Its [battle event scripts](https://github.com/everything8215/ff6/blob/813013276c952fdd27edcf7b8b86f17291542cbf/src/btlgfx/battle_event_script.asm) distinguish cinematic encounters from normal battles. The [scene manifest](scenes.json) records original labels and dialogue IDs so implementation can be checked without guessing from recollection.
 
-The repository now contains extraction tooling, source-pixel previews, decoded data and this specification. It does not yet contain a playable FF6 sample, authored 3D maps, finished animation clips, rendered music, or a timing-verified recreation. Runtime performance and audiovisual parity remain implementation acceptance gates.
+The repository contains extraction tooling, source-pixel previews, decoded data and this specification. A playable first-battle slice now exists in `samples/ff6_narshe`, with prototype 3D maps, mount clips and rendered original audio. The complete opening, finished environment art and timing-verified recreation remain implementation work. See the sample README for current limits. Runtime performance and audiovisual parity remain acceptance gates.
 
 ## 3 Presentation contract
 
@@ -68,7 +68,7 @@ Maintain a shot ledger per scene: source event/label, actors, start positions, f
 
 Translate explicit source waits such as 15, 30, 45 and 90 frames into integer engine ticks. The initial timing model uses `ticks / 60` seconds because the engine updates at 60 Hz. Preserve source object-wait semantics separately from fixed waits. Calibrate actor movement and music transitions against a reference capture; a matching wait count alone does not establish matching runtime duration.
 
-Record original actor movements and sound cues before smoothing paths for the diorama camera. The march's armor gait, footfalls, ground motion and credits need a shared timeline. The engine has no exposed audio playback clock; scripted fades and starts are available, while sample-accurate audiovisual synchronization would require a generic audio time query or an offline-produced audio/video timing track. Begin with tick-based sequencing and measure drift.
+Record original actor movements and sound cues before smoothing paths for the diorama camera. The march's armor gait, footfalls, ground motion and credits need a shared timeline. The engine exposes `fe.audio.music_position` and `fe.audio.seek_music`. Use the playback clock for music-led choreography and tick-based movement/waits elsewhere; measure drift against reference capture.
 
 Use `fe.cutscene`, `fe.task`, `fe.camera` and `fe.transition`. `cutscene.play` adds letterboxing by default; use a game-level wrapper when the source shot should use the full reference frame. Movement helpers currently wait until motion stops; that can include a blocked mover. The game must validate that an actor reached the required mark and handle a timeout instead of silently continuing a broken shot.
 
@@ -158,7 +158,7 @@ Status is based on the current workspace implementation, not the README alone. A
 | ATB and battle rules | `battle/core.lua`, scheduler, effects and sideview presenter | FF6 formulas, Magitek, enemy AI, boss links, scripted event presenter and HUD. |
 | Three-party field play | `rpg/party.lua` has one active lineup; field assumes one player | New game-owned party/defense controller and field integration. Existing active-lineup switching alone is insufficient. |
 | Audio playback | `MiniAudio.*`, layered music, loop points, fades and buses | Offline SPC rendering, cue extraction, loops, source behavior for resume/restart. |
-| Audio timeline synchronization | No exposed playback position in the inspected binding | Measure tick-based synchronization; add generic playback clock only if required. |
+| Audio timeline synchronization | `fe.audio.music_position` and `fe.audio.seek_music` are exposed | Author cue alignment and measure drift against reference capture. |
 | Fades/flash/mosaic/shake | Screen effects, transition kit and camera shake | Choreograph source sequences; custom local distortion for exact effects if necessary. |
 | Saving and checkpoints | `fe.state`, `fe.save`, starter hooks and migrations | Serializable story/defense state, stable save points, checkpoint fixture factory. |
 | Validation and demonstration | Headless tests, input replays, screenshots and profiler | Game tests, visual baselines, scripted pitch tour and measurements. |
