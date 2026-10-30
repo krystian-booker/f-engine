@@ -56,6 +56,7 @@ public:
                 next.layer = grid_.traverseLink(centre + heading * (1 - EdgeOffset), from.layer, heading,
                                                 rules_.maxUp, rules_.maxDown, false);
             }
+            next = grid_.wrapCell(next); // steps off a wrapping grid's edge land on the far side
             if (!enterable(next) || !climbable(source, next, dx, dz)) {
                 continue;
             }
@@ -65,7 +66,7 @@ public:
             const glm::ivec2 step(axis[0], axis[1]);
             if (const auto* ladder =
                     rules_.ladders && rules_.footprint <= 1 ? grid_.ladderStep(from, step) : nullptr) {
-                const auto end = from == ladder->foot() ? ladder->top() : ladder->foot();
+                const auto end = grid_.wrapCell(from == ladder->foot() ? ladder->top() : ladder->foot());
                 if (enterable(end)) {
                     add(from, end, 1, StepKind::Climb, out);
                 }
@@ -147,7 +148,7 @@ private:
             if (clear) {
                 const float length =
                     static_cast<float>(gaps + 1) * (diagonal ? std::numbers::sqrt2_v<float> : 1);
-                add(from, landing, length, StepKind::Jump, out);
+                add(from, grid_.wrapCell(landing), length, StepKind::Jump, out);
                 return; // the nearest landing in a direction is the only one
             }
         }
@@ -166,7 +167,7 @@ private:
         return true;
     }
     [[nodiscard]] bool isGap(GridPos p, float floor) const {
-        if (!clearAbove(p, floor) || rules_.blocked.contains(cellKey(p))) {
+        if (!clearAbove(p, floor) || rules_.blocked.contains(cellKey(grid_.wrapCell(p)))) {
             return false;
         }
         const auto& cell = grid_.at(p);
@@ -177,13 +178,16 @@ private:
     [[nodiscard]] bool tagsAllow(const GridCell& cell) const {
         return !(cell.tags & rules_.blockedTags) && (!rules_.requiredTags || (cell.tags & rules_.requiredTags));
     }
-    // One cell of the body: inside the grid, walkable unless flying, its tags allowed, not occupied.
+    // One cell of the body: inside the grid, walkable unless flying, its tags
+    // allowed, not occupied. Occupancy is keyed on the canonical cell, so a
+    // footprint reaching past a wrapping grid's edge sees the far side.
     [[nodiscard]] bool enterableCell(GridPos p) const {
         if (!grid_.contains(p)) {
             return false;
         }
         const auto& cell = grid_.at(p);
-        return (rules_.fly || cell.walkable) && tagsAllow(cell) && !rules_.blocked.contains(cellKey(p));
+        return (rules_.fly || cell.walkable) && tagsAllow(cell) &&
+               !rules_.blocked.contains(cellKey(grid_.wrapCell(p)));
     }
     [[nodiscard]] bool climbable(GridPos from, GridPos to, int dx, int dz) const {
         if (rules_.fly) {
@@ -303,6 +307,9 @@ Route findRoute(const Grid& grid, GridPos from, GridPos to, const StepRules& rul
     validateRules(rules);
     Route route;
     const Neighbours neighbours(grid, rules);
+    // Searches run over canonical cells, so a wrapping grid's keys are unique.
+    from = grid.wrapCell(from);
+    to = grid.wrapCell(to);
     // A goal the body cannot occupy (unwalkable, tagged, occupied, outside
     // the grid) ends the search before it starts.
     if (!grid.contains(from) || !neighbours.enterable(to)) {
@@ -343,8 +350,14 @@ Route findRoute(const Grid& grid, GridPos from, GridPos to, const StepRules& rul
         if (rules.cost) {
             return 0.0f;
         }
-        const float dx = static_cast<float>(std::abs(p.x - to.x));
-        const float dz = static_cast<float>(std::abs(p.z - to.z));
+        int ax = std::abs(p.x - to.x);
+        int az = std::abs(p.z - to.z);
+        if (grid.wraps()) { // the short way round stays admissible
+            ax = std::min(ax, grid.width() - ax);
+            az = std::min(az, grid.depth() - az);
+        }
+        const auto dx = static_cast<float>(ax);
+        const auto dz = static_cast<float>(az);
         return rules.diagonal ? std::max(dx, dz) + (std::numbers::sqrt2_v<float> - 1) * std::min(dx, dz)
                               : dx + dz;
     };
@@ -408,6 +421,7 @@ Reach findReachable(const Grid& grid, GridPos start, float budget, const StepRul
     validateRules(rules);
     Reach reach;
     auto& cells = reach.cells;
+    start = grid.wrapCell(start);
     if (!grid.contains(start) || !std::isfinite(budget) || budget < 0) {
         return reach;
     }

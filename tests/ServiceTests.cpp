@@ -422,11 +422,13 @@ public:
     void composition(const std::string& text, int cursor) override {
         compositions.emplace_back(text, cursor);
     }
+    void pad(const InputState::PadEvent& event) override { pads.push_back(event); }
     std::vector<std::pair<std::string, float>> inputs;
     std::vector<glm::vec2> mice;
     std::vector<float> wheels;
     std::vector<std::string> texts;
     std::vector<std::pair<std::string, int>> compositions;
+    std::vector<InputState::PadEvent> pads;
 };
 } // namespace
 
@@ -464,6 +466,40 @@ TEST_CASE("an input recorder sees everything fed, including focus-loss releases"
     input.setRecorder(nullptr);
     input.feed("key:Z", 1);
     CHECK(recorder.inputs.size() == 4);
+}
+
+TEST_CASE("gamepad connections are published on the next tick and reach a recorder attached later") {
+    InputState input;
+    input.connectPad({1, "Pad One", "xbox", true, false});
+    CHECK(input.pads().contains(1));  // pads() changes at once
+    CHECK(input.padEvents().empty()); // the event waits for the tick
+    CountingRecorder recorder;
+    input.setRecorder(&recorder); // sees the event still queued
+    REQUIRE(recorder.pads.size() == 1);
+    CHECK(recorder.pads[0].connected);
+    CHECK(recorder.pads[0].pad.name == "Pad One");
+    input.connectPad({2, "Pad Two", "generic", false, false});
+    CHECK(recorder.pads.size() == 2);
+    input.setRecorder(&recorder); // attaching again reports nothing twice
+    CHECK(recorder.pads.size() == 2);
+    input.tick(1.0 / 60);
+    REQUIRE(input.padEvents().size() == 2);
+    CHECK(input.padEvents()[1].pad.number == 2);
+    input.tick(1.0 / 60);
+    CHECK(input.padEvents().empty());
+    input.disconnectPad(2);
+    input.disconnectPad(9); // never connected: no event
+    input.tick(1.0 / 60);
+    REQUIRE(input.padEvents().size() == 1);
+    CHECK_FALSE(input.padEvents()[0].connected);
+    CHECK(input.padEvents()[0].pad.name == "Pad Two");
+    CHECK(recorder.pads.size() == 3);
+    // A flood keeps the first 64 pending events.
+    for (int i = 0; i < 100; ++i) {
+        input.connectPad({3, "Flood", "generic", false, false});
+    }
+    input.tick(1.0 / 60);
+    CHECK(input.padEvents().size() == 64);
 }
 
 namespace {

@@ -131,7 +131,7 @@ function hooks.update_encounters(world, player)
   local previous = live.last_position
   live.last_position = { x = p.x, z = p.z, layer = player.layer }
   if not previous or previous.layer ~= player.layer or not f.can_trigger() then return end
-  local moved = vec.flat_distance(previous, p)
+  local moved = vec.flat_distance_in(world, previous, p)
   if moved > 0 then
     local troop, entry = encounter.step(world, p, moved, player.layer)
     if troop then f.start_encounter(troop, entry) end

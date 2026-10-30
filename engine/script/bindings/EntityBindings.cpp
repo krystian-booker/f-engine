@@ -208,6 +208,9 @@ void setMover(const EntityRef& e, const sol::table& t) {
     }
     m.footprint = lua::within(lua::get(t, "footprint", m.footprint), 1, MaxFootprint, "mover footprint");
     m.fly = lua::get(t, "fly", m.fly);
+    m.altitude = lua::within(lua::get(t, "altitude", m.altitude), 0.0f, 1000.0f, "mover altitude");
+    m.altitudeSpeed =
+        lua::within(lua::get(t, "altitude_speed", m.altitudeSpeed), 0.0f, MaxSpeed, "mover altitude_speed");
     const Grid& grid = e.owner().grid();
     if (const auto tags = lua::field(t, "blocked_tags"); !lua::absent(tags)) {
         m.blockedTags = gridTagBits(grid, tags, "mover blocked_tags");
@@ -243,7 +246,8 @@ sol::object moverTable(sol::state_view lua, const EntityRef& e, const Mover& m) 
     const Grid& grid = e.owner().grid();
     auto t = lua.create_table_with("speed", m.speed, "max_step", m.maxStep, "radius", m.radius, "collide",
                                    m.collide, "climb_speed", m.climbSpeed, "footprint", m.footprint, "fly",
-                                   m.fly, "blocked_tags", sol::as_table(grid.tagsOf(m.blockedTags)),
+                                   m.fly, "altitude", m.altitude, "altitude_speed", m.altitudeSpeed, "lift",
+                                   m.lift, "blocked_tags", sol::as_table(grid.tagsOf(m.blockedTags)),
                                    "required_tags", sol::as_table(grid.tagsOf(m.requiredTags)));
     if (m.jump.distance > 0) {
         t["jump"] = lua.create_table_with("distance", m.jump.distance, "max_up", m.jump.maxUp, "max_down",
@@ -722,9 +726,9 @@ void bindEntity(Engine& engine) {
         .method(
             "mover", component<Mover>("mover", setMover, moverTable),
             "fun(settings?: {speed?: number, max_step?: number, radius?: number, collide?: boolean, "
-            "climb_speed?: number, footprint?: integer, fly?: boolean, blocked_tags?: string[], "
-            "required_tags?: string[], jump?: {distance: integer, max_up?: number, max_down?: number, "
-            "diagonal?: boolean}|false}|nil): table?",
+            "climb_speed?: number, footprint?: integer, fly?: boolean, altitude?: number, altitude_speed?: "
+            "number, blocked_tags?: string[], required_tags?: string[], jump?: {distance: integer, max_up?: "
+            "number, max_down?: number, diagonal?: boolean}|false}|nil): table?",
             "Movement. A table adds or configures it (and returns the new state), no argument reads it "
             "(nil without a mover), nil removes it. `speed` (units/second) is 0 to 1000, `max_step` 0 "
             "to 1000 and `radius` 0 to 0.49. `jump` lets planned paths jump gaps (see world:path); ladders "
@@ -735,7 +739,11 @@ void bindEntity(Engine& engine) {
             "an error) are its passability class, flying or not: it never stands on or paths through a "
             "cell carrying a blocked tag or, when `required_tags` is not empty, a cell with none of them "
             "(a boat is `{fly = true, required_tags = {'water'}}`). They are read back as name lists and "
-            "plan `move_to(target)`; rules given to move_to replace them.")
+            "plan `move_to(target)`; rules given to move_to replace them. `altitude` (0 to 1000) lifts the "
+            "body that far above the grid surface, reached at `altitude_speed` units/second (0, the "
+            "default: at once); `lift` reads the height in effect. A lifted body passes over boxes and "
+            "bodies whose tops lie below its feet; its cell, zones and tags still apply, it flies past "
+            "ladders, and a launch lands it on the surface (the lift eases back up afterwards).")
         .method(
             "platform", component<Platform>("platform", setPlatform, platformTable),
             "fun(settings?: {size?: {x: number, z: number}}|nil): table?",
@@ -847,21 +855,25 @@ void bindEntity(Engine& engine) {
             "fun(): table", "Script-side table that lives as long as the entity.")
         .method(
             "attach",
-            [](const EntityRef& e, const EntityRef& parent, sol::object offset) {
+            [](const EntityRef& e, const EntityRef& parent, sol::object offset, sol::object settings) {
                 if (!parent.valid() || !e.sameWorld(parent)) {
                     throw std::runtime_error("attach: the parent must be a live entity in the same world");
                 }
                 if (parent.id == e.id) {
                     throw std::runtime_error("attach: an entity cannot follow itself");
                 }
+                const auto options = lua::options(settings, "attach options");
                 auto& t = e.get<Transform>();
                 t.parent = parent.id;
                 t.offset = lua::vec3(offset, glm::vec3(0));
+                t.ground = options ? lua::get(*options, "ground", false) : false;
             },
-            "fun(parent: Entity, offset?: Vec3)",
+            "fun(parent: Entity, offset?: Vec3, options?: {ground?: boolean})",
             "Follow another entity of the same world (emote balloons, carried objects); detaches when the "
-            "parent "
-            "is destroyed.")
+            "parent is destroyed. `offset` is turned by the parent's yaw. With `ground = true` the offset "
+            "is added to the grid surface under the parent instead of the parent's position, so a flat "
+            "sprite attached that way is a blob shadow that stays on the ground however high the parent "
+            "flies.")
         .method(
             "detach", [](const EntityRef& e) { e.get<Transform>().parent = entt::null; }, "fun()",
             "Stop following.")

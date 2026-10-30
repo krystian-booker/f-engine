@@ -58,6 +58,9 @@ World::World(std::string name, MapData map, AssetCache& assets, std::uint64_t se
 
 void World::rebuildStatic() {
     collision_.setBoxes(staticBoxes(map_, assets_, geometryPath()));
+    collision_.setWrap(map_.grid.wraps() ? glm::vec2(static_cast<float>(map_.grid.width()),
+                                                     static_cast<float>(map_.grid.depth()))
+                                         : glm::vec2(0));
     collision_.refresh();
     Json emitters = Json::array();
     for (const auto& emitter : map_.emitters) {
@@ -182,7 +185,9 @@ entt::entity World::spawn(const std::string& id, glm::vec3 position, int layer) 
     }
     const auto entity = create();
     Transform transform;
-    transform.position = transform.previous = position;
+    // Canonical on a wrapping map: one representative per position.
+    const auto flat = map_.grid.wrapPoint({position.x, position.z});
+    transform.position = transform.previous = {flat.x, position.y, flat.y};
     transform.layer = std::clamp(layer, 0, map_.grid.layerCount() - 1);
     registry_.emplace<Transform>(entity, transform);
     if (!id.empty()) {
@@ -243,7 +248,7 @@ std::vector<entt::entity> World::query(const std::string& tag, std::optional<glm
     std::vector<entt::entity> result;
     const auto near = [&](const Transform& transform) {
         const auto& p = transform.position;
-        return !centre || glm::length(glm::vec2(p.x - centre->x, p.z - centre->z)) <= radius;
+        return !centre || glm::length(map_.grid.delta({centre->x, centre->z}, {p.x, p.z})) <= radius;
     };
     if (tag.empty()) {
         for (const auto [entity, transform] : registry_.view<Transform>().each()) {
@@ -278,6 +283,13 @@ void World::playMesh(entt::entity entity, const std::string& animation, bool loo
 }
 
 void World::beginTick() {
+    if (map_.grid.wraps()) {
+        // Scripts may steer the target past a seam; it stays canonical like
+        // every position, and the frame already drawn interpolated across it.
+        const auto flat = map_.grid.wrapPoint({camera_.target.x, camera_.target.z});
+        camera_.target.x = flat.x;
+        camera_.target.z = flat.y;
+    }
     camera_.beginTick();
     for (const auto [entity, transform] : registry_.view<Transform>().each()) {
         transform.previous = transform.position;

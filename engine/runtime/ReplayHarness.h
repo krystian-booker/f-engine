@@ -25,15 +25,19 @@ struct Image;
 //    {"tick": 42, "assert": "require('fe.state').flag('met_elder')"},
 //    {"tick": 50, "mouse": [120, 80]}, {"tick": 51, "wheel": -1},
 //    {"tick": 55, "text": "Aria"}, {"tick": 56, "text": "かな", "cursor": 2},
+//    {"tick": 58, "pads": [{"connected": true, "pad": 1, "name": "Virtual", "type": "xbox",
+//                           "rumble": true, "trigger_rumble": false}]},
 //    {"tick": 60, "capture": "out/town.png", "compare": "reference/{backend}/town.png", "tolerance": 0.02}]
 //
 // `input` is an ordered list of [name, value] pairs, fed in that order (the
 // recorder writes this form, so a tick's keyboard and gamepad events replay in
 // the order they happened); an object {name: value} is also accepted and fed
 // in key order. `text` is committed text, or with `cursor` the IME's pre-edit
-// string (as `fe.input.feed_text`). Ticks after a wait_for are relative to
-// when its condition became true; a wait_for that times out fails, and the
-// command's other fields still run.
+// string (as `fe.input.feed_text`). `pads` connects or disconnects gamepads
+// (as `fe.input.feed_pad`), so fe.input.pads(), device_type(pad) and
+// pad_events() replay; a disconnect needs only `pad`. Ticks after a wait_for
+// are relative to when its condition became true; a wait_for that times out
+// fails, and the command's other fields still run.
 // `compare` is relative to the replay file, and "{backend}" in it stands for
 // the renderer backend's folder (see backendFolder), so each backend keeps its
 // own references. Every capture must look like a rendered frame (see
@@ -108,7 +112,9 @@ inline constexpr int ReferenceWidth = 320;
 // Records the raw input fed to the engine as a replay, so a played session
 // can be replayed (`fengine <game> --record out.json`, then `--replay`).
 // Attach it with InputState::setRecorder. A tick's inputs become one command
-// holding an ordered list of [name, value] pairs.
+// holding an ordered list of [name, value] pairs; its gamepad connections and
+// disconnections one `pads` command, written before the inputs so a pad is
+// known when its buttons replay.
 class ReplayRecorder final : public InputRecorder {
 public:
     explicit ReplayRecorder(std::uint64_t seed) : seed_(seed) {}
@@ -117,6 +123,7 @@ public:
     void wheel(float delta) override;
     void text(std::string_view utf8) override;
     void composition(const std::string& text, int cursor) override;
+    void pad(const InputState::PadEvent& event) override;
     // Stamps everything recorded since the last call with the tick about to run.
     void stamp(std::uint64_t tick);
     // The replay, ending with an empty command at `lastTick` so the replay
@@ -127,6 +134,7 @@ private:
     std::uint64_t seed_;
     Json commands_ = Json::array();
     Json pendingInput_ = Json::array(); // [name, value] pairs in feed order
+    Json pendingPads_ = Json::array();  // pad events in arrival order
     std::optional<glm::vec2> pendingMouse_;
     float pendingWheel_ = 0;
     std::string pendingText_;

@@ -33,6 +33,12 @@ public:
 
     [[nodiscard]] const std::vector<Box>& boxes() const { return boxes_; }
     void setBoxes(std::vector<Box> boxes);
+    // The map's size when its grid wraps (World sets it; zero = no wrap).
+    // Positions stay canonical, so a query near a seam also looks at the
+    // position shifted by a map width or depth, and bodies are separated by
+    // the shortest difference round the map. Boxes stay inside the canonical
+    // range; rays are not wrapped.
+    void setWrap(glm::vec2 size) { wrap_ = size; }
     void moved(entt::entity entity);
     // Re-buckets every collider; picks up transforms edited outside World (editor).
     void refresh();
@@ -69,8 +75,16 @@ private:
     void track(entt::registry& registry, entt::entity entity);
     void resized(entt::registry& registry, entt::entity entity);
     void untrack(entt::registry& registry, entt::entity entity);
+    // `position` and, on a wrapping map, its mirror across each seam the
+    // reach square crosses (at most four points).
+    template<class Visit> void forEachMirror(glm::vec3 position, float reach, Visit&& visit) const;
+    // Colliders in the buckets within `reach` of one point, each once.
+    template<class Visit> void forEachNearAt(glm::vec3 position, float reach, Visit&& visit) const;
+    // The same over the point's mirrors, each collider once.
     template<class Visit> void forEachNear(glm::vec3 position, float reach, Visit&& visit) const;
     template<class Visit> void forEachBoxNear(glm::vec3 position, float reach, Visit&& visit) const;
+    // (b - a) on the x/z plane, the short way round on a wrapping map.
+    [[nodiscard]] glm::vec2 separation(glm::vec3 a, glm::vec3 b) const;
     void indexBoxes();
     void insert(entt::entity entity, std::int64_t key);
     void erase(entt::entity entity);
@@ -89,6 +103,8 @@ private:
     std::multiset<float> radii_; // every tracked collider's radius
     using Pair = std::pair<entt::entity, entt::entity>;
     std::vector<Pair> contacts_, current_; // sorted
+    glm::vec2 wrap_{0};
+    mutable std::vector<entt::entity> mirrorScratch_; // forEachNear's union over mirrors
 };
 
 // Emits zone_enter/zone_exit for every entity with a Transform and either a

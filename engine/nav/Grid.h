@@ -52,6 +52,22 @@ inline constexpr int CellLimit = 1 << 30;
     return -floorCell(-value);
 }
 
+// Toroidal arithmetic (Grid::wraps()). Floor division, never fmod: the same
+// result for negative values on every platform, so wrapped simulations stay
+// deterministic. wrapCoordinate folds a value into [0, size); wrapDifference
+// folds a difference into [-size/2, size/2), the shortest way round.
+[[nodiscard]] inline float wrapCoordinate(float value, float size) {
+    const float wrapped = value - std::floor(value / size) * size;
+    return wrapped < size ? wrapped : 0.0f; // a hair below zero rounds up to `size`
+}
+[[nodiscard]] inline float wrapDifference(float difference, float size) {
+    return difference - std::floor(difference / size + 0.5f) * size;
+}
+[[nodiscard]] inline int wrapIndex(int value, int size) {
+    const int wrapped = value % size;
+    return wrapped < 0 ? wrapped + size : wrapped;
+}
+
 struct GridPos {
     int x = 0, z = 0, layer = 0;
     bool operator==(const GridPos&) const = default;
@@ -93,6 +109,38 @@ public:
     [[nodiscard]] int layerCount() const { return static_cast<int>(layers_.size()); }
     [[nodiscard]] const Layer& layer(int index) const { return layers_.at(static_cast<std::size_t>(index)); }
     int addLayer(const std::string& name);
+    // A toroidal grid ("wrap": true): the east edge joins the west and the
+    // south the north. Every cell lookup folds its x and z into the grid, so
+    // heights, walkability, links, components and path finding continue
+    // across the seam, and contains() refuses only a bad layer. Positions
+    // are still kept canonical, in [0, width) x [0, depth): wrapPoint and
+    // wrapCell give that representative and delta the shortest difference.
+    // All of them are the identity on a grid that does not wrap.
+    [[nodiscard]] bool wraps() const { return wrap_; }
+    void setWrap(bool wrap);
+    [[nodiscard]] glm::vec2 wrapPoint(glm::vec2 p) const {
+        return wrap_ ? glm::vec2(wrapCoordinate(p.x, static_cast<float>(width_)),
+                                 wrapCoordinate(p.y, static_cast<float>(depth_)))
+                     : p;
+    }
+    [[nodiscard]] GridPos wrapCell(GridPos p) const {
+        return wrap_ ? GridPos{wrapIndex(p.x, width_), wrapIndex(p.z, depth_), p.layer} : p;
+    }
+    // `to - from` on the x/z plane, the short way round when the grid wraps.
+    [[nodiscard]] glm::vec2 delta(glm::vec2 from, glm::vec2 to) const {
+        const auto d = to - from;
+        return wrap_ ? glm::vec2(wrapDifference(d.x, static_cast<float>(width_)),
+                                 wrapDifference(d.y, static_cast<float>(depth_)))
+                     : d;
+    }
+    // Whether a cell lies inside the grid's rectangle and layer, wrap or no
+    // wrap: the strict test, for validating authored data.
+    [[nodiscard]] bool inRange(int x, int z, int layer = 0) const {
+        return x >= 0 && z >= 0 && x < width_ && z < depth_ && layer >= 0 && layer < layerCount();
+    }
+    [[nodiscard]] bool inRange(GridPos p) const { return inRange(p.x, p.z, p.layer); }
+    // Whether a cell can be looked up: inRange, or any x and z of a valid
+    // layer when the grid wraps.
     [[nodiscard]] bool contains(int x, int z, int layer = 0) const;
     [[nodiscard]] bool contains(GridPos p) const { return contains(p.x, p.z, p.layer); }
     // Writable access counts as a change (see revision()): read through a
@@ -189,12 +237,19 @@ public:
     void setCellProps(GridPos p, Json props);
 
 private:
+    // Cell slot of (x, z), which the caller has checked with contains(); a
+    // wrapping grid folds the coordinates here, so every lookup wraps.
     [[nodiscard]] std::size_t index(int x, int z) const {
+        if (wrap_) {
+            x = wrapIndex(x, width_);
+            z = wrapIndex(z, depth_);
+        }
         return static_cast<std::size_t>(z) * static_cast<std::size_t>(width_) + static_cast<std::size_t>(x);
     }
     void indexLinks();
     void buildComponents() const;
     int width_ = 0, depth_ = 0;
+    bool wrap_ = false;
     std::vector<Layer> layers_;
     std::vector<std::string> tagNames_;
     std::vector<GridLink> links_;

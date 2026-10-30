@@ -51,6 +51,7 @@ Engine::Engine(EngineOptions&& options, std::optional<GameConfig> config)
                                  : std::make_unique<LocalPlatformServices>(
                                        options.userData.empty() ? std::filesystem::path()
                                                                 : options.userData / "platform.json")),
+      clipboard_(options.clipboard ? std::move(options.clipboard) : std::make_unique<MemoryClipboard>()),
       locale_(options.locale.empty() ? "en-US" : options.locale),
       loader_(std::make_unique<WorldLoader>(*assets_)), emitters_(std::make_unique<EmitterAudio>()),
       docs_(std::make_unique<BindingDocs>()),
@@ -61,6 +62,19 @@ Engine::Engine(EngineOptions&& options, std::optional<GameConfig> config)
     }
     if (!isFolder(options.libraryRoot)) {
         throw std::runtime_error("Lua library folder not found: " + options.libraryRoot.string());
+    }
+    // Content packs go over the game folder once game.json is loaded, so a
+    // pack cannot change the game's configuration, only its files.
+    for (const auto& name : mountOverlayFolder(options.gameRoot / "packs", options.gameRoot)) {
+        packs_.push_back("packs/" + name);
+    }
+    if (!options.userData.empty()) {
+        for (const auto& name : mountOverlayFolder(options.userData / "packs", options.gameRoot)) {
+            packs_.push_back("user://packs/" + name);
+        }
+    }
+    for (const auto& pack : packs_) {
+        log(LogLevel::Info, "Mounted content pack " + pack);
     }
     assets_->defineFont("default", {{"files", {"@fe/assets/fonts/pixel.fnt"}}});
     display_.width = config_.windowWidth;

@@ -319,6 +319,28 @@ void bindGrid(TypeBinder<WorldRef>& type) {
             },
             "fun(): integer, integer, integer", "Grid width, depth and layer count.")
         .method(
+            "wraps", [](const WorldRef& w) { return w.get().grid().wraps(); }, "fun(): boolean",
+            "Whether the map is toroidal (`grid.wrap`): its east edge joins its west and its south its "
+            "north. Positions stay in [0, width) x [0, depth); use `wrap_delta` for differences between them.")
+        .method(
+            "wrap_delta",
+            [](sol::this_state s, const WorldRef& w, sol::object a, sol::object b) {
+                const auto from = lua::position(a), to = lua::position(b);
+                const auto d = w.get().grid().delta({from.x, from.z}, {to.x, to.z});
+                return lua::table(s, glm::vec3(d.x, to.y - from.y, d.y));
+            },
+            "fun(a: Vec3, b: Vec3): Vec3",
+            "`b - a`, the short way round on a wrapping map (the plain difference otherwise).")
+        .method(
+            "wrap_point",
+            [](sol::this_state s, const WorldRef& w, sol::object p) {
+                const auto v = lua::position(p);
+                const auto flat = w.get().grid().wrapPoint({v.x, v.z});
+                return lua::table(s, glm::vec3(flat.x, v.y, flat.y));
+            },
+            "fun(p: Vec3): Vec3",
+            "The position folded into the map's range on a wrapping map; `p` itself otherwise.")
+        .method(
             "cell",
             [](sol::this_state s, const WorldRef& w, sol::object cell) -> sol::object {
                 const auto p = lua::cell(cell);
@@ -1075,6 +1097,33 @@ void bindCamera(Engine& engine) {
                 c.get().fov = lua::within(lua::as<float>(v, "fov"), 1.0f, 170.0f, "fov");
             },
             "number", "Vertical field of view in degrees (1 to 170).")
+        .property(
+            "near", [](const CameraRef& c) { return c.get().nearPlane; },
+            [](const CameraRef& c, sol::object v) {
+                auto& camera = c.get();
+                const float near = lua::within(lua::as<float>(v, "near"), 0.001f, 100.0f, "near");
+                if (near >= camera.farPlane) {
+                    throw std::runtime_error("near must be below far (" + lua::format(camera.farPlane) + ")");
+                }
+                camera.nearPlane = near;
+            },
+            "number",
+            "Near clip plane in world units (0.001 to 100, below `far`; default 0.1). Depth precision falls "
+            "as far/near grows, so raise `near` before stretching `far` a long way.")
+        .property(
+            "far", [](const CameraRef& c) { return c.get().farPlane; },
+            [](const CameraRef& c, sol::object v) {
+                auto& camera = c.get();
+                const float far = lua::within(lua::as<float>(v, "far"), 1.0f, 100000.0f, "far");
+                if (far <= camera.nearPlane) {
+                    throw std::runtime_error("far must be above near (" + lua::format(camera.nearPlane) + ")");
+                }
+                camera.farPlane = far;
+            },
+            "number",
+            "Far clip plane in world units (1 to 100000, above `near`; default 300). Raise it before a "
+            "`distance` that would clip an overworld (an airship camera at 400); fog and depth-of-field "
+            "fall off relative to the planes, so retune them when the planes move a long way.")
         .property(
             "orthographic", [](const CameraRef& c) { return c.get().orthographic; },
             [](const CameraRef& c, sol::object v) {

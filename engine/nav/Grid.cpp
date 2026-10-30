@@ -101,7 +101,18 @@ int Grid::addLayer(const std::string& name) {
 }
 
 bool Grid::contains(int x, int z, int layer) const {
-    return x >= 0 && z >= 0 && x < width_ && z < depth_ && layer >= 0 && layer < layerCount();
+    if (wrap_) {
+        return layer >= 0 && layer < layerCount();
+    }
+    return inRange(x, z, layer);
+}
+
+void Grid::setWrap(bool wrap) {
+    if (wrap_ == wrap) {
+        return;
+    }
+    wrap_ = wrap;
+    ++revision_; // the seam joins or splits components
 }
 
 GridCell& Grid::at(int x, int z, int layer) {
@@ -308,12 +319,13 @@ const GridLink* Grid::ladderStep(GridPos from, glm::ivec2 step) const {
         return nullptr;
     }
     const auto cell = index(from.x, from.z);
+    const auto here = wrapCell(from);
     for (auto it =
              std::lower_bound(ladderIndex_.begin(), ladderIndex_.end(), std::make_pair(cell, std::size_t{0}));
          it != ladderIndex_.end() && it->first == cell; ++it) {
         const auto& link = links_[it->second];
-        if ((from == link.foot() && step == link.direction) ||
-            (from == link.top() && step == -link.direction)) {
+        if ((here == wrapCell(link.foot()) && step == link.direction) ||
+            (here == wrapCell(link.top()) && step == -link.direction)) {
             return &link;
         }
     }
@@ -398,11 +410,13 @@ std::vector<std::string> Grid::tagsOf(std::uint32_t mask) const {
 }
 
 const Json* Grid::cellProps(GridPos p) const {
+    p = wrapCell(p);
     const auto found = cellProps_.find({p.x, p.z, p.layer});
     return found == cellProps_.end() ? nullptr : &found->second;
 }
 
 void Grid::setCellProps(GridPos p, Json props) {
+    p = wrapCell(p);
     if (props.is_null() || props.empty()) {
         cellProps_.erase({p.x, p.z, p.layer});
     } else {
@@ -418,6 +432,7 @@ Grid Grid::fromJson(const Json& data) {
         throw std::runtime_error("Grid needs at least one layer");
     }
     Grid grid(width, depth, 1);
+    grid.wrap_ = data.value("wrap", false);
     grid.tagNames_ = data.value("tags", std::vector<std::string>{});
     if (grid.tagNames_.size() > 32) {
         throw std::runtime_error("A grid supports at most 32 distinct tags");
@@ -534,11 +549,13 @@ Grid Grid::fromJson(const Json& data) {
             if (value.direction == glm::ivec2(0)) {
                 throw std::runtime_error("A ladder link needs a dir (the way up)");
             }
-            if (!grid.contains(value.foot()) || !grid.contains(value.top())) {
+            // Both ends inside the rectangle: a ladder may not straddle the
+            // seam of a wrapping grid.
+            if (!grid.inRange(value.foot()) || !grid.inRange(value.top())) {
                 throw std::runtime_error("Grid ladder outside the map");
             }
         } else {
-            if (!grid.contains(value.x, value.z, value.from) || !grid.contains(value.x, value.z, value.to)) {
+            if (!grid.inRange(value.x, value.z, value.from) || !grid.inRange(value.x, value.z, value.to)) {
                 throw std::runtime_error("Grid link outside the map");
             }
             if (value.from == value.to) {
@@ -550,7 +567,7 @@ Grid Grid::fromJson(const Json& data) {
     grid.indexLinks();
     for (const auto& entry : data.value("cell_props", Json::array())) {
         const GridPos p{entry.at("x"), entry.at("z"), entry.value("layer", 0)};
-        if (!grid.contains(p)) {
+        if (!grid.inRange(p)) {
             throw std::runtime_error("Grid cell_props entry outside the map");
         }
         grid.setCellProps(p, entry.at("props"));
@@ -636,6 +653,9 @@ Json Grid::toJson() const {
                          {"props", value}});
     }
     Json result{{"width", width_}, {"depth", depth_}, {"layers", layers}};
+    if (wrap_) {
+        result["wrap"] = true;
+    }
     if (!tagNames_.empty()) {
         result["tags"] = tagNames_;
     }

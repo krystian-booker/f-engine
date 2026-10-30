@@ -35,9 +35,14 @@ class SceneLighting {
 public:
     SceneLighting();
     // Fits the cascades, sets up the shadow views and bins this frame's lights.
-    // `viewProjection` is the camera's, for skipping shadows of lights out of view.
+    // `viewProjection` is the camera's, for skipping shadows of lights out of
+    // view. `wrapOffsets` are the mirrors a wrapping map is drawn under this
+    // frame (WorldRenderer; the zero shift first, and only that one on other
+    // maps): lights are copied under each so mirrored geometry is lit like
+    // the original, and the light grid and caster bounds cover them.
     void prepare(World& world, double alpha, float aspect, const glm::mat4& viewProjection,
-                 const SceneViews& views, const ShadowAtlas& atlas);
+                 const SceneViews& views, const ShadowAtlas& atlas,
+                 const std::vector<glm::vec3>& wrapOffsets);
     // Uniforms and textures for one draw (samplers 2..4 and 7).
     void bind(const Uniforms& uniforms) const;
     [[nodiscard]] bool shadows() const { return shadows_; }

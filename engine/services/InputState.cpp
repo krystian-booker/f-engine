@@ -196,11 +196,39 @@ void InputState::usePad(int number) {
 }
 
 void InputState::connectPad(Pad pad) {
-    pads_[pad.number] = std::move(pad);
+    pads_[pad.number] = pad;
+    queuePadEvent({true, std::move(pad)});
 }
 
 void InputState::disconnectPad(int number) {
-    pads_.erase(number);
+    const auto found = pads_.find(number);
+    if (found == pads_.end()) {
+        return;
+    }
+    PadEvent event{false, std::move(found->second)};
+    pads_.erase(found);
+    queuePadEvent(std::move(event));
+}
+
+void InputState::queuePadEvent(PadEvent event) {
+    if (pendingPads_.size() >= MaxPendingPadEvents) {
+        return;
+    }
+    if (recorder_) {
+        recorder_->pad(event);
+        recordedPads_ = pendingPads_.size() + 1;
+    }
+    pendingPads_.push_back(std::move(event));
+}
+
+void InputState::setRecorder(InputRecorder* recorder) {
+    recorder_ = recorder;
+    if (!recorder_) {
+        return;
+    }
+    for (; recordedPads_ < pendingPads_.size(); ++recordedPads_) {
+        recorder_->pad(pendingPads_[recordedPads_]);
+    }
 }
 
 std::string InputState::deviceType() const {
@@ -307,6 +335,8 @@ void InputState::applyPending() {
         it = queue.empty() ? pending_.erase(it) : std::next(it);
     }
     text_ = std::exchange(pendingText_, {});
+    padEvents_ = std::exchange(pendingPads_, {});
+    recordedPads_ = 0;
     if (pendingComposition_) {
         composition_ = std::move(pendingComposition_->first);
         compositionCursor_ = pendingComposition_->second;
@@ -321,7 +351,7 @@ void InputState::tick(double dt) {
         for (const auto& bound : action.inputs) {
             const auto binding = parseBinding(bound);
             const float value = raw(binding.input);
-            const float directed = binding.direction == 0 ? std::abs(value)
+            const float directed = binding.direction == 0  ? std::abs(value)
                                    : binding.direction < 0 ? -value
                                                            : value;
             held = held || directed >= action.threshold;

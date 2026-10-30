@@ -16,10 +16,23 @@ std::string relativeTo(const std::filesystem::path& root, const std::filesystem:
 // the folder `<dir>/<name>`. Once it is mounted, the functions below see its
 // entries as files under that folder. Where both exist, development builds
 // read the loose file and ship builds the archive's copy. Mounts last for the
-// process (one game per process).
+// process (one game per process) and are keyed by archive: mounting the same
+// archive again replaces its mount. Several archives may stand in for one
+// folder; the one mounted last wins where their entries share a path.
 void mountPack(const std::filesystem::path& archive, bool preferLoose = FENGINE_DEV != 0);
 // Mounts `<folder>.pak` when it exists; returns whether it does.
 bool mountFolderPack(const std::filesystem::path& folder);
+// Lays `archive` over `root` (a game folder, loose or itself supplied by an
+// archive): its entries win over the folder's files and earlier mounts, also
+// over loose files in development builds, so a content pack can be tested
+// against an unpacked game. The engine mounts <game>/packs/*.pak and <user
+// data>/packs/*.pak this way.
+void mountOverlay(const std::filesystem::path& archive, const std::filesystem::path& root);
+// mountOverlay for every `*.pak` in `folder`, in name order; an archive that
+// does not open (damaged, not a pak) is logged and skipped. Returns the file
+// names mounted, in mount order; none when the folder does not exist.
+std::vector<std::string> mountOverlayFolder(const std::filesystem::path& folder,
+                                            const std::filesystem::path& root);
 // The game folder a command line names: a folder, which `<folder>.pak` may
 // supply, or the archive itself. Mounts the archive.
 std::filesystem::path openGame(const std::filesystem::path& folderOrArchive);

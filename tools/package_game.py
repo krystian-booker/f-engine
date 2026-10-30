@@ -358,10 +358,15 @@ def package(args):
         work = Path(temporary)
         sources, loose = work / "sources", work / "loose"
         # Tests and replays are development material; saves are per-user;
-        # shader sources are compiled below.
-        copy_tree(game, sources / "game", skip_parts=("saves", "tests", "replays"), skip_top=("shaders",),
-                  skip_suffixes=LOOSE_SUFFIXES)
+        # shader sources are compiled below; content packs stay archives of
+        # their own, mounted over game.pak at start.
+        copy_tree(game, sources / "game", skip_parts=("saves", "tests", "replays"),
+                  skip_top=("shaders", "packs"), skip_suffixes=LOOSE_SUFFIXES)
         copy_tree(lualib, sources / "lualib", skip_parts=("tests",))
+        for pack in sorted((game / "packs").glob("*.pak")) if (game / "packs").is_dir() else ():
+            if pack.is_file():
+                (loose / "packs").mkdir(parents=True, exist_ok=True)
+                shutil.copy2(pack, loose / "packs" / pack.name)
         compile_game_shaders(game, backends, args, loose / "shaders")
         if args.cook:
             cook_textures(assetc, sources / "game", loose)

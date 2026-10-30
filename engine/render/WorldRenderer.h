@@ -133,6 +133,12 @@ private:
     std::vector<DecalQuad> decal_;
 
     // Per-render state
+    // The shifts a wrapping map is drawn under this frame (appendWrapOffsets):
+    // the zero shift first, then +-width/depth mirrors the camera or a shadow
+    // view sees. Map chunks, water, mesh entities, sprites and lights are
+    // repeated under each; decals, particles, overlays and distortion are not.
+    // Exactly {0} on a map that does not wrap.
+    std::vector<glm::vec3> wrapOffsets_;
     const SceneLighting* lighting_ = nullptr;
     const Environment* environment_ = nullptr;
     const SceneViews* views_ = nullptr;

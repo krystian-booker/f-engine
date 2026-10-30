@@ -31,6 +31,11 @@ public:
         std::string name, type = "generic";
         bool rumble = false, triggerRumble = false;
     };
+    // A gamepad connected or disconnected (`pad` describes it either way).
+    struct PadEvent {
+        bool connected = false;
+        Pad pad;
+    };
     // A rumble request; pad 0 means every gamepad. Strengths are 0..1.
     struct Rumble {
         int pad = 0;
@@ -75,9 +80,13 @@ public:
     void setDevice(const std::string& device, const std::string& name = {});
     // The gamepad with this number was used (last_device becomes "gamepad").
     void usePad(int number);
+    // pads() changes at once; the event is published by the next tick() (at
+    // most 64 wait, further ones are dropped) and reported to the recorder.
     void connectPad(Pad pad);
     void disconnectPad(int number);
     [[nodiscard]] const std::map<int, Pad>& pads() const { return pads_; }
+    // Gamepads connected or disconnected since the last tick, in order.
+    [[nodiscard]] const std::vector<PadEvent>& padEvents() const { return padEvents_; }
     // Committed UTF-8 text and the IME's pre-edit string (cursor in
     // characters); both are queued until tick().
     void feedText(std::string_view utf8);
@@ -86,8 +95,10 @@ public:
     // down) is released and any IME composition ends, all through the same
     // queue as other input, so a recorder sees the releases too.
     void focusLost();
-    // Everything fed from now on is also reported to `recorder` (null stops).
-    void setRecorder(InputRecorder* recorder) { recorder_ = recorder; }
+    // Everything fed from now on is also reported to `recorder` (null stops),
+    // starting with the gamepad events still waiting for a tick that no
+    // recorder saw (the pads present when the platform layer started).
+    void setRecorder(InputRecorder* recorder);
     [[nodiscard]] InputRecorder* recorder() const { return recorder_; }
 
     // Script requests carried out by the platform layer.
@@ -143,6 +154,8 @@ private:
     // Whether two values agree on every edge of the input.
     [[nodiscard]] static bool sameSide(const std::vector<Edge>& edges, float a, float b);
     void applyPending();
+    static constexpr std::size_t MaxPendingPadEvents = 64;
+    void queuePadEvent(PadEvent event);
     std::map<std::string, Action> actions_;
     std::map<std::string, Axis> axes_;
     std::map<std::string, float> raw_;
@@ -150,6 +163,8 @@ private:
     std::vector<std::string> pressedInputs_;
     std::string lastDevice_ = "keyboard", deviceName_, deviceType_ = "generic";
     std::map<int, Pad> pads_;
+    std::vector<PadEvent> pendingPads_, padEvents_;
+    std::size_t recordedPads_ = 0; // leading pendingPads_ the recorder has seen
     std::string pendingText_, text_;
     std::optional<std::pair<std::string, int>> pendingComposition_;
     std::string composition_;

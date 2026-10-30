@@ -1,7 +1,10 @@
 #include "engine/nav/Query.h"
+#include <algorithm>
 #include <doctest/doctest.h>
 #include <limits>
 #include <numbers>
+#include <stdexcept>
+#include <utility>
 
 using namespace fe;
 
@@ -835,4 +838,125 @@ TEST_CASE("links and ladders join components; a cell edit splits them again") {
     const Grid copy = grid;
     CHECK(copy.component({0, 1, 0}) == copy.component({6, 1, 0}));
     CHECK(copy.revision() == grid.revision());
+}
+
+TEST_CASE("a wrapping grid folds cells, points and differences round the map") {
+    Grid grid(10, 6, 1);
+    // Not wrapping: every helper is the identity and the edges are edges.
+    CHECK_FALSE(grid.wraps());
+    CHECK(grid.wrapCell({-1, 7, 0}) == GridPos{-1, 7, 0});
+    CHECK(grid.wrapPoint({-0.5f, 6.5f}) == glm::vec2(-0.5f, 6.5f));
+    CHECK(grid.delta({9.5f, 0.5f}, {0.5f, 0.5f}) == glm::vec2(-9, 0));
+    CHECK_FALSE(grid.contains(-1, 0));
+    CHECK_FALSE(grid.contains(10, 0));
+    CHECK_THROWS_AS((void)grid.at(-1, 0), std::out_of_range);
+    CHECK_FALSE(grid.canStand({-0.5f, 1.5f}));
+    CHECK(grid.heightAt({-0.5f, 1.5f}) == 0);
+    const auto revision = grid.revision();
+    grid.setWrap(true);
+    CHECK(grid.wraps());
+    CHECK(grid.revision() > revision);
+    CHECK(grid.wrapCell({-1, 7, 0}) == GridPos{9, 1, 0});
+    CHECK(grid.wrapCell({10, -1, 2}) == GridPos{0, 5, 2});
+    CHECK(grid.wrapPoint({-0.5f, 6.5f}) == glm::vec2(9.5f, 0.5f));
+    CHECK(grid.wrapPoint({10.25f, -0.25f}) == glm::vec2(0.25f, 5.75f));
+    CHECK(grid.wrapPoint({-1e-9f, 3}) == glm::vec2(0, 3)); // never `width` itself
+    CHECK(grid.delta({9.5f, 0.5f}, {0.5f, 0.5f}) == glm::vec2(1, 0));
+    CHECK(grid.delta({0.5f, 0.5f}, {9.5f, 0.5f}) == glm::vec2(-1, 0));
+    CHECK(grid.delta({0.5f, 0.5f}, {0.5f, 5.5f}) == glm::vec2(0, -1));
+    CHECK(grid.delta({2, 2}, {4, 3}) == glm::vec2(2, 1));
+    CHECK(wrapDifference(5, 10) == -5); // half way round: the range is [-size/2, size/2)
+    CHECK(wrapDifference(-5, 10) == -5);
+    // Lookups wrap; only a bad layer is outside.
+    CHECK(grid.contains(-1, 0));
+    CHECK(grid.contains(10, 60));
+    CHECK_FALSE(grid.contains(0, 0, 1));
+    CHECK(grid.inRange(9, 5));
+    CHECK_FALSE(grid.inRange(10, 0));
+    CHECK_FALSE(grid.inRange(-1, 0));
+    grid.at(9, 1).height = 2;
+    grid.at(9, 2).ramp = Ramp::East;
+    CHECK(grid.heightAt({-0.5f, 1.5f}) == doctest::Approx(2));
+    CHECK(grid.heightAt({10.5f, 1.5f}) == doctest::Approx(0));
+    CHECK(grid.heightAt({-0.25f, 2.5f}) == doctest::Approx(0.75f)); // three quarters up the ramp
+    CHECK(std::as_const(grid).at(-1, 1).height == doctest::Approx(2));
+    CHECK(std::as_const(grid).at(19, 7).height == doctest::Approx(2));
+    grid.at(9, 3).walkable = false;
+    CHECK_FALSE(grid.canStand({-0.5f, 3.5f}, 0.2f));
+    CHECK_FALSE(grid.canStand({0.1f, 3.5f}, 0.2f)); // the disc crosses the seam into the wall
+    CHECK(grid.canStand({0.1f, 4.5f}, 0.2f));
+    CHECK(grid.canStand({-0.5f, 4.5f}, 0.2f));
+    grid.setCellProps({-1, 4, 0}, {{"note", "west"}});
+    REQUIRE(grid.cellProps({9, 4, 0}));
+    CHECK(grid.cellProps({9, 4, 0})->at("note") == "west");
+    CHECK(grid.cellProps({19, 4, 0}) == grid.cellProps({9, 4, 0}));
+    // The flag survives the file and the file keeps its validation strict.
+    const auto copy = Grid::fromJson(grid.toJson());
+    CHECK(copy.wraps());
+    CHECK(copy.heightAt({-0.5f, 1.5f}) == doctest::Approx(2));
+    auto json = grid.toJson();
+    json["cell_props"] = Json::array({{{"x", 10}, {"z", 0}, {"props", {{"a", 1}}}}});
+    CHECK_THROWS(Grid::fromJson(json));
+    json = grid.toJson();
+    json["layers"].push_back({{"name", "top"}});
+    Json ladder{{"x", 9}, {"z", 0}, {"from", 0}, {"to", 1}, {"kind", "ladder"}, {"dir", "e"}};
+    json["links"] = Json::array({ladder});
+    CHECK_THROWS(Grid::fromJson(json)); // a ladder may not straddle the seam
+    ladder["x"] = 8;
+    json["links"] = Json::array({ladder});
+    CHECK(Grid::fromJson(json).links().size() == 1);
+}
+
+TEST_CASE("paths, reach and components cross a wrapping grid's seam") {
+    Grid grid(10, 6, 1);
+    StepRules rules;
+    // Flat: the long way round is the only way.
+    CHECK(findPath(grid, {9, 1, 0}, {2, 1, 0}, rules).size() == 7);
+    CHECK(findPath(grid, {9, 1, 0}, {-8, 1, 0}, rules).empty()); // outside a plain grid
+    grid.setWrap(true);
+    auto path = findPath(grid, {9, 1, 0}, {2, 1, 0}, rules);
+    REQUIRE(path.size() == 3);
+    CHECK(path[0] == GridPos{0, 1, 0});
+    CHECK(path[2] == GridPos{2, 1, 0});
+    // Any representative of a cell is that cell, and the route comes back canonical.
+    path = findPath(grid, {-1, 7, 0}, {-8, 1, 0}, rules);
+    REQUIRE(path.size() == 3);
+    CHECK(path[2] == GridPos{2, 1, 0});
+    CHECK(findPath(grid, {9, 1, 0}, {2, 1, 0}, rules).size() == 3);
+    StepRules diagonal = rules;
+    diagonal.diagonal = true;
+    path = findPath(grid, {9, 0, 0}, {1, 2, 0}, diagonal);
+    REQUIRE(path.size() == 2); // two diagonal steps over the corner of the seam
+    CHECK(path[0] == GridPos{0, 1, 0});
+    // Reach spills over the seam, keyed on canonical cells.
+    const auto cells = reachable(grid, {0, 1, 0}, 1, rules);
+    CHECK(std::any_of(cells.begin(), cells.end(),
+                      [](const ReachCell& c) { return c.pos == GridPos{9, 1, 0}; }));
+    CHECK(std::none_of(cells.begin(), cells.end(), [](const ReachCell& c) { return c.pos.x < 0; }));
+    // Occupancy across the seam counts: a body on (9, 1) stops the short route.
+    StepRules occupied = rules;
+    occupied.blocked.insert(cellKey({9, 1, 0}));
+    CHECK(findPath(grid, {1, 1, 0}, {8, 1, 0}, occupied).size() > 3);
+    // A wall down x = 0 forces the long way; a gap jump clears it.
+    for (int z = 0; z < 6; ++z) {
+        grid.at(0, z).walkable = false;
+    }
+    CHECK(findPath(grid, {9, 1, 0}, {2, 1, 0}, rules).size() == 7);
+    StepRules hop = rules;
+    hop.jump = {1, 0, 0, false};
+    const auto route = findRoute(grid, {9, 1, 0}, {1, 1, 0}, hop);
+    REQUIRE(route.steps.size() == 1);
+    CHECK(route.steps[0].cell == GridPos{1, 1, 0});
+    CHECK(route.steps[0].kind == StepKind::Jump);
+    // Components join across the seam and lookups of any representative agree.
+    for (int z = 0; z < 6; ++z) {
+        grid.at(0, z).walkable = true;
+        grid.at(5, z).walkable = false;
+    }
+    CHECK(grid.component({1, 1, 0}) == grid.component({9, 1, 0}));
+    CHECK(grid.component({-1, 1, 0}) == grid.component({9, 1, 0}));
+    CHECK(grid.component({5, 1, 0}) == -1);
+    grid.setWrap(false);
+    CHECK(grid.component({1, 1, 0}) != grid.component({9, 1, 0}));
+    CHECK(grid.component({-1, 1, 0}) == -1);
 }

@@ -116,6 +116,18 @@ private:
     // layer's footprint counts.
     [[nodiscard]] bool supported(glm::vec2 position, const Body& body, int layer) const;
     [[nodiscard]] bool freeOfSolids(entt::entity entity, glm::vec3 position, const Body& body) const;
+    // Where the mover's feet rest at `p` on `layer`: the surface plus its lift.
+    [[nodiscard]] float restY(const Mover& mover, glm::vec2 p, int layer) const;
+    // The lift in effect this tick, if any (a body without a mover has none).
+    [[nodiscard]] float liftOf(entt::entity entity) const;
+    // On a wrapping grid, folds the position into the canonical range and
+    // keeps `previous` the nearest representative of itself, so a frame
+    // interpolates across the seam, not across the map. Called wherever a
+    // position is written, before the collision hash hears of it. A no-op
+    // on other grids.
+    void canonicalise(Transform& transform) const;
+    // Moves lift towards altitude by altitudeSpeed * dt (at once when it is 0).
+    static void easeLift(Mover& mover, float dt);
     [[nodiscard]] int targetLayer(glm::vec3 target, int current, const Body& body) const;
     // The landing spot for a jump to `target`: `target` when free, else the
     // nearest free standing spot around it, else nothing.

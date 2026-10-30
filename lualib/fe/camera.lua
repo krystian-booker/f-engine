@@ -61,6 +61,7 @@ function Rig:init(world, options)
     self.base[key] = options[key] or props[key] or value
   end
   self.bounds = { min = vec_of(options.min or props.min), max = vec_of(options.max or props.max) }
+  self.wraps = world:wraps() -- a toroidal map has no edges to clamp to
   self.zone_type = options.zone_type or "camera"
   self.current = { pitch = self.base.pitch, yaw = self.base.yaw, distance = self.base.distance, fov = self.base.fov }
   self.yaw_offset = 0
@@ -106,11 +107,11 @@ function Rig:goal()
     end
   end
   local target = { x = point.x, y = (point.y or 0) + self.base.height, z = point.z }
-  if min then
+  if min and not self.wraps then
     target.x = math.max(min.x, target.x)
     target.z = math.max(min.z, target.z)
   end
-  if max then
+  if max and not self.wraps then
     target.x = math.min(max.x, target.x)
     target.z = math.min(max.z, target.z)
   end
@@ -152,10 +153,13 @@ function Rig:update(dt)
   local target, goal = self:goal()
   local rate = self.base.smoothing
   local t = self.cam.target
+  -- Approached the short way round: the engine folds the target back into
+  -- the map at the next tick.
+  local d = self.world:wrap_delta(t, target)
   self.cam.target = {
-    x = tween.approach(t.x, target.x, rate, dt),
+    x = tween.approach(t.x, t.x + d.x, rate, dt),
     y = tween.approach(t.y, target.y, rate, dt),
-    z = tween.approach(t.z, target.z, rate, dt),
+    z = tween.approach(t.z, t.z + d.z, rate, dt),
   }
   self.current.pitch = tween.approach(self.current.pitch, goal.pitch, rate * 0.6, dt)
   self.current.distance = tween.approach(self.current.distance, goal.distance, rate * 0.6, dt)
@@ -235,11 +239,12 @@ function Rig:pan_to(target, duration, options)
   local to = { pitch = options.pitch, distance = options.distance, fov = options.fov,
     yaw = options.yaw and from.yaw + angle_delta(from.yaw, options.yaw) }
   local to_target = { x = target.x, y = (target.y or 0) + self.base.height, z = target.z }
+  local d = self.world:wrap_delta(from.target, to_target) -- the short way round on a wrapping map
   tween.run(duration, function(t)
     self.cam.target = {
-      x = tween.lerp(from.target.x, to_target.x, t),
+      x = from.target.x + d.x * tween.lerp(0, 1, t),
       y = tween.lerp(from.target.y, to_target.y, t),
-      z = tween.lerp(from.target.z, to_target.z, t),
+      z = from.target.z + d.z * tween.lerp(0, 1, t),
     }
     for _, key in ipairs({ "pitch", "yaw", "distance", "fov" }) do
       if to[key] then

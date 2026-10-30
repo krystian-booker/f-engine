@@ -1,4 +1,5 @@
 #include "engine/core/Paths.h"
+#include "engine/core/Log.h"
 #include "engine/core/Pack.h"
 #include <algorithm>
 #include <fstream>
@@ -101,12 +102,17 @@ std::shared_mutex mountsMutex;
 std::vector<std::shared_ptr<const Mount>> mounts;
 Extracted extracted;
 
-// The mount whose folder holds `path`, with the entry name inside it ("" for
-// the folder itself).
-std::pair<std::shared_ptr<const Mount>, std::string> locate(const std::filesystem::path& path) {
+struct Located {
+    std::shared_ptr<const Mount> mount;
+    std::string name; // the entry name inside the mount's folder; "" for the folder itself
+};
+
+// Every mount whose folder holds `path`, in mount order (oldest first).
+std::vector<Located> locate(const std::filesystem::path& path) {
     std::shared_lock lock(mountsMutex);
+    std::vector<Located> found;
     if (mounts.empty()) {
-        return {};
+        return found;
     }
     const auto normal = std::filesystem::absolute(path).lexically_normal();
     for (const auto& mount : mounts) {
@@ -120,11 +126,12 @@ std::pair<std::shared_ptr<const Mount>, std::string> locate(const std::filesyste
                 if (name == ".") {
                     name.clear();
                 }
-                return {mount, std::move(name)};
+                found.push_back({mount, std::move(name)});
+                break;
             }
         }
     }
-    return {};
+    return found;
 }
 
 struct Packed {
@@ -132,30 +139,72 @@ struct Packed {
     const PackArchive::Entry* entry = nullptr;
 };
 
-// The archive entry `path` reads from; empty when it reads the loose file.
+// The archive entry `path` reads from: the newest mount holding it, unless
+// that mount defers to a loose file that exists. Empty when it reads the
+// loose file.
 Packed packed(const std::filesystem::path& path) {
-    auto [mount, name] = locate(path);
-    if (!mount || name.empty()) {
-        return {};
-    }
-    const auto* entry = mount->archive.find(name);
+    auto located = locate(path);
     std::error_code error;
-    if (!entry || (mount->preferLoose && std::filesystem::is_regular_file(path, error))) {
-        return {};
+    for (auto it = located.rbegin(); it != located.rend(); ++it) {
+        if (it->name.empty()) {
+            continue;
+        }
+        const auto* entry = it->mount->archive.find(it->name);
+        if (!entry) {
+            continue;
+        }
+        if (it->mount->preferLoose && std::filesystem::is_regular_file(path, error)) {
+            return {};
+        }
+        return {std::move(it->mount), entry};
     }
-    return {std::move(mount), entry};
+    return {};
+}
+
+void addMount(std::shared_ptr<Mount> mount) {
+    std::unique_lock lock(mountsMutex);
+    std::erase_if(mounts,
+                  [&](const auto& existing) { return existing->archive.file() == mount->archive.file(); });
+    mounts.push_back(std::move(mount));
 }
 } // namespace
 
 void mountPack(const std::filesystem::path& archive, bool preferLoose) {
     const auto absolute = std::filesystem::absolute(archive).lexically_normal();
-    auto mount = std::make_shared<Mount>(
+    addMount(std::make_shared<Mount>(
         Mount{absolute.parent_path() / absolute.stem(),
               std::filesystem::weakly_canonical(absolute.parent_path()) / absolute.stem(),
-              PackArchive(absolute), preferLoose});
-    std::unique_lock lock(mountsMutex);
-    std::erase_if(mounts, [&](const auto& existing) { return existing->root == mount->root; });
-    mounts.push_back(std::move(mount));
+              PackArchive(absolute), preferLoose}));
+}
+
+void mountOverlay(const std::filesystem::path& archive, const std::filesystem::path& root) {
+    const auto absolute = std::filesystem::absolute(archive).lexically_normal();
+    const auto folder = std::filesystem::absolute(root).lexically_normal();
+    addMount(std::make_shared<Mount>(
+        Mount{folder, std::filesystem::weakly_canonical(folder), PackArchive(absolute), false}));
+}
+
+std::vector<std::string> mountOverlayFolder(const std::filesystem::path& folder,
+                                            const std::filesystem::path& root) {
+    std::vector<std::filesystem::path> archives;
+    std::error_code error;
+    for (const auto& entry : std::filesystem::directory_iterator(folder, error)) {
+        if (entry.path().extension() == ".pak" && entry.is_regular_file(error)) {
+            archives.push_back(entry.path());
+        }
+    }
+    std::sort(archives.begin(), archives.end(),
+              [](const auto& a, const auto& b) { return a.filename() < b.filename(); });
+    std::vector<std::string> mounted;
+    for (const auto& archive : archives) {
+        try {
+            mountOverlay(archive, root);
+            mounted.push_back(archive.filename().string());
+        } catch (const std::exception& problem) {
+            log(LogLevel::Warning, "Skipping pack " + archive.string() + ": " + problem.what());
+        }
+    }
+    return mounted;
 }
 
 bool mountFolderPack(const std::filesystem::path& folder) {
@@ -205,8 +254,12 @@ bool isFolder(const std::filesystem::path& path) {
     if (std::filesystem::is_directory(path, error)) {
         return true;
     }
-    const auto [mount, name] = locate(path);
-    return mount && mount->archive.hasFolder(name);
+    for (const auto& [mount, name] : locate(path)) {
+        if (mount->archive.hasFolder(name)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::string readFile(const std::filesystem::path& path) {
@@ -228,7 +281,7 @@ std::vector<std::string> listFolder(const std::filesystem::path& folder) {
     for (const auto& entry : std::filesystem::directory_iterator(folder, error)) {
         names.push_back(entry.path().filename().string() + (entry.is_directory(error) ? "/" : ""));
     }
-    if (const auto [mount, name] = locate(folder); mount) {
+    for (const auto& [mount, name] : locate(folder)) {
         const auto inside = mount->archive.list(name);
         names.insert(names.end(), inside.begin(), inside.end());
     }

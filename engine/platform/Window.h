@@ -1,9 +1,11 @@
 #pragma once
 #include "engine/core/GameConfig.h"
 #include "engine/platform/Display.h"
+#include "engine/services/Clipboard.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_metal.h>
 #include <bgfx/bgfx.h>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -40,6 +42,15 @@ private:
 // The player's preferred locale as a BCP 47 tag ("en-US"), "en-US" when the
 // system has no preference.
 std::string preferredLocale();
+
+// The system clipboard (SDL_GetClipboardText / SDL_SetClipboardText); needs
+// SDL's video subsystem, so a Window must exist. The runtime supplies it as
+// EngineOptions::clipboard, except to replays and recordings.
+class SdlClipboard final : public Clipboard {
+public:
+    [[nodiscard]] std::optional<std::string> read() override;
+    void write(const std::string& text) override;
+};
 
 // Whether the window is in the foreground (focused and not minimised), from
 // SDL window events.

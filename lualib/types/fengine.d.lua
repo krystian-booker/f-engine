@@ -209,8 +209,8 @@ fe.app.fullscreen = nil
 ---@type fun(mode: boolean|'borderless'|'exclusive')
 fe.app.set_fullscreen = nil
 
---- Window and monitor settings. width and height are the window size in screen units, or the exclusive fullscreen mode; monitor indexes monitors; modes are the exclusive fullscreen modes of that monitor, largest first. hdr is true when the frame is presented to a high dynamic range back buffer (game.json hdr_output or --hdr, and the renderer supports one). Headless runs report one monitor the size of game.json's window.
----@type fun(): {fullscreen: false|'borderless'|'exclusive', width: integer, height: integer, vsync: 'on'|'off'|'adaptive', monitor: integer, hdr: boolean, monitors: {name: string, width: integer, height: integer, refresh: number}[], modes: {width: integer, height: integer, refresh: number}[]}
+--- Window and monitor settings. width and height are the window size in screen units, or the exclusive fullscreen mode; monitor indexes monitors; modes are the exclusive fullscreen modes of that monitor, largest first. hdr is true when the frame is presented to a high dynamic range back buffer (game.json hdr_output or --hdr, and the renderer supports one). scale is the window's pixels per screen unit (2 on a Retina display, 1 headless): the viewport (fe.app.viewport) is width x scale by height x scale. Headless runs report one monitor the size of game.json's window.
+---@type fun(): {fullscreen: false|'borderless'|'exclusive', width: integer, height: integer, vsync: 'on'|'off'|'adaptive', monitor: integer, hdr: boolean, scale: number, monitors: {name: string, width: integer, height: integer, refresh: number}[], modes: {width: integer, height: integer, refresh: number}[]}
 fe.app.display = nil
 
 --- Change display settings; omitted fields stay. fullscreen = true means 'borderless' (a desktop-sized window); 'exclusive' switches the monitor to the display mode closest to width x height. Applied after the frame; fe.app.display() shows the request until then. The engine does not store these: keep them in the player's settings (fe.config) and apply them at start.
@@ -220,6 +220,18 @@ fe.app.set_display = nil
 --- The player's preferred language and region as a BCP 47 tag, such as 'en-US' or 'ja' (from the operating system; 'en-US' in headless runs).
 ---@type fun(): string
 fe.app.locale = nil
+
+--- The clipboard's text, nil when it holds none. Text beyond 64 KiB is cut at a character boundary. The system clipboard in the windowed runtime; tests, headless runs, replays and recordings read what fe.app.set_clipboard wrote in the same session.
+---@type fun(): string?
+fe.app.clipboard = nil
+
+--- Put text on the clipboard (at most 64 KiB, no NUL bytes).
+---@type fun(text: string)
+fe.app.set_clipboard = nil
+
+--- Content packs laid over the game folder at start, in mount order: 'packs/<name>.pak' from the game folder, then 'user://packs/<name>.pak' from the user-data folder, each set in name order. A file in a later pack wins over the same path in an earlier one and in the game itself (loose or packed), also in development builds; game.json is read before they mount. A pack added while the game runs is seen after a restart.
+---@type fun(): string[]
+fe.app.packs = nil
 
 --- The number with the decimal and digit-group separators of a language: `locale` is a BCP 47 tag (default fe.app.locale()), of which the language subtag chooses from a built-in table (en, de, fr, es, it, pt, ja, zh, ko, ru, pl, nl, sv, tr; others format as English; languages that group with a space use a no-break space). `decimals` (0 to 20) is 0 for a whole number and 2 otherwise by default; the number is rounded to it. fe.i18n.number uses the current language.
 ---@type fun(number: number, options?: {decimals?: integer, locale?: string}): string
@@ -367,6 +379,10 @@ fe.input.device_name = nil
 ---@type fun(): {number: integer, name: string, type: string, rumble: boolean, trigger_rumble: boolean}[]
 fe.input.pads = nil
 
+--- Gamepads connected or disconnected this tick, in order (fe.input.pads() already reflects them). The fe.input kit turns them into its pad_connected and pad_disconnected signals; a game that pauses when the player's pad is unplugged listens there.
+---@type fun(): {type: 'connected'|'disconnected', pad: integer, name: string}[]
+fe.input.pad_events = nil
+
 --- Vibrate the low- and high-frequency motors (0..1) for up to 60 seconds; a new call replaces the previous one. Without a gamepad number, every gamepad. 0, 0 stops.
 ---@type fun(low: number, high: number, seconds: number, pad?: integer)
 fe.input.rumble = nil
@@ -414,6 +430,10 @@ fe.input.feed = nil
 --- Inject committed text, or with a cursor an IME composition; it applies on the next tick. Only in development builds, --test/--check runs and --replay/--record sessions.
 ---@type fun(text: string, cursor?: integer)
 fe.input.feed_text = nil
+
+--- Connect a virtual gamepad numbered `pad` described by `spec` (name 'Virtual' of at most 64 bytes, type 'generic' and no rumble by default), or without a spec disconnect it; fe.input.pads() changes at once and the event arrives on the next tick. Only in development builds, --test/--check runs and --replay/--record sessions.
+---@type fun(pad: integer, spec?: {name?: string, type?: 'xbox'|'playstation'|'switch'|'steamdeck'|'generic', rumble?: boolean, trigger_rumble?: boolean})
+fe.input.feed_pad = nil
 
 --- Fonts, colors, icons and markup. Markup tags: {color:x} {icon:id} {wait:s} {speed:cps} ({speed:0} = the rest at once) {size:scale}...{/size} {b}...{/b} {shake}...{/shake} {wave}...{/wave} {ruby:base|reading}; other {tags} are passed to the resolver set with fe.text.resolver. Lines break at spaces and between CJK characters (kinsoku rules); right-to-left scripts are not supported.
 fe.text = fe.text or {}
@@ -687,8 +707,8 @@ Entity.moving = nil
 ---@type fun(self: Entity, position: Vec3, layer?: integer): boolean
 Entity.can_occupy = nil
 
---- Movement. A table adds or configures it (and returns the new state), no argument reads it (nil without a mover), nil removes it. `speed` (units/second) is 0 to 1000, `max_step` 0 to 1000 and `radius` 0 to 0.49. `jump` lets planned paths jump gaps (see world:path); ladders are climbed at `climb_speed` (default 1.5, at most 1000), also when steering into one. `footprint` (1 to 8, default 1) is the square of cells the mover occupies, anchored at its cell towards +x and +z, and `fly` lets it stand on and path over unwalkable cells and height steps. `blocked_tags` and `required_tags` (grid tag names from the map's tag list; an unknown name is an error) are its passability class, flying or not: it never stands on or paths through a cell carrying a blocked tag or, when `required_tags` is not empty, a cell with none of them (a boat is `{fly = true, required_tags = {'water'}}`). They are read back as name lists and plan `move_to(target)`; rules given to move_to replace them.
----@type fun(self: Entity, settings?: {speed?: number, max_step?: number, radius?: number, collide?: boolean, climb_speed?: number, footprint?: integer, fly?: boolean, blocked_tags?: string[], required_tags?: string[], jump?: {distance: integer, max_up?: number, max_down?: number, diagonal?: boolean}|false}|nil): table?
+--- Movement. A table adds or configures it (and returns the new state), no argument reads it (nil without a mover), nil removes it. `speed` (units/second) is 0 to 1000, `max_step` 0 to 1000 and `radius` 0 to 0.49. `jump` lets planned paths jump gaps (see world:path); ladders are climbed at `climb_speed` (default 1.5, at most 1000), also when steering into one. `footprint` (1 to 8, default 1) is the square of cells the mover occupies, anchored at its cell towards +x and +z, and `fly` lets it stand on and path over unwalkable cells and height steps. `blocked_tags` and `required_tags` (grid tag names from the map's tag list; an unknown name is an error) are its passability class, flying or not: it never stands on or paths through a cell carrying a blocked tag or, when `required_tags` is not empty, a cell with none of them (a boat is `{fly = true, required_tags = {'water'}}`). They are read back as name lists and plan `move_to(target)`; rules given to move_to replace them. `altitude` (0 to 1000) lifts the body that far above the grid surface, reached at `altitude_speed` units/second (0, the default: at once); `lift` reads the height in effect. A lifted body passes over boxes and bodies whose tops lie below its feet; its cell, zones and tags still apply, it flies past ladders, and a launch lands it on the surface (the lift eases back up afterwards).
+---@type fun(self: Entity, settings?: {speed?: number, max_step?: number, radius?: number, collide?: boolean, climb_speed?: number, footprint?: integer, fly?: boolean, altitude?: number, altitude_speed?: number, blocked_tags?: string[], required_tags?: string[], jump?: {distance: integer, max_up?: number, max_down?: number, diagonal?: boolean}|false}|nil): table?
 Entity.mover = nil
 
 --- Make the entity a moving surface (rafts, lifts): its position is the top, `size` (default 1 x 1, at most 64 x 64) the footprint. Movers and colliders standing on it ride along; grid cells whose centre it covers on its layer are walkable at its height while it is there. Move it with mover{collide = false} or place(). No argument reads it (nil without one); nil removes it.
@@ -755,8 +775,8 @@ Entity.props = nil
 ---@type fun(self: Entity): table
 Entity.data = nil
 
---- Follow another entity of the same world (emote balloons, carried objects); detaches when the parent is destroyed.
----@type fun(self: Entity, parent: Entity, offset?: Vec3)
+--- Follow another entity of the same world (emote balloons, carried objects); detaches when the parent is destroyed. `offset` is turned by the parent's yaw. With `ground = true` the offset is added to the grid surface under the parent instead of the parent's position, so a flat sprite attached that way is a blob shadow that stays on the ground however high the parent flies.
+---@type fun(self: Entity, parent: Entity, offset?: Vec3, options?: {ground?: boolean})
 Entity.attach = nil
 
 --- Stop following.
@@ -778,6 +798,8 @@ Entity.destroy = nil
 ---@field pitch number Degrees above the horizon, held within -89 to 89.9 (89.9 is top-down).
 ---@field distance number Distance from the target (0.1 to 10000).
 ---@field fov number Vertical field of view in degrees (1 to 170).
+---@field near number Near clip plane in world units (0.001 to 100, below `far`; default 0.1). Depth precision falls as far/near grows, so raise `near` before stretching `far` a long way.
+---@field far number Far clip plane in world units (1 to 100000, above `near`; default 300). Raise it before a `distance` that would clip an overworld (an airship camera at 400); fog and depth-of-field fall off relative to the planes, so retune them when the planes move a long way.
 ---@field orthographic boolean Parallel projection from the same orbit position (pixel-exact 2D views; default false). The view covers `ortho_height` world units vertically; distance then only sets the near and far planes. Shadows, picking, `project` and `ray` follow it.
 ---@field ortho_height number World units visible vertically when orthographic (0.01 to 100000). 0 (the default) derives it from distance and fov, the height a perspective view covers at the target, so toggling `orthographic` keeps the framing; reading returns the height in effect.
 ---@field shake Vec3 Visual offset (screen shake), not interpolated. Reading returns a copy; assign a whole table.
@@ -874,6 +896,18 @@ World.camera = nil
 --- Grid width, depth and layer count.
 ---@type fun(self: World): integer, integer, integer
 World.grid_size = nil
+
+--- Whether the map is toroidal (`grid.wrap`): its east edge joins its west and its south its north. Positions stay in [0, width) x [0, depth); use `wrap_delta` for differences between them.
+---@type fun(self: World): boolean
+World.wraps = nil
+
+--- `b - a`, the short way round on a wrapping map (the plain difference otherwise).
+---@type fun(self: World, a: Vec3, b: Vec3): Vec3
+World.wrap_delta = nil
+
+--- The position folded into the map's range on a wrapping map; `p` itself otherwise.
+---@type fun(self: World, p: Vec3): Vec3
+World.wrap_point = nil
 
 --- Grid cell data, nil outside the map.
 ---@type fun(self: World, cell: Cell): {x: integer, z: integer, layer: integer, height: number, walkable: boolean, ramp: string, rise: number, tags: string[], props?: table}?

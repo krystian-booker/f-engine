@@ -1935,3 +1935,216 @@ TEST_CASE("a launch during a ladder climb is refused") {
     CHECK_THROWS_AS(s.world.launch(e, {0, 1, 0}), std::runtime_error);
     CHECK(s.world.registry().get<Mover>(e).motion() == Motion::Climb);
 }
+
+namespace {
+void steer(Fixture& f, entt::entity e, glm::vec2 velocity, int ticks) {
+    for (int i = 0; i < ticks; ++i) {
+        f.world.beginTick();
+        f.world.registry().get<Mover>(e).drive = velocity;
+        f.world.tick(1.0 / 60);
+    }
+}
+} // namespace
+
+TEST_CASE("a mover's lift eases towards its altitude, place keeps it and ramps raise the lifted body") {
+    Fixture f;
+    auto& registry = f.world.registry();
+    const auto e = f.walker({2.5f, 0, 3.5f});
+    auto& mover = registry.get<Mover>(e);
+    const auto& t = registry.get<Transform>(e);
+    mover.altitude = 2;
+    mover.altitudeSpeed = 4; // half a second up
+    f.run(0.25);
+    CHECK(mover.lift == doctest::Approx(1).epsilon(0.02));
+    CHECK(t.position.y == doctest::Approx(1).epsilon(0.02));
+    CHECK_FALSE(mover.moved); // hovering is not a motion
+    CHECK_FALSE(f.world.moving(e));
+    f.run(0.5);
+    CHECK(mover.lift == doctest::Approx(2));
+    CHECK(t.position.y == doctest::Approx(2));
+    // place rests the body on the surface plus its lift, and the ramp at x = 7
+    // raises the lifted body with the ground.
+    f.world.place(e, {6.5f, 0, 3.0f}, 0);
+    CHECK(t.position.y == doctest::Approx(2));
+    CHECK(t.previous.y == doctest::Approx(2));
+    steer(f, e, {2, 0}, 60);
+    CHECK(t.position.x > 7.5f);
+    CHECK(t.position.y == doctest::Approx(3).epsilon(0.01)); // the plateau's 1 plus the lift
+    // An altitude speed of 0 applies at once, down as well as up.
+    mover.altitudeSpeed = 0;
+    mover.altitude = 0.5f;
+    f.run(1.0 / 60);
+    CHECK(mover.lift == doctest::Approx(0.5f));
+    CHECK(t.position.y == doctest::Approx(1.5f));
+    // A non-colliding mover is lifted the same way: idle, steered, routed or placed.
+    const auto ghost = f.world.spawn("", {3.5f, 0, 5.5f});
+    registry.emplace<Mover>(ghost, Mover{.collide = false, .altitude = 1.5f});
+    const auto& g = registry.get<Transform>(ghost);
+    f.run(1.0 / 60);
+    CHECK(g.position.y == doctest::Approx(1.5f));
+    steer(f, ghost, {2, 0}, 30);
+    CHECK(g.position.x > 4.3f);
+    CHECK(g.position.y == doctest::Approx(1.5f));
+    f.world.moveTo(ghost, {5.5f, 0, 5.5f}, false);
+    f.run(1);
+    CHECK(g.position.x == doctest::Approx(5.5f).epsilon(0.02));
+    CHECK(g.position.y == doctest::Approx(1.5f));
+    f.world.place(ghost, {2.5f, 0, 5.5f}, 0);
+    CHECK(g.position.y == doctest::Approx(1.5f));
+}
+
+TEST_CASE("a lifted body passes over boxes and bodies below its feet and still reports its cells") {
+    Fixture f;
+    auto& registry = f.world.registry();
+    f.world.map().colliders.push_back({{3, 0, 6}, {3.5f, 1, 7}}); // a low wall across the row
+    f.world.rebuildStatic();
+    const auto tall = f.world.spawn("", {6.5f, 0, 6.5f});
+    registry.emplace<Collider>(tall, Collider{0.25f, 1.6f, true});
+    const auto e = f.walker({1.5f, 0, 6.5f});
+    auto& mover = registry.get<Mover>(e);
+    const auto& t = registry.get<Transform>(e);
+    steer(f, e, {2, 0}, 90);
+    CHECK(t.position.x < 2.9f); // on the ground the wall stops it
+    f.world.place(e, {1.5f, 0, 6.5f}, 0);
+    mover.altitude = 1.2f; // over the wall's top, under the tall body's
+    steer(f, e, {2, 0}, 150);
+    CHECK(t.position.x > 4);
+    CHECK(t.position.x < 6.3f); // held by the tall body
+    CHECK(t.position.y == doctest::Approx(1.2f));
+    f.world.place(e, {1.5f, 0, 6.5f}, 0);
+    mover.altitude = 2;
+    f.world.takeEvents();
+    steer(f, e, {2, 0}, 180);
+    CHECK(t.position.x > 7);
+    CHECK(t.position.y == doctest::Approx(2));
+    // The place reports its cell, then every cell flown over.
+    CHECK(cellsEntered(f.world.takeEvents(), e) ==
+          std::vector<GridPos>{{1, 6, 0}, {2, 6, 0}, {3, 6, 0}, {4, 6, 0}, {5, 6, 0}, {6, 6, 0}, {7, 6, 0}});
+    // Lifted or not, it may stand where its feet are free.
+    CHECK(f.world.canOccupy(e, {6.5f, 2, 6.5f}, 0));
+    CHECK_FALSE(f.world.canOccupy(e, {6.5f, 0, 6.5f}, 0));
+}
+
+TEST_CASE("a ground attachment rests on the surface under its parent") {
+    Fixture f;
+    auto& registry = f.world.registry();
+    const auto parent = f.world.spawn("", {8.5f, 3, 2.5f}); // three units over the plateau at (8, 2)
+    const auto shadow = f.world.spawn("", {0, 0, 0});
+    const auto balloon = f.world.spawn("", {0, 0, 0});
+    auto& under = registry.get<Transform>(shadow);
+    under.parent = parent;
+    under.ground = true;
+    under.offset = {0.5f, 0, 0};
+    auto& above = registry.get<Transform>(balloon);
+    above.parent = parent;
+    above.offset = {0.5f, 0, 0};
+    f.run(1.0 / 60);
+    CHECK(under.position == glm::vec3(9, 1, 2.5f));
+    CHECK(under.previous == glm::vec3(9, 1, 2.5f));
+    CHECK(above.position == glm::vec3(9, 3, 2.5f));
+    // Off the plateau the shadow follows the ground down while the parent keeps its height.
+    f.world.place(parent, {5.5f, 3, 2.5f}, 0, true);
+    f.run(1.0 / 60);
+    CHECK(under.position == glm::vec3(6, 0, 2.5f));
+    CHECK(above.position == glm::vec3(6, 3, 2.5f));
+}
+
+namespace {
+Json wrapGrid(int width, int depth) {
+    auto grid = flatGrid(width, depth);
+    grid["wrap"] = true;
+    return grid;
+}
+} // namespace
+
+TEST_CASE("on a wrapping map a driven mover crosses the east seam and arrives on the west") {
+    Scratch s("torus-drive", wrapGrid(12, 10));
+    CHECK(s.world.grid().wraps());
+    const auto e = s.world.spawn("", {11.6f, 0, 5.5f});
+    s.world.registry().emplace<Mover>(e);
+    s.world.registry().emplace<Collider>(e);
+    drive(s, e, {3, 0}, 30); // 1.5 units east at 3 u/s
+    const auto& t = s.world.registry().get<Transform>(e);
+    CHECK(t.position.x == doctest::Approx(1.1f).epsilon(0.01));
+    CHECK(t.position.x >= 0);
+    CHECK(t.position.x < 12);
+    // `previous` is the nearest representative of itself, so a frame interpolates
+    // across the seam and never across the map.
+    CHECK(std::abs(t.previous.x - t.position.x) < 0.1f);
+    CHECK(std::abs(s.world.interpolated(e, 0.5).x - t.position.x) < 0.1f);
+    // The spatial hash followed the canonical position: a body on the west side is found.
+    CHECK(s.world.registry().get<Mover>(e).cell == GridPos{1, 5, 0});
+    const auto spawned = s.world.spawn("", {-0.4f, 0, 2.5f}); // spawned outside the range: folded
+    CHECK(s.world.registry().get<Transform>(spawned).position.x == doctest::Approx(11.6f));
+    // Back west across the seam the other way.
+    drive(s, e, {-3, 0}, 30);
+    CHECK(t.position.x == doctest::Approx(11.6f).epsilon(0.01));
+    CHECK(std::abs(t.previous.x - t.position.x) < 0.1f);
+}
+
+TEST_CASE("on a wrapping map move_to crosses the seam the short way, planned or not") {
+    Scratch s("torus-move", wrapGrid(12, 10));
+    const auto e = s.world.spawn("", centre(11, 5));
+    s.world.registry().emplace<Mover>(e).speed = 4;
+    s.world.moveTo(e, centre(1, 5), true); // 2 cells across the seam, not 10 the long way
+    s.step(60);
+    const auto& t = s.world.registry().get<Transform>(e);
+    CHECK(count(s.world.takeEvents(), WorldEvent::Kind::Arrived) == 1);
+    CHECK(t.position.x == doctest::Approx(1.5f).epsilon(0.01));
+    s.world.moveTo(e, centre(10, 5), false); // a straight walk, 3 units west across the seam
+    s.step(60);
+    CHECK(count(s.world.takeEvents(), WorldEvent::Kind::Arrived) == 1);
+    CHECK(t.position.x == doctest::Approx(10.5f).epsilon(0.01));
+    // A target given past the edge names the same cell.
+    s.world.moveTo(e, {12.5f, 0, 5.5f}, true);
+    s.step(60);
+    CHECK(count(s.world.takeEvents(), WorldEvent::Kind::Arrived) == 1);
+    CHECK(t.position.x == doctest::Approx(0.5f).epsilon(0.01));
+    // A route jump across the seam lands on the far side.
+    auto& mover = s.world.registry().get<Mover>(e);
+    mover.jump = {1, 0, 0, false};
+    s.world.grid().at(11, 5).walkable = false; // a pit on the seam's east side
+    s.world.moveTo(e, centre(10, 5), true);
+    s.step(120);
+    CHECK(count(s.world.takeEvents(), WorldEvent::Kind::Landed) == 1);
+    CHECK(t.position.x == doctest::Approx(10.5f).epsilon(0.01));
+}
+
+TEST_CASE("on a wrapping map attachments and contacts work across the seam") {
+    Scratch s("torus-attach", wrapGrid(12, 10));
+    const auto parent = s.world.spawn("", {0.1f, 0, 5.5f});
+    const auto child = s.world.spawn("", {0, 0, 0});
+    auto& ct = s.world.registry().get<Transform>(child);
+    ct.parent = parent;
+    ct.offset = {-0.5f, 0, 0};
+    s.step();
+    CHECK(ct.position.x == doctest::Approx(11.6f)); // mirrored to the far side, canonical
+    CHECK(std::abs(ct.previous.x - ct.position.x) < 0.1f);
+    // A solid body just west of the seam blocks a walker coming from the east...
+    const auto wall = s.world.spawn("", {0.2f, 0, 2.5f});
+    s.world.registry().emplace<Collider>(wall);
+    const auto walker = s.world.spawn("", {11.4f, 0, 2.5f});
+    s.world.registry().emplace<Mover>(walker);
+    s.world.registry().emplace<Collider>(walker);
+    drive(s, walker, {3, 0}, 30);
+    const auto& wt = s.world.registry().get<Transform>(walker);
+    CHECK(wt.position.x > 11.4f);
+    CHECK(wt.position.x < 11.9f);
+    // ...and the two touch across it.
+    CHECK(count(s.world.takeEvents(), WorldEvent::Kind::ContactBegin) == 1);
+    CHECK(s.world.query("", glm::vec3(11.9f, 0, 2.5f), 0.5f).size() == 2);
+}
+
+TEST_CASE("on a wrapping map the camera target is folded back into the map each tick") {
+    Scratch s("torus-camera", wrapGrid(12, 10));
+    s.world.camera().target = {12.7f, 1, -0.5f};
+    s.step();
+    CHECK(s.world.camera().target.x == doctest::Approx(0.7f));
+    CHECK(s.world.camera().target.z == doctest::Approx(9.5f));
+    CHECK(s.world.camera().target.y == doctest::Approx(1));
+    // A map that does not wrap leaves it alone.
+    Scratch plain("plain-camera", flatGrid(12, 10));
+    plain.world.camera().target = {12.7f, 1, -0.5f};
+    plain.step();
+    CHECK(plain.world.camera().target.x == doctest::Approx(12.7f));
+}

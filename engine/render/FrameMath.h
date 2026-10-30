@@ -523,4 +523,31 @@ inline std::vector<std::uint8_t> downscaleRgba(const std::vector<std::uint8_t>& 
     }
     return out;
 }
+
+// A wrapping map (Grid::wraps()) is drawn once per visible mirror: shifted by
+// 0, +-width and +-depth (and the four corners), whichever of those put the
+// map's bounds `min`..`max` where `sees(min, max)` says they matter. Appends
+// the shifts not yet in `out`, the zero shift first; a map that does not
+// wrap (`width` or `depth` 0) gets only that one.
+template<class Sees>
+void appendWrapOffsets(glm::vec3 min, glm::vec3 max, float width, float depth, Sees&& sees,
+                       std::vector<glm::vec3>& out) {
+    if (out.empty()) {
+        out.emplace_back(0);
+    }
+    if (width <= 0 || depth <= 0) {
+        return;
+    }
+    for (int dz = -1; dz <= 1; ++dz) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            const glm::vec3 offset(static_cast<float>(dx) * width, 0, static_cast<float>(dz) * depth);
+            if ((dx == 0 && dz == 0) || std::find(out.begin(), out.end(), offset) != out.end()) {
+                continue;
+            }
+            if (sees(min + offset, max + offset)) {
+                out.push_back(offset);
+            }
+        }
+    }
+}
 } // namespace fe

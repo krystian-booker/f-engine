@@ -157,6 +157,7 @@ sol::table displayTable(sol::state_view lua, const DisplayState& display) {
                                                     : "adaptive";
     out["monitor"] = display.monitor;
     out["hdr"] = display.hdr;
+    out["scale"] = display.scale;
     auto monitors = lua.create_table();
     for (const auto& monitor : display.monitors) {
         auto entry = modeTable(lua, monitor.desktop);
@@ -588,15 +589,17 @@ void bindApp(Engine& engine) {
         .fn(
             "display", [&engine](sol::this_state state) { return displayTable(state, engine.display()); },
             "fun(): {fullscreen: false|'borderless'|'exclusive', width: integer, height: integer, vsync: "
-            "'on'|'off'|'adaptive', monitor: integer, hdr: boolean, monitors: {name: string, width: "
-            "integer, height: integer, "
+            "'on'|'off'|'adaptive', monitor: integer, hdr: boolean, scale: number, monitors: {name: "
+            "string, width: integer, height: integer, "
             "refresh: number}[], modes: {width: integer, height: integer, refresh: number}[]}",
             "Window and monitor settings. width and height are the window size in screen units, or the "
             "exclusive fullscreen mode; monitor indexes monitors; modes are the exclusive fullscreen modes "
             "of "
             "that monitor, largest first. hdr is true when the frame is presented to a high dynamic range "
-            "back buffer (game.json hdr_output or --hdr, and the renderer supports one). Headless runs "
-            "report one monitor the size of game.json's window.")
+            "back buffer (game.json hdr_output or --hdr, and the renderer supports one). scale is the "
+            "window's pixels per screen unit (2 on a Retina display, 1 headless): the viewport "
+            "(fe.app.viewport) is width x scale by height x scale. Headless runs report one monitor the "
+            "size of game.json's window.")
         .fn(
             "set_display",
             [&engine](sol::table settings) { engine.requestDisplay(displayRequest(settings)); },
@@ -611,6 +614,47 @@ void bindApp(Engine& engine) {
             "locale", [&engine] { return engine.locale(); }, "fun(): string",
             "The player's preferred language and region as a BCP 47 tag, such as 'en-US' or 'ja' (from the "
             "operating system; 'en-US' in headless runs).")
+        .fn(
+            "clipboard",
+            [&engine](sol::this_state state) -> sol::object {
+                sol::state_view lua(state);
+                auto text = engine.clipboard().read();
+                if (!text || text->empty()) {
+                    return sol::make_object(lua, sol::lua_nil);
+                }
+                if (text->size() > MaxClipboardBytes) {
+                    // Cut before a continuation byte, so the text stays valid UTF-8.
+                    auto end = MaxClipboardBytes;
+                    while (end > 0 && (static_cast<unsigned char>((*text)[end]) & 0xc0u) == 0x80u) {
+                        --end;
+                    }
+                    text->resize(end);
+                }
+                return sol::make_object(lua, *text);
+            },
+            "fun(): string?",
+            "The clipboard's text, nil when it holds none. Text beyond 64 KiB is cut at a character "
+            "boundary. The system clipboard in the windowed runtime; tests, headless runs, replays and "
+            "recordings read what fe.app.set_clipboard wrote in the same session.")
+        .fn(
+            "set_clipboard",
+            [&engine](const std::string& text) {
+                if (text.size() > MaxClipboardBytes) {
+                    throw std::runtime_error("Clipboard text is at most 64 KiB");
+                }
+                if (text.find('\0') != std::string::npos) {
+                    throw std::runtime_error("Clipboard text cannot contain NUL"); // the system clipboard is C-string text
+                }
+                engine.clipboard().write(text);
+            },
+            "fun(text: string)", "Put text on the clipboard (at most 64 KiB, no NUL bytes).")
+        .fn(
+            "packs", [&engine] { return sol::as_table(engine.packs()); }, "fun(): string[]",
+            "Content packs laid over the game folder at start, in mount order: 'packs/<name>.pak' from the "
+            "game folder, then 'user://packs/<name>.pak' from the user-data folder, each set in name order. "
+            "A file in a later pack wins over the same path in an earlier one and in the game itself "
+            "(loose or packed), also in development builds; game.json is read before they mount. A pack "
+            "added while the game runs is seen after a restart.")
         .fn(
             "format_number",
             [&engine](sol::object number, sol::object options) {

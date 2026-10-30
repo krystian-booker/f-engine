@@ -31,6 +31,9 @@ struct DisplayState {
     // The back buffer is a high dynamic range format (game.json hdr_output or
     // --hdr, and the backend provided one); false headless.
     bool hdr = false;
+    // Window pixels per screen unit (2 on a Retina display); the viewport is
+    // width x scale by height x scale. 1 headless.
+    float scale = 1;
 };
 
 // A change scripts asked for; unset fields keep their value.

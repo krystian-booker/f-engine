@@ -7,6 +7,7 @@
 #include "engine/render/ShadowCascades.h"
 #include "engine/render/SpriteGeometry.h"
 #include "engine/world/MapData.h"
+#include <algorithm>
 #include <doctest/doctest.h>
 #include <fstream>
 #include <glm/ext/matrix_clip_space.hpp>
@@ -864,4 +865,47 @@ TEST_CASE("the screen pass leaves an sRGB back buffer alone and scales linear li
     CHECK(halfToFloat(0xb800) == doctest::Approx(-0.5f));
     CHECK(halfToFloat(0x0001) == doctest::Approx(5.9604645e-8f));
     CHECK(halfToFloat(0) == 0.0f);
+}
+
+TEST_CASE("a wrapping map is drawn under the mirror offsets the view reaches, and once otherwise") {
+    // A 12 x 10 map; a view is the part of the x/z plane it reaches.
+    const glm::vec3 mapMin(0), mapMax(12, 16, 10);
+    const auto reaching = [](glm::vec2 viewMin, glm::vec2 viewMax) {
+        return [=](glm::vec3 lo, glm::vec3 hi) {
+            return lo.x <= viewMax.x && hi.x >= viewMin.x && lo.z <= viewMax.y && hi.z >= viewMin.y;
+        };
+    };
+    // Over the north-west corner, 8 units out: the west, north and corner
+    // mirrors matter, the east and south ones do not.
+    const auto corner = reaching({-7.5f, -7.5f}, {8.5f, 8.5f});
+    std::vector<glm::vec3> offsets;
+    appendWrapOffsets(mapMin, mapMax, 12, 10, corner, offsets);
+    REQUIRE(offsets.size() == 4);
+    CHECK(offsets[0] == glm::vec3(0));
+    const auto has = [&](glm::vec3 offset) {
+        return std::find(offsets.begin(), offsets.end(), offset) != offsets.end();
+    };
+    CHECK(has({-12, 0, 0}));
+    CHECK(has({0, 0, -10}));
+    CHECK(has({-12, 0, -10}));
+    CHECK_FALSE(has({12, 0, 0}));
+    CHECK_FALSE(has({0, 0, 10}));
+    // A map that does not wrap has the zero offset only, whatever the view.
+    offsets.clear();
+    appendWrapOffsets(mapMin, mapMax, 0, 0, corner, offsets);
+    CHECK(offsets == std::vector<glm::vec3>{glm::vec3(0)});
+    // From the middle no mirror is in view.
+    const auto middle = reaching({1.4f, 0.4f}, {10.6f, 9.6f});
+    offsets.clear();
+    appendWrapOffsets(mapMin, mapMax, 12, 10, middle, offsets);
+    CHECK(offsets == std::vector<glm::vec3>{glm::vec3(0)});
+    // Appending keeps what a first view found and adds the rest once.
+    appendWrapOffsets(mapMin, mapMax, 12, 10, corner, offsets);
+    CHECK(offsets.size() == 4);
+    appendWrapOffsets(mapMin, mapMax, 12, 10, corner, offsets);
+    CHECK(offsets.size() == 4);
+    // The far side counts too: a view past the east edge takes the east mirror.
+    offsets.clear();
+    appendWrapOffsets(mapMin, mapMax, 12, 10, reaching({8, 2}, {16, 6}), offsets);
+    CHECK(offsets == std::vector<glm::vec3>{glm::vec3(0), glm::vec3(12, 0, 0)});
 }

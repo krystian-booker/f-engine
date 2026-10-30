@@ -30,10 +30,12 @@ SceneLighting::SceneLighting() {
 }
 
 void SceneLighting::prepare(World& world, double alpha, float aspect, const glm::mat4& viewProjection,
-                            const SceneViews& views, const ShadowAtlas& atlas) {
+                            const SceneViews& views, const ShadowAtlas& atlas,
+                            const std::vector<glm::vec3>& wrapOffsets) {
     const auto& env = world.environment();
     const auto& camera = world.camera();
     const auto& grid = world.grid();
+    const Frustum frustum(viewProjection);
 
     sceneLights_.clear();
     auto add = [&](const LightSettings& light, glm::vec3 offset, float seed) {
@@ -52,9 +54,31 @@ void SceneLighting::prepare(World& world, double alpha, float aspect, const glm:
             add(source.light, world.interpolated(entity, alpha), flickerSeed(entity));
         }
     }
+    // Mirrors of a wrapping map: every light the camera can see under each
+    // other shift, with the same flicker, so geometry drawn there is lit as
+    // its original is. Sprites keep their canonical light probe either way.
+    const auto originals = sceneLights_.size();
+    for (std::size_t o = 1; o < wrapOffsets.size(); ++o) {
+        const auto& offset = wrapOffsets[o];
+        for (std::size_t i = 0; i < originals; ++i) {
+            const auto& light = sceneLights_[i].settings;
+            const glm::vec3 reach(light.radius);
+            if (frustum.visible(light.position + offset - reach, light.position + offset + reach)) {
+                SceneLight copy = sceneLights_[i];
+                copy.settings.position += offset;
+                sceneLights_.push_back(copy);
+            }
+        }
+    }
+    glm::vec3 shiftMin(0), shiftMax(0);
+    for (const auto& offset : wrapOffsets) {
+        shiftMin = glm::min(shiftMin, offset);
+        shiftMax = glm::max(shiftMax, offset);
+    }
     const glm::vec2 extent(static_cast<float>(grid.width()), static_cast<float>(grid.depth()));
-    grid_.build(sceneLights_, glm::vec2(-LightMargin), extent + LightMargin, camera.focus(alpha));
-    prepareLightShadows(world.camera().focus(alpha), Frustum(viewProjection), views, atlas);
+    grid_.build(sceneLights_, glm::vec2(-LightMargin) + glm::vec2(shiftMin.x, shiftMin.z),
+                extent + LightMargin + glm::vec2(shiftMax.x, shiftMax.z), camera.focus(alpha));
+    prepareLightShadows(world.camera().focus(alpha), frustum, views, atlas);
     // Uploads only what changed: a world whose lights hold still (no flicker,
     // no moving light entities) sends nothing per frame.
     if (uploadedLights_ != grid_.lightTexels) {
@@ -101,6 +125,8 @@ void SceneLighting::prepare(World& world, double alpha, float aspect, const glm:
         settings.sceneMin = glm::min(settings.sceneMin, model->min);
         settings.sceneMax = glm::max(settings.sceneMax, model->max + glm::vec3(0, CasterHeadroom, 0));
     }
+    settings.sceneMin += shiftMin; // mirrored casters, too
+    settings.sceneMax += shiftMax;
     settings.resolution = ShadowAtlas::Resolution;
     settings.bias = env.shadowBias;
     settings.homogeneousDepth = bgfx::getCaps()->homogeneousDepth;

@@ -13,10 +13,37 @@
 
 namespace fe {
 namespace {
-const std::set<std::string> Known = {"tick",     "input",   "lua",     "assert",    "message",
-                                     "wait_for", "timeout", "mouse",   "wheel",     "text",
-                                     "cursor",   "capture", "compare", "tolerance", "resize"};
+const std::set<std::string> Known = {"tick",    "input",   "lua",       "assert", "message", "wait_for",
+                                     "timeout", "mouse",   "wheel",     "text",   "cursor",  "pads",
+                                     "capture", "compare", "tolerance", "resize"};
+
+// A `pads` record entry, as ReplayRecorder writes it.
+Json padJson(const InputState::PadEvent& event) {
+    return {{"connected", event.connected}, {"pad", event.pad.number},
+            {"name", event.pad.name},       {"type", event.pad.type},
+            {"rumble", event.pad.rumble},   {"trigger_rumble", event.pad.triggerRumble}};
 }
+
+void applyPads(Engine& engine, const Json& pads) {
+    for (const auto& entry : pads) {
+        const int number = entry.at("pad").get<int>();
+        if (number < 1 || number > 64) {
+            throw std::runtime_error("Replay pads: gamepad numbers are 1 to 64, got " + std::to_string(number));
+        }
+        if (!entry.value("connected", true)) {
+            engine.input().disconnectPad(number);
+            continue;
+        }
+        InputState::Pad pad;
+        pad.number = number;
+        pad.name = entry.value("name", std::string("Gamepad"));
+        pad.type = entry.value("type", std::string("generic"));
+        pad.rumble = entry.value("rumble", false);
+        pad.triggerRumble = entry.value("trigger_rumble", false);
+        engine.input().connectPad(std::move(pad));
+    }
+}
+} // namespace
 
 ReplayHarness::ReplayHarness(const std::filesystem::path& file) : folder_(file.parent_path()) {
     auto document = readJson(file);
@@ -100,6 +127,9 @@ ReplayHarness::Effects ReplayHarness::apply(std::uint64_t tick, Engine& engine) 
             }
             offset_ += tick - waitStarted_;
             waiting_ = false;
+        }
+        if (command.contains("pads")) {
+            applyPads(engine, command.at("pads"));
         }
         if (command.contains("input")) {
             feedInputs(engine, command.at("input"));
@@ -286,12 +316,20 @@ void ReplayRecorder::composition(const std::string& text, int cursor) {
     pendingComposition_.emplace(text, cursor);
 }
 
+void ReplayRecorder::pad(const InputState::PadEvent& event) {
+    pendingPads_.push_back(padJson(event));
+}
+
 void ReplayRecorder::stamp(std::uint64_t tick) {
     if (pendingMouse_) {
         commands_.push_back({{"tick", tick}, {"mouse", {pendingMouse_->x, pendingMouse_->y}}});
     }
     if (pendingWheel_ != 0) {
         commands_.push_back({{"tick", tick}, {"wheel", pendingWheel_}});
+    }
+    if (!pendingPads_.empty()) {
+        commands_.push_back({{"tick", tick}, {"pads", std::move(pendingPads_)}});
+        pendingPads_ = Json::array();
     }
     if (!pendingInput_.empty()) {
         commands_.push_back({{"tick", tick}, {"input", std::move(pendingInput_)}});

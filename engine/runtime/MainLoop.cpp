@@ -299,8 +299,12 @@ private:
         engine.development = FENGINE_DEV != 0;
         engine.seed = sessionSeed(options_, replay_);
         engine.testHooks = !options_.replay.empty() || !options_.record.empty();
-        // Replays and recordings must not depend on the machine's language.
+        // Replays and recordings must not depend on the machine's language or
+        // clipboard (they keep the engine's in-memory one).
         engine.locale = engine.testHooks ? "en-US" : preferredLocale();
+        if (!engine.testHooks) {
+            engine.clipboard = std::make_unique<SdlClipboard>();
+        }
         if (options_.platform) {
             engine.platform = options_.platform(options_.userData);
         }

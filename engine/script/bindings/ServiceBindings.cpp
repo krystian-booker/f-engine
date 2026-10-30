@@ -3,6 +3,10 @@
 #include "engine/script/bindings/Convert.h"
 #include "engine/script/bindings/WorldTypes.h"
 
+#include <algorithm>
+#include <iterator>
+#include <string_view>
+
 namespace fe {
 void bindSave(Engine& engine) {
     auto& host = engine.lua();
@@ -285,6 +289,21 @@ void bindInput(Engine& engine) {
             "boolean}[]",
             "Connected gamepads by number, with their layout and whether they can rumble.")
         .fn(
+            "pad_events",
+            [&input](sol::this_state state) {
+                sol::state_view lua(state);
+                auto out = lua.create_table();
+                for (const auto& event : input.padEvents()) {
+                    out.add(lua.create_table_with("type", event.connected ? "connected" : "disconnected",
+                                                  "pad", event.pad.number, "name", event.pad.name));
+                }
+                return out;
+            },
+            "fun(): {type: 'connected'|'disconnected', pad: integer, name: string}[]",
+            "Gamepads connected or disconnected this tick, in order (fe.input.pads() already reflects "
+            "them). The fe.input kit turns them into its pad_connected and pad_disconnected signals; a "
+            "game that pauses when the player's pad is unplugged listens there.")
+        .fn(
             "rumble",
             [&input](float low, float high, double seconds, sol::object pad) {
                 rumble(input, lua::within(low, 0.0f, 1.0f, "low"), lua::within(high, 0.0f, 1.0f, "high"),
@@ -356,7 +375,43 @@ void bindInput(Engine& engine) {
                 },
                 "fun(text: string, cursor?: integer)",
                 "Inject committed text, or with a cursor an IME composition; it applies on the next tick. "
-                "Only in development builds, --test/--check runs and --replay/--record sessions.");
+                "Only in development builds, --test/--check runs and --replay/--record sessions.")
+            .fn(
+                "feed_pad",
+                [&input](sol::object pad, sol::object spec) {
+                    const int number = padArgument(pad);
+                    if (number == 0) {
+                        throw std::runtime_error("feed_pad needs a gamepad number");
+                    }
+                    if (lua::absent(spec)) {
+                        input.disconnectPad(number);
+                        return;
+                    }
+                    const auto options = lua::options(spec, "feed_pad spec");
+                    InputState::Pad description;
+                    description.number = number;
+                    description.name = lua::get(*options, "name", std::string("Virtual"));
+                    if (description.name.size() > 64) {
+                        throw std::runtime_error("feed_pad name is at most 64 bytes");
+                    }
+                    description.type = lua::get(*options, "type", std::string("generic"));
+                    static constexpr std::string_view Types[] = {"xbox", "playstation", "switch", "steamdeck",
+                                                                 "generic"};
+                    if (std::find(std::begin(Types), std::end(Types), description.type) == std::end(Types)) {
+                        throw std::runtime_error("feed_pad type must be xbox, playstation, switch, steamdeck or "
+                                                 "generic, got '" +
+                                                 description.type + "'");
+                    }
+                    description.rumble = lua::get(*options, "rumble", false);
+                    description.triggerRumble = lua::get(*options, "trigger_rumble", false);
+                    input.connectPad(std::move(description));
+                },
+                "fun(pad: integer, spec?: {name?: string, type?: 'xbox'|'playstation'|'switch'|'steamdeck'|"
+                "'generic', rumble?: boolean, trigger_rumble?: boolean})",
+                "Connect a virtual gamepad numbered `pad` described by `spec` (name 'Virtual' of at most 64 "
+                "bytes, type 'generic' and no rumble by default), or without a spec disconnect it; fe.input.pads() "
+                "changes at once and the event arrives on the next tick. Only in development builds, "
+                "--test/--check runs and --replay/--record sessions.");
     }
 }
 
@@ -485,7 +540,8 @@ void bindAudio(Engine& engine) {
                 return audio.playSound(resolveInside(root, path), o);
             },
             "fun(path: string, options?: {volume?: number, pitch?: number, preserve_speed?: boolean, pan?: "
-            "number, loop?: boolean, bus?: string, position?: Vec3, world?: World, radius?: number}): integer",
+            "number, loop?: boolean, bus?: string, position?: Vec3, world?: World, radius?: number}): "
+            "integer",
             "Play a sound; returns a voice id. With `position` it is heard from `world`'s camera (default "
             "the focus world) each tick: silent beyond `radius` (8) and panned by the camera's right vector. "
             "`volume` 0 to 4 (like music and buses), `pitch` 0.1 to 4 (speed and pitch together, or the "

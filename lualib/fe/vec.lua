@@ -10,6 +10,11 @@ function vec.dot(a, b) return a.x * b.x + (a.y or 0) * (b.y or 0) + a.z * b.z en
 function vec.length(v) return math.sqrt(vec.dot(v, v)) end
 --- Distance on the ground plane (ignores height).
 function vec.flat_distance(a, b) return math.sqrt((a.x - b.x) ^ 2 + (a.z - b.z) ^ 2) end
+--- Ground-plane distance inside `world`: the short way round on a wrapping map.
+function vec.flat_distance_in(world, a, b)
+  local d = world:wrap_delta(a, b)
+  return math.sqrt(d.x * d.x + d.z * d.z)
+end
 function vec.distance(a, b) return vec.length(vec.sub(a, b)) end
 function vec.normalize(v)
   local length = vec.length(v)

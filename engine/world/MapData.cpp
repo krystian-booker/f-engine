@@ -538,7 +538,7 @@ MapData MapData::fromJson(const Json& j) {
         if (p.contains("facing")) {
             point.facing = jsonVec2(p.at("facing"));
         }
-        if (!m.grid.contains(floorCell(point.position.x), floorCell(point.position.z), point.layer)) {
+        if (!m.grid.inRange(floorCell(point.position.x), floorCell(point.position.z), point.layer)) {
             throw std::runtime_error("Point '" + name + "' lies outside the grid");
         }
         m.points[name] = point;

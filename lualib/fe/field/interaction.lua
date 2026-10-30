@@ -146,9 +146,10 @@ function interaction.target(input)
   for _, entity in ipairs(f.entities()) do
     if entity:valid() and entity ~= player and not event.running(entity) then
       local q = entity.position
-      local distance = vec.flat_distance(p, q)
-      if math.abs(q.y - p.y) < 1 and (not best or distance < best_distance) then
-        local facing_dot = distance > 0.01 and ((q.x - p.x) * fc.x + (q.z - p.z) * fc.z) / distance or 1
+      local d = f.world:wrap_delta(p, q)
+      local distance = math.sqrt(d.x * d.x + d.z * d.z)
+      if math.abs(d.y) < 1 and (not best or distance < best_distance) then
+        local facing_dot = distance > 0.01 and (d.x * fc.x + d.z * fc.z) / distance or 1
         local reached = {}
         for _, verb in ipairs(f.verbs_for(entity, input, player)) do
           if distance <= (verb.range or default_range) and (verb.facing == false or facing_dot > f.settings.facing_dot) then
@@ -245,7 +246,7 @@ function interaction.retouch()
   for _, other in ipairs(pending) do
     if not f.can_trigger() then return end
     if other:valid() and other.layer == player.layer
-        and vec.flat_distance(other.position, player.position) <= f.settings.touch_range then
+        and vec.flat_distance_in(f.world, other.position, player.position) <= f.settings.touch_range then
       f.touch(other)
     end
   end

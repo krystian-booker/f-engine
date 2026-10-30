@@ -38,6 +38,9 @@ struct Transform {
     int layer = 0;
     entt::entity parent = entt::null; // follows the parent with `offset`
     glm::vec3 offset{0};
+    // Attached: rest on the grid surface under the parent (a blob shadow)
+    // instead of at the parent's height, however high it flies.
+    bool ground = false;
 };
 
 // Y-axis billboard, lying flat at the feet's height, full billboard, or
@@ -132,6 +135,11 @@ struct Mover {
     // boat is {fly = true, requiredTags = water}.
     std::uint32_t blockedTags = 0, requiredTags = 0;
     glm::vec2 drive{0}; // direct steering for this tick (units/second)
+    // Flight height above the grid surface, in world units: the body rests at
+    // surface + lift. `altitude` is the wanted height, `lift` the height in
+    // effect, approaching it at altitudeSpeed units/second (0 = at once).
+    float altitude = 0, altitudeSpeed = 0; // settings
+    float lift = 0;                        // state, owned by MovementSystem
 
     // State, owned by MovementSystem. A mover is in exactly one motion at a
     // time, the alternative `state` holds, so it can never be on a route and

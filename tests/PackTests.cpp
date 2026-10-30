@@ -253,6 +253,95 @@ TEST_CASE("the asset cache, scripts and fe.fs read a game from its pak") {
     REQUIRE(engine.loadWorld("main", "arena"));
 }
 
+TEST_CASE("content packs lay over the game in name order, user packs last, damaged ones skipped") {
+    Scratch scratch("overlay");
+    const auto source = scratch.root / "source";
+    std::filesystem::create_directories(source);
+    std::filesystem::copy(std::filesystem::path(FENGINE_TEST_GAME) / "maps", source / "maps",
+                          std::filesystem::copy_options::recursive);
+    std::filesystem::copy_file(std::filesystem::path(FENGINE_TEST_GAME) / "game.json", source / "game.json");
+    write(source / "main.lua", "return {}");
+    write(source / "data" / "items.json", "{\"from\": \"game\"}");
+    write(source / "data" / "base_only.json", "{}");
+    write(source / "scripts" / "greeting.lua", "return 'game'");
+    // A second map that only pack b supplies: arena's files under a new id.
+    const auto arena = std::filesystem::path(FENGINE_TEST_GAME) / "maps" / "arena";
+    auto arena2 = readJson(arena / "map.json");
+    arena2["id"] = "arena2";
+
+    const auto user = scratch.root / "user";
+    {
+        PackWriter a(source / "packs" / "a.pak");
+        a.add("data/items.json", "{\"from\": \"a\"}");
+        a.add("data/a_only.json", "{}");
+        a.add("scripts/greeting.lua", "return 'a'");
+        a.finish();
+        PackWriter b(source / "packs" / "b.pak");
+        b.add("data/items.json", "{\"from\": \"b\"}");
+        b.add("scripts/greeting.lua", "return 'b'");
+        b.add("maps/arena2/map.json", arena2.dump());
+        for (const auto& entry : std::filesystem::directory_iterator(arena)) {
+            if (entry.path().filename() != "map.json") {
+                b.add("maps/arena2/" + entry.path().filename().string(), slurp(entry.path()));
+            }
+        }
+        b.finish();
+        write(source / "packs" / "z.pak", "not a pak at all");
+        write(source / "packs" / "notes.txt", "ignored");
+        PackWriter c(user / "packs" / "c.pak");
+        c.add("data/items.json", "{\"from\": \"c\"}");
+        c.add("data/c_only.json", "{}");
+        c.finish();
+    }
+
+    SUBCASE("over a packed game") {
+        packFolder(source, scratch.root / "dist" / "game.pak");
+        const auto game = openGame(scratch.root / "dist" / "game.pak");
+        std::filesystem::create_directories(game / "packs");
+        for (const char* name : {"a.pak", "b.pak", "z.pak"}) {
+            std::filesystem::copy_file(source / "packs" / name, game / "packs" / name);
+        }
+        EngineOptions options;
+        options.gameRoot = game;
+        options.libraryRoot = FENGINE_LUALIB;
+        options.userData = user;
+        options.seed = 1;
+        Engine engine(std::move(options));
+        CHECK(engine.packs() == std::vector<std::string>{"packs/a.pak", "packs/b.pak", "user://packs/c.pak"});
+        auto& lua = engine.lua();
+        CHECK(lua.console("table.concat(fe.app.packs(), ',')") ==
+              "packs/a.pak,packs/b.pak,user://packs/c.pak");
+        CHECK(lua.console("fe.fs.read('data/items.json')") == "{\"from\": \"c\"}");
+        CHECK(lua.console("require('scripts.greeting')") == "b");
+        CHECK(lua.console("table.concat(fe.fs.list('data'), ',')") ==
+              "a_only.json,base_only.json,c_only.json,items.json");
+        CHECK(lua.console("fe.fs.exists('maps/arena2')") == "true");
+        REQUIRE(engine.loadWorld("second", "arena2")); // the map id inside is checked against the folder
+    }
+
+    SUBCASE("over a loose development folder") {
+        // A pack still overrides a loose file, while a loose file beats game.pak.
+        packFolder(source, scratch.root / "source.pak");
+        write(source / "data" / "items.json", "{\"from\": \"loose\"}");
+        write(source / "data" / "base_only.json", "{\"loose\": true}");
+        std::filesystem::remove(source / "scripts" / "greeting.lua");
+        mountPack(scratch.root / "source.pak", true);
+        CHECK(readFile(source / "data" / "base_only.json") == "{\"loose\": true}");
+        EngineOptions options;
+        options.gameRoot = source;
+        options.libraryRoot = FENGINE_LUALIB;
+        options.userData = scratch.root / "other-user";
+        options.seed = 1;
+        Engine engine(std::move(options));
+        CHECK(engine.packs() == std::vector<std::string>{"packs/a.pak", "packs/b.pak"});
+        auto& lua = engine.lua();
+        CHECK(lua.console("fe.fs.read('data/items.json')") == "{\"from\": \"b\"}");
+        CHECK(lua.console("fe.fs.read('data/base_only.json')") == "{\"loose\": true}");
+        CHECK(lua.console("require('scripts.greeting')") == "b");
+        CHECK(lua.console("fe.fs.exists('data/a_only.json')") == "true");
+    }
+}
+
 TEST_CASE("user:// images load read-only from the user data folder and follow changes") {
     Scratch scratch("user");
     const auto user = scratch.root / "user";

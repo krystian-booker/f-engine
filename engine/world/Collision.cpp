@@ -234,7 +234,53 @@ template<class Visit> void CollisionSystem::forEachBoxNear(glm::vec3 p, float re
     }
 }
 
+template<class Visit> void CollisionSystem::forEachMirror(glm::vec3 p, float reach, Visit&& visit) const {
+    visit(p);
+    if (wrap_.x <= 0) {
+        return;
+    }
+    // One shift per axis whose seam the square crosses. A reach past half
+    // the map needs no second shift: the plain square already covers it.
+    const float dx = p.x - reach < 0 ? wrap_.x : p.x + reach > wrap_.x ? -wrap_.x : 0.0f;
+    const float dz = p.z - reach < 0 ? wrap_.y : p.z + reach > wrap_.y ? -wrap_.y : 0.0f;
+    if (dx != 0) {
+        visit(p + glm::vec3(dx, 0, 0));
+    }
+    if (dz != 0) {
+        visit(p + glm::vec3(0, 0, dz));
+    }
+    if (dx != 0 && dz != 0) {
+        visit(p + glm::vec3(dx, 0, dz));
+    }
+}
+
+glm::vec2 CollisionSystem::separation(glm::vec3 a, glm::vec3 b) const {
+    const glm::vec2 d(b.x - a.x, b.z - a.z);
+    if (wrap_.x <= 0) {
+        return d;
+    }
+    return {wrapDifference(d.x, wrap_.x), wrapDifference(d.y, wrap_.y)};
+}
+
 template<class Visit> void CollisionSystem::forEachNear(glm::vec3 p, float reach, Visit&& visit) const {
+    if (wrap_.x <= 0) {
+        forEachNearAt(p, reach, visit);
+        return;
+    }
+    // Mirrors can share buckets near a corner: collect, then visit each once.
+    auto& found = mirrorScratch_;
+    found.clear();
+    forEachMirror(p, reach, [&](glm::vec3 q) {
+        forEachNearAt(q, reach, [&](entt::entity other) { found.push_back(other); });
+    });
+    std::sort(found.begin(), found.end());
+    found.erase(std::unique(found.begin(), found.end()), found.end());
+    for (const auto other : found) {
+        visit(other);
+    }
+}
+
+template<class Visit> void CollisionSystem::forEachNearAt(glm::vec3 p, float reach, Visit&& visit) const {
     const std::int64_t x0 = bucketCoord(p.x - reach), x1 = bucketCoord(p.x + reach);
     const std::int64_t z0 = bucketCoord(p.z - reach), z1 = bucketCoord(p.z + reach);
     if (x1 < x0 || z1 < z0) {
@@ -272,16 +318,21 @@ void CollisionSystem::nearby(glm::vec3 position, float reach, std::vector<entt::
     forEachNear(position, reach, [&](entt::entity entity) { out.push_back(entity); });
 }
 
-bool CollisionSystem::blockedByBox(glm::vec3 p, float radius, float height) const {
+bool CollisionSystem::blockedByBox(glm::vec3 position, float radius, float height) const {
     bool blocked = false;
-    forEachBoxNear(p, radius, [&](const Box& box) {
-        if (blocked || p.y + height < box.min.y || p.y > box.max.y) {
+    forEachMirror(position, radius, [&](glm::vec3 p) {
+        if (blocked) {
             return;
         }
-        const glm::vec2 nearest =
-            glm::clamp(glm::vec2(p.x, p.z), glm::vec2(box.min.x, box.min.z), glm::vec2(box.max.x, box.max.z));
-        const auto offset = nearest - glm::vec2(p.x, p.z);
-        blocked = glm::dot(offset, offset) < radius * radius;
+        forEachBoxNear(p, radius, [&](const Box& box) {
+            if (blocked || p.y + height < box.min.y || p.y > box.max.y) {
+                return;
+            }
+            const glm::vec2 nearest = glm::clamp(glm::vec2(p.x, p.z), glm::vec2(box.min.x, box.min.z),
+                                                 glm::vec2(box.max.x, box.max.z));
+            const auto offset = nearest - glm::vec2(p.x, p.z);
+            blocked = glm::dot(offset, offset) < radius * radius;
+        });
     });
     return blocked;
 }
@@ -304,13 +355,13 @@ bool CollisionSystem::blocksMove(entt::entity self, glm::vec3 from, glm::vec3 to
             return;
         }
         const float reach = radius + collider.radius;
-        const float after = glm::length(glm::vec2(q.x - to.x, q.z - to.z));
+        const float after = glm::length(separation(to, q));
         if (after >= reach) {
             return;
         }
         // Overlapping at the destination: allowed only as a way out of an
         // overlap that already exists.
-        const float before = glm::length(glm::vec2(q.x - from.x, q.z - from.z));
+        const float before = glm::length(separation(from, q));
         blocked = !(before < reach && after > before + 1e-6f);
     });
     return blocked;
@@ -329,7 +380,7 @@ void CollisionSystem::updateContacts(EventQueue& events) {
             const auto pb = registry_.get<Transform>(b).position;
             const auto& cb = registry_.get<Collider>(b);
             const float reach = ca.radius + cb.radius + Margin;
-            const glm::vec2 d(pb.x - pa.x, pb.z - pa.z);
+            const glm::vec2 d = separation(pa, pb);
             if (overlapVertically(pa.y, ca.height + Margin, pb.y, cb.height + Margin) &&
                 glm::dot(d, d) <= reach * reach) {
                 current_.emplace_back(a, b);

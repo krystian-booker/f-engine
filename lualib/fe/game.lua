@@ -36,6 +36,7 @@
 --- A world's `paused` and `time_scale` are only written when the game's
 --- value for it changes, so a game may still set them by hand.
 local data = require("fe.data")
+local input = require("fe.input")
 local scene = require("fe.scene")
 local signal = require("fe.signal")
 local state = require("fe.state")
@@ -217,11 +218,13 @@ local function expire_scales()
   end
 end
 
---- The update phase (before the worlds move): tasks, scenes, `updated`.
---- `extra(dt)` runs after the scenes (the entry's own update).
+--- The update phase (before the worlds move): gamepad signals
+--- (`input.poll`), tasks, scenes, `updated`. `extra(dt)` runs after the
+--- scenes (the entry's own update).
 ---@param dt number
 ---@param extra? fun(dt: number)
 function game.update(dt, extra)
+  input.poll()
   expire_scales()
   game.sync_worlds()
   local real_dt = dt

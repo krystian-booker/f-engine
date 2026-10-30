@@ -86,7 +86,7 @@ function followers.update()
   local settings = f.settings
   local p = f.player.position
   local last = trail[1]
-  if not last or vec.flat_distance(last, p) > settings.trail_step then
+  if not last or vec.flat_distance_in(f.world, last, p) > settings.trail_step then
     table.insert(trail, 1, { x = p.x, y = p.y, z = p.z, layer = f.player.layer })
     while #trail > settings.trail_length do table.remove(trail) end
   end
@@ -94,7 +94,7 @@ function followers.update()
   for i, follower in ipairs(entities) do
     local index = math.min(#trail, math.floor(i * spacing / settings.trail_step) + 1)
     local spot = trail[index]
-    if spot and vec.flat_distance(spot, follower.position) > settings.follower_settle then
+    if spot and vec.flat_distance_in(f.world, spot, follower.position) > settings.follower_settle then
       follower:move_to(spot, { path = false })
     end
   end

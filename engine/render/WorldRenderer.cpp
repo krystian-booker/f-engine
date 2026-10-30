@@ -16,6 +16,9 @@ constexpr std::uint64_t ShadowState = BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST
 constexpr float BlendCutoff = 0.01f;
 // A silhouette shows only where geometry is at least this much nearer than the sprite.
 constexpr float SilhouetteMargin = 0.3f;
+// Height above a wrapping map's surface its mirrors are tested for: sprites,
+// meshes and lifted bodies up to this high count as part of the map's bounds.
+constexpr float WrapHeadroom = 16;
 const glm::mat4 Identity(1);
 
 std::uint64_t cull(const Material& material) {
@@ -118,14 +121,33 @@ void WorldRenderer::render(World& world, std::size_t slot, double alpha, double 
     const auto view = camera.view(alpha);
     const auto projection = camera.projection(aspect, bgfx::getCaps()->homogeneousDepth, alpha);
     viewProjection_ = projection * view;
-    lighting.prepare(world, alpha, aspect, viewProjection_, views, atlas_);
+    frustum_ = Frustum(viewProjection_);
+    // A wrapping map's mirrors: first those the camera sees (their lights
+    // matter, so lighting takes them), then, once the shadow views are known,
+    // those only a shadow volume sees (casters only).
+    const auto& grid = world.grid();
+    const float wrapWidth = grid.wraps() ? static_cast<float>(grid.width()) : 0.0f;
+    const float wrapDepth = grid.wraps() ? static_cast<float>(grid.depth()) : 0.0f;
+    glm::vec3 mapMin(0);
+    glm::vec3 mapMax(static_cast<float>(grid.width()), WrapHeadroom, static_cast<float>(grid.depth()));
+    if (const auto* map = wrapWidth > 0 ? gpu_.model(world.geometryPath(), true) : nullptr) {
+        mapMin = glm::min(mapMin, map->source->min);
+        mapMax = glm::max(mapMax, map->source->max + glm::vec3(0, WrapHeadroom, 0));
+    }
+    wrapOffsets_.clear();
+    appendWrapOffsets(
+        mapMin, mapMax, wrapWidth, wrapDepth,
+        [&](glm::vec3 lo, glm::vec3 hi) { return frustum_.visible(lo, hi); }, wrapOffsets_);
+    lighting.prepare(world, alpha, aspect, viewProjection_, views, atlas_, wrapOffsets_);
     lighting_ = &lighting;
+    appendWrapOffsets(
+        mapMin, mapMax, wrapWidth, wrapDepth,
+        [&](glm::vec3 lo, glm::vec3 hi) { return anyViewSees(lo, hi, true); }, wrapOffsets_);
     environment_ = &world.environment();
     views_ = &views;
     target_ = &target;
     calls_ = &calls;
     time_ = time;
-    frustum_ = Frustum(viewProjection_);
     cameraPosition_ = camera.position(alpha);
     cameraRight_ = camera.right(alpha);
     cameraUp_ = glm::normalize(glm::cross(cameraRight_, camera.forward(alpha)));
@@ -154,8 +176,13 @@ void WorldRenderer::render(World& world, std::size_t slot, double alpha, double 
     setupViews(world, views, target, view, projection);
     drawSky(world, camera.focus(alpha));
     if (const auto* map = gpu_.model(world.geometryPath(), true)) {
-        for (const auto& part : map->parts) {
-            addPart(part, Identity, glm::vec4(1), true, std::nullopt, -1, nullptr);
+        for (std::size_t o = 0; o < wrapOffsets_.size(); ++o) {
+            // Per-chunk culling keeps a mirror to the chunks it shows, and
+            // instancing draws every copy of a chunk in one call.
+            const auto shift = o == 0 ? Identity : glm::translate(glm::mat4(1), wrapOffsets_[o]);
+            for (const auto& part : map->parts) {
+                addPart(part, shift, glm::vec4(1), true, std::nullopt, -1, nullptr);
+            }
         }
     }
     drawMeshes(world, alpha);
@@ -566,20 +593,34 @@ void WorldRenderer::drawMeshes(World& world, double alpha) {
         const auto base = glm::translate(glm::mat4(1), world.interpolated(entity, alpha)) *
                           glm::rotate(glm::mat4(1), transform.previousYaw + turn * t, glm::vec3(0, 1, 0)) *
                           glm::scale(glm::mat4(1), transform.scale);
+        // Bit o: the mesh is drawn under wrapOffsets_[o] (all of them while animating).
+        std::uint32_t mirrors = (1u << wrapOffsets_.size()) - 1;
         if (cache.animationIndex < 0) {
             // At rest the model's bounds are known: a mesh that is neither in
             // view nor in a shadow volume is skipped before it is posed.
             glm::vec3 lo, hi;
             transformBounds(base, model->source->min, model->source->max, lo, hi);
-            if (!anyViewSees(lo, hi, mesh.castShadow)) {
+            mirrors = 0;
+            for (std::size_t o = 0; o < wrapOffsets_.size(); ++o) {
+                if (anyViewSees(lo + wrapOffsets_[o], hi + wrapOffsets_[o], mesh.castShadow)) {
+                    mirrors |= 1u << o;
+                }
+            }
+            if (!mirrors) {
                 continue;
             }
         }
         model->source->pose(cache.animationIndex, mesh.time, pose_);
         const auto* params = paramsOf(entity);
-        for (const auto& part : model->parts) {
-            addPart(part, base * pose_[static_cast<std::size_t>(part.node)], mesh.tint, mesh.castShadow,
-                    mesh.blend, cache.shaderSlot, params);
+        for (std::size_t o = 0; o < wrapOffsets_.size(); ++o) {
+            if (!(mirrors & (1u << o))) {
+                continue;
+            }
+            const auto placed = o == 0 ? base : glm::translate(glm::mat4(1), wrapOffsets_[o]) * base;
+            for (const auto& part : model->parts) {
+                addPart(part, placed * pose_[static_cast<std::size_t>(part.node)], mesh.tint, mesh.castShadow,
+                        mesh.blend, cache.shaderSlot, params);
+            }
         }
     }
 }
@@ -668,39 +709,53 @@ void WorldRenderer::collectSprites(World& world, double alpha) {
             addDecal(world, material, v, transform.layer, bottomLeft, placement.size, uv0, uv1, blend);
             continue;
         }
-        std::array<SpriteVertex, 4> quad{v, v, v, v};
-        quad[0].position = bottomLeft;
-        quad[0].uv = {uv0.x, uv1.y};
-        quad[1].position = bottomLeft + span.right;
-        quad[1].uv = {uv1.x, uv1.y};
-        quad[2].position = bottomLeft + span.right + span.up;
-        quad[2].uv = {uv1.x, uv0.y};
-        quad[3].position = bottomLeft + span.up;
-        quad[3].uv = {uv0.x, uv0.y};
-        glm::vec3 lo = glm::min(quad[0].position, quad[2].position),
-                  hi = glm::max(quad[0].position, quad[2].position);
-        const bool visible = frustum_.visible(lo - glm::vec3(0.1f), hi + glm::vec3(0.1f));
-        if (s.distort > 0) {
-            if (visible) {
-                addDistortion(material.atlas, material.texel, quad, s.distort, distortProgram, material.params);
+        const bool castShadow = castsShadow(s.castShadow, blend);
+        // One quad per mirror of a wrapping map; the probe stays canonical,
+        // so every copy is lit alike.
+        const auto emit = [&](glm::vec3 offset, bool mirror) {
+            std::array<SpriteVertex, 4> quad{v, v, v, v};
+            quad[0].position = bottomLeft + offset;
+            quad[0].uv = {uv0.x, uv1.y};
+            quad[1].position = bottomLeft + offset + span.right;
+            quad[1].uv = {uv1.x, uv1.y};
+            quad[2].position = bottomLeft + offset + span.right + span.up;
+            quad[2].uv = {uv1.x, uv0.y};
+            quad[3].position = bottomLeft + offset + span.up;
+            quad[3].uv = {uv0.x, uv0.y};
+            glm::vec3 lo = glm::min(quad[0].position, quad[2].position),
+                      hi = glm::max(quad[0].position, quad[2].position);
+            const bool visible = frustum_.visible(lo - glm::vec3(0.1f), hi + glm::vec3(0.1f));
+            if (s.distort > 0) {
+                if (visible) {
+                    addDistortion(material.atlas, material.texel, quad, s.distort, distortProgram,
+                                  material.params);
+                }
+                return;
             }
-            continue;
-        }
-        SpriteBatch::Quad settings;
-        settings.blend = blend;
-        settings.visible = visible;
-        settings.castShadow = castsShadow(s.castShadow, blend);
-        sprites_.add(material, quad, settings);
-        if (visible && s.silhouette.a > 0 && !lying) {
-            // Pulled towards the camera along each view ray, so it covers the
-            // same pixels but shows only behind geometry nearer than the margin.
-            for (auto& corner : quad) {
-                corner.position += glm::normalize(cameraPosition_ - corner.position) * SilhouetteMargin;
-                corner.outline = packRgba8(s.silhouette);
+            // A mirror is worth a quad only where it shows or throws a shadow.
+            if (mirror && !visible && !(castShadow && anyViewSees(lo, hi, true))) {
+                return;
             }
-            SpriteBatch::Quad silhouette;
-            silhouette.silhouette = true;
-            sprites_.add(material, quad, silhouette);
+            SpriteBatch::Quad settings;
+            settings.blend = blend;
+            settings.visible = visible;
+            settings.castShadow = castShadow;
+            sprites_.add(material, quad, settings);
+            if (visible && s.silhouette.a > 0 && !lying) {
+                // Pulled towards the camera along each view ray, so it covers the
+                // same pixels but shows only behind geometry nearer than the margin.
+                for (auto& corner : quad) {
+                    corner.position += glm::normalize(cameraPosition_ - corner.position) * SilhouetteMargin;
+                    corner.outline = packRgba8(s.silhouette);
+                }
+                SpriteBatch::Quad silhouette;
+                silhouette.silhouette = true;
+                sprites_.add(material, quad, silhouette);
+            }
+        };
+        emit(glm::vec3(0), false);
+        for (std::size_t o = 1; o < wrapOffsets_.size(); ++o) {
+            emit(wrapOffsets_[o], true);
         }
     }
 }

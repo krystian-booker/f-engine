@@ -302,3 +302,33 @@ TEST_CASE("the Steam Deck's own controls use the steamdeck layout") {
     REQUIRE(f.state.pads().contains(1));
     CHECK(f.state.pads().at(1).type == "steamdeck");
 }
+
+TEST_CASE("gamepad connections become events on the next tick and reach a recorder attached later") {
+    Fixture f;
+    f.device(SDL_EVENT_GAMEPAD_ADDED, 44);
+    CHECK(f.state.pads().contains(1));
+    CHECK(f.state.padEvents().empty());
+    // The runtime attaches the recorder after SdlInput connected the pads
+    // present at start; they are recorded all the same.
+    ReplayRecorder recorder(1);
+    f.input.record(&recorder);
+    f.state.tick(1.0 / 60);
+    REQUIRE(f.state.padEvents().size() == 1);
+    CHECK(f.state.padEvents()[0].connected);
+    CHECK(f.state.padEvents()[0].pad.number == 1);
+    f.device(SDL_EVENT_GAMEPAD_REMOVED, 44);
+    CHECK(f.state.pads().empty());
+    f.state.tick(1.0 / 60);
+    REQUIRE(f.state.padEvents().size() == 1);
+    CHECK_FALSE(f.state.padEvents()[0].connected);
+    f.state.tick(1.0 / 60);
+    CHECK(f.state.padEvents().empty());
+    recorder.stamp(1);
+    const auto commands = recorder.toJson(1).at("commands");
+    REQUIRE(commands.size() == 1); // both events in one `pads` command, nothing else happened
+    REQUIRE(commands[0].contains("pads"));
+    CHECK(commands[0].at("pads").size() == 2);
+    CHECK(commands[0].at("pads")[0].at("connected") == true);
+    CHECK(commands[0].at("pads")[0].at("pad") == 1);
+    CHECK(commands[0].at("pads")[1].at("connected") == false);
+}

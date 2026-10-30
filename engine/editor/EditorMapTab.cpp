@@ -295,8 +295,8 @@ void Editor::drawMapTab() {
     }
     const auto& map = w->authored();
     layer_ = std::clamp(layer_, 0, map.grid.layerCount() - 1);
-    ImGui::Text("%s (%s)  %dx%d, %d layer(s)", map.name.c_str(), map.id.c_str(), map.grid.width(),
-                map.grid.depth(), map.grid.layerCount());
+    ImGui::Text("%s (%s)  %dx%d, %d layer(s)%s", map.name.c_str(), map.id.c_str(), map.grid.width(),
+                map.grid.depth(), map.grid.layerCount(), map.grid.wraps() ? ", wraps" : "");
     if (ImGui::Button("Save map")) {
         saveMap(*w);
     }

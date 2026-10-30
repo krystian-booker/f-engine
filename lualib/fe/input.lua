@@ -9,9 +9,19 @@
 --- Axes: move_x, move_y (field movement) are rebuilt from the digital
 --- bindings of left/right and up/down by `input.sync_axes()`, so rebinding
 --- those actions also rebinds movement; camera_x.
+--- Gamepads connecting and disconnecting arrive as the `pad_connected` and
+--- `pad_disconnected` signals (pad number, name), raised by `input.poll()`,
+--- which `fe.game` calls first in every update.
 local i18n = require("fe.i18n")
+local signal = require("fe.signal")
 
-local input = {}
+local input = {
+  --- Emitted with (pad number, name) when a gamepad is connected.
+  pad_connected = signal.new(),
+  --- Emitted with (pad number, name) when a gamepad is disconnected; a game
+  --- that pauses when the player's pad is unplugged listens here.
+  pad_disconnected = signal.new(),
+}
 
 i18n.defaults({ fe = { button = {
   a = "A", b = "B", x = "X", y = "Y", leftshoulder = "LB", rightshoulder = "RB", lefttrigger = "LT",
@@ -139,6 +149,16 @@ function input.prompt(action)
   end
   local first = fe.input.bindings(action)[1]
   return first and (first:gsub("^%w+:", "")) or "?"
+end
+
+--- Raise `pad_connected` and `pad_disconnected` for this tick's gamepad
+--- events (`fe.input.pad_events()`). `fe.game` calls it at the start of every
+--- update; a game with its own loop calls it once per tick.
+function input.poll()
+  for _, event in ipairs(fe.input.pad_events()) do
+    local which = event.type == "connected" and input.pad_connected or input.pad_disconnected
+    which:emit(event.pad, event.name)
+  end
 end
 
 --- Menu navigation with key repeat: returns -1, 0 or 1 for an axis pair.

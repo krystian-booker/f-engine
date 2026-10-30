@@ -88,6 +88,7 @@ void Editor::drawEntity(World& w, entt::entity entity) {
         ImGui::PushID("mover");
         ImGui::SeparatorText("Mover");
         ImGui::DragFloat("Speed", &mover->speed, 0.05f, 0, 1000);
+        ImGui::DragFloat("Altitude", &mover->altitude, 0.05f, 0, 1000);
         ImGui::Checkbox("Collide", &mover->collide);
         ImGui::PopID();
     }

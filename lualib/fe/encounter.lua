@@ -139,8 +139,8 @@ function encounter.update_symbols(world, player)
   local now = task.time()
   for _, symbol in ipairs(world:query({ tag = "encounter_symbol" })) do
     local props, state = symbol:props(), symbol:data()
-    local p, q = symbol.position, player.position
-    local dx, dz = q.x - p.x, q.z - p.z
+    local towards = world:wrap_delta(symbol.position, player.position)
+    local dx, dz = towards.x, towards.z
     local distance_to = math.sqrt(dx * dx + dz * dz)
     local speed = state.speed or 1.6
     if distance_to < props.sight and distance_to > 0.1 then

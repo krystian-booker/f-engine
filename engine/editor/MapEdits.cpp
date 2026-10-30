@@ -190,7 +190,7 @@ int paint(Grid& grid, const GridBrush& brush, GridPos centre, int radius) {
     for (int dz = -radius; dz <= radius; ++dz) {
         for (int dx = -radius; dx <= radius; ++dx) {
             const GridPos p{centre.x + dx, centre.z + dz, centre.layer};
-            if (!grid.contains(p)) {
+            if (!grid.inRange(p)) {
                 continue;
             }
             auto& cell = grid.at(p.x, p.z, p.layer);
@@ -248,12 +248,12 @@ std::string editProblem(const Grid& grid, const GridLink& link) {
         if (link.direction == glm::ivec2(0)) {
             return "A ladder needs a direction (the way up)";
         }
-        if (!grid.contains(link.foot()) || !grid.contains(link.top())) {
+        if (!grid.inRange(link.foot()) || !grid.inRange(link.top())) {
             return "Both ends of a ladder must lie inside the grid";
         }
         return {};
     }
-    if (!grid.contains(link.x, link.z, link.from) || !grid.contains(link.x, link.z, link.to)) {
+    if (!grid.inRange(link.x, link.z, link.from) || !grid.inRange(link.x, link.z, link.to)) {
         return "A link must lie inside the grid on existing layers";
     }
     if (link.from == link.to) {
@@ -292,7 +292,7 @@ std::vector<GridPos> zoneCells(const Zone& zone, const Grid& grid, int fallbackL
     for (int z = std::max(0, floorCell(zone.min.y)); z < std::min(grid.depth(), ceilCell(zone.max.y)); ++z) {
         for (int x = std::max(0, floorCell(zone.min.x)); x < std::min(grid.width(), ceilCell(zone.max.x));
              ++x) {
-            if (grid.contains(x, z, layer)) {
+            if (grid.inRange(x, z, layer)) {
                 cells.push_back({x, z, layer});
             }
         }
@@ -333,7 +333,7 @@ int importMarkers(MapData& map, const Model& model, std::vector<std::string>& pr
                 props.at("spawn").is_string() ? props.at("spawn").get<std::string>() : marker.name;
             const int x = floorCell(marker.position.x);
             const int z = floorCell(marker.position.z);
-            if (!grid.contains(x, z, 0)) {
+            if (!grid.inRange(x, z, 0)) {
                 problems.push_back(marker.name + ": spawn point lies outside the grid");
             } else {
                 map.points[name] =

@@ -134,6 +134,8 @@ void Window::describe(DisplayState& state) const {
         state.fullscreen = fullscreen ? FullscreenMode::Borderless : FullscreenMode::Window;
         SDL_GetWindowSize(window_, &state.width, &state.height);
     }
+    const float density = SDL_GetWindowPixelDensity(window_);
+    state.scale = density > 0 ? density : 1.0f;
     const SDL_DisplayID current = SDL_GetDisplayForWindow(window_);
     int count = 0;
     SDL_DisplayID* ids = SDL_GetDisplays(&count);
@@ -181,6 +183,22 @@ void Window::apply(const DisplayState& target) {
 float Window::refreshRate() const {
     const auto* mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window_));
     return mode && mode->refresh_rate > 0 ? mode->refresh_rate : 60.0f;
+}
+
+std::optional<std::string> SdlClipboard::read() {
+    if (!SDL_HasClipboardText()) {
+        return std::nullopt;
+    }
+    char* text = SDL_GetClipboardText();
+    std::string out = text ? text : "";
+    SDL_free(text);
+    return out;
+}
+
+void SdlClipboard::write(const std::string& text) {
+    if (!SDL_SetClipboardText(text.c_str())) {
+        throw std::runtime_error(std::string("SDL_SetClipboardText: ") + SDL_GetError());
+    }
 }
 
 std::string preferredLocale() {

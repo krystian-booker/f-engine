@@ -232,8 +232,8 @@ TEST_CASE("recorded inputs replay in the order they happened; the object form st
 
     // A sorted object feeds in key order (key:X before pad:a).
     auto other = fixtureEngine();
-    ReplayHarness legacy(writeReplay(
-        "legacy.json", Json::array({{{"tick", 1}, {"input", {{"pad:a", 1}, {"key:X", 1}}}}})));
+    ReplayHarness legacy(
+        writeReplay("legacy.json", Json::array({{{"tick", 1}, {"input", {{"pad:a", 1}, {"key:X", 1}}}}})));
     legacy.apply(1, *other);
     CHECK(other->input().lastDevice() == "gamepad");
     other->tick(1.0 / 60);
@@ -260,4 +260,52 @@ TEST_CASE("a wait_for that times out fails without skipping the command's other 
     replay.apply(4, *engine);
     CHECK(engine->lua().console("replay_next") == "1");
     CHECK(replay.finished());
+}
+
+TEST_CASE("recorded gamepad connections replay before that tick's inputs") {
+    ReplayRecorder recorder(5);
+    recorder.pad({true, {1, "Virtual DualSense", "playstation", true, true}});
+    recorder.input("pad1:a", 1);
+    recorder.stamp(2);
+    recorder.pad({false, {1, "Virtual DualSense", "playstation", true, true}});
+    recorder.stamp(4);
+    const auto json = recorder.toJson(4);
+    const auto& commands = json.at("commands");
+    REQUIRE(commands.size() == 3);
+    CHECK(commands[0] == Json{{"tick", 2},
+                              {"pads", Json::array({{{"connected", true},
+                                                     {"pad", 1},
+                                                     {"name", "Virtual DualSense"},
+                                                     {"type", "playstation"},
+                                                     {"rumble", true},
+                                                     {"trigger_rumble", true}}})}});
+    CHECK(commands[1].at("input") == Json::array({Json::array({"pad1:a", 1.0})}));
+    CHECK(commands[2].at("pads")[0].at("connected") == false);
+
+    auto engine = fixtureEngine();
+    ReplayHarness replay(writeReplay("pads.json", json));
+    replay.apply(2, *engine);
+    engine->tick(1.0 / 60);
+    REQUIRE(engine->input().pads().contains(1));
+    CHECK(engine->input().pads().at(1).type == "playstation");
+    CHECK(engine->input().deviceType() == "playstation"); // the pad was known when its button fed
+    REQUIRE(engine->input().padEvents().size() == 1);
+    CHECK(engine->input().padEvents()[0].connected);
+    CHECK(engine->lua().console("fe.input.pad_events()[1].name") == "Virtual DualSense");
+    replay.apply(4, *engine);
+    engine->tick(1.0 / 60);
+    CHECK(engine->input().pads().empty());
+    REQUIRE(engine->input().padEvents().size() == 1);
+    CHECK_FALSE(engine->input().padEvents()[0].connected);
+    CHECK(engine->input().padEvents()[0].pad.name == "Virtual DualSense");
+    // A hand-written disconnect needs only the number.
+    ReplayHarness terse(writeReplay(
+        "pads_terse.json", Json::array({{{"tick", 1}, {"pads", {{{"connected", true}, {"pad", 2}}}}},
+                                        {{"tick", 2}, {"pads", {{{"connected", false}, {"pad", 2}}}}}})));
+    terse.apply(1, *engine);
+    engine->tick(1.0 / 60);
+    CHECK(engine->input().pads().at(2).name == "Gamepad");
+    terse.apply(2, *engine);
+    engine->tick(1.0 / 60);
+    CHECK(engine->input().pads().empty());
 }

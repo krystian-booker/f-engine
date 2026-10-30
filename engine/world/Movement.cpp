@@ -98,16 +98,15 @@ void MovementSystem::moveTo(entt::entity entity, glm::vec3 target, bool findPath
         return;
     }
     const auto& transform = registry_.get<Transform>(entity);
-    GridPos to{floorCell(target.x), floorCell(target.z), layer.value_or(transform.layer)};
+    const GridPos to =
+        grid_.wrapCell({floorCell(target.x), floorCell(target.z), layer.value_or(transform.layer)});
     if (!grid_.contains(to)) {
         throw std::runtime_error("Movement target is outside the map grid");
     }
     settle(entity);
     const auto body = bodyOf(entity);
     const auto from = cellOf(entity);
-    if (!layer) {
-        to.layer = targetLayer(target, transform.layer, body);
-    }
+    const int goalLayer = layer ? to.layer : targetLayer(target, transform.layer, body);
     StepRules planning;
     if (rules) {
         planning = *rules;
@@ -120,7 +119,7 @@ void MovementSystem::moveTo(entt::entity entity, glm::vec3 target, bool findPath
     }
     planning.footprint = body.footprint;
     planning.fly = body.fly;
-    const auto planned = findRoute(grid_, from, to, planning, routeVisitLimit_);
+    const auto planned = findRoute(grid_, from, {to.x, to.z, goalLayer}, planning, routeVisitLimit_);
     const auto& path = planned.steps;
     // A search stopped by its visit cap may hold a detour (or nothing): the
     // mover does not follow it, and says so the way it does for no route.
@@ -177,9 +176,47 @@ bool MovementSystem::freeOfSolids(entt::entity entity, glm::vec3 position, const
            !collision_.blockedByEntity(entity, position, body.radius, body.height);
 }
 
+float MovementSystem::restY(const Mover& mover, glm::vec2 p, int layer) const {
+    return grid_.heightAt(p, layer) + mover.lift;
+}
+
+float MovementSystem::liftOf(entt::entity entity) const {
+    const auto* mover = registry_.try_get<Mover>(entity);
+    return mover ? mover->lift : 0.0f;
+}
+
+void MovementSystem::canonicalise(Transform& transform) const {
+    if (!grid_.wraps()) {
+        return;
+    }
+    const auto here = flat(transform.position);
+    const auto wrapped = grid_.wrapPoint(here);
+    const auto back = grid_.delta(here, flat(transform.previous));
+    transform.position.x = wrapped.x;
+    transform.position.z = wrapped.y;
+    transform.previous.x = wrapped.x + back.x;
+    transform.previous.z = wrapped.y + back.y;
+}
+
+void MovementSystem::easeLift(Mover& mover, float dt) {
+    if (mover.altitudeSpeed <= 0) {
+        mover.lift = mover.altitude;
+        return;
+    }
+    const float step = mover.altitudeSpeed * dt;
+    if (std::abs(mover.altitude - mover.lift) <= step) {
+        mover.lift = mover.altitude;
+    } else {
+        mover.lift += mover.altitude > mover.lift ? step : -step;
+    }
+}
+
+// `target` and the spots searched around it are surface points; a lifted body
+// is tested that far above them, where its feet would be.
 std::optional<glm::vec3> MovementSystem::landingFor(entt::entity entity, glm::vec3 target, int layer) const {
     const auto body = bodyOf(entity);
-    if (!body.collide || freeOfSolids(entity, target, body)) {
+    const glm::vec3 up(0, liftOf(entity), 0);
+    if (!body.collide || freeOfSolids(entity, target + up, body)) {
         return target;
     }
     const auto centre = flat(target);
@@ -189,7 +226,7 @@ std::optional<glm::vec3> MovementSystem::landingFor(entt::entity entity, glm::ve
                                 static_cast<float>(LandingSearchAngles);
             const glm::vec2 spot = centre + glm::vec2(std::cos(angle), std::sin(angle)) * ring;
             const glm::vec3 probe(spot.x, grid_.heightAt(spot, layer), spot.y);
-            if (supported(spot, body, layer) && freeOfSolids(entity, probe, body)) {
+            if (supported(spot, body, layer) && freeOfSolids(entity, probe + up, body)) {
                 return probe;
             }
         }
@@ -207,7 +244,11 @@ std::optional<Mover::Jump> MovementSystem::jumpTo(entt::entity entity, glm::vec3
     }
     Mover::Jump jump;
     jump.from = transform.position;
-    jump.to = *landing;
+    // The landing in the body's sheet of a wrapping grid, so the arc is the
+    // short way round; a lifted body lands lifted.
+    const auto reach = grid_.delta(flat(transform.position), flat(*landing));
+    jump.to = glm::vec3(transform.position.x + reach.x, landing->y + liftOf(entity),
+                        transform.position.z + reach.y);
     jump.height = height;
     jump.duration = std::max(MinimumJumpSeconds, duration);
     jump.fromLayer = transform.layer;
@@ -299,11 +340,13 @@ MovementSystem::Surface MovementSystem::groundUnder(glm::vec2 position, const Bo
 void MovementSystem::finishLaunch(entt::entity entity, Surface surface) {
     auto& mover = registry_.get<Mover>(entity);
     auto& transform = registry_.get<Transform>(entity);
+    mover.lift = 0; // a ballistic fall lands on the surface; the lift eases back up afterwards
     const glm::vec3 point(transform.position.x, surface.height, transform.position.z);
     const auto spot = landingFor(entity, point, surface.layer);
     transform.layer = surface.layer;
     transform.position = spot.value_or(point);
     reset(mover);
+    canonicalise(transform);
     collision_.moved(entity);
     events_.push({WorldEvent::Kind::Landed, entity, entt::null, {}});
     if (!spot) {
@@ -353,6 +396,7 @@ void MovementSystem::advanceLaunch(entt::entity entity, float dt) {
             }
         }
         transform.position = {to.x, y1, to.y};
+        canonicalise(transform);
         collision_.moved(entity);
         std::optional<Surface> landing;
         for (int l = 0; l < grid_.layerCount(); ++l) {
@@ -399,18 +443,19 @@ void MovementSystem::finishJump(entt::entity entity, bool interrupted) {
         std::optional<int> ground;
         float nearest = 0;
         for (int l = 0; l < grid_.layerCount(); ++l) {
-            const float surface = grid_.heightAt(here, l);
-            const float gap = std::abs(surface - transform.position.y);
+            const float rest = restY(mover, here, l);
+            const float gap = std::abs(rest - transform.position.y);
             if ((!ground || gap < nearest) && supported(here, body, l) &&
-                (!body.collide || !collision_.blockedByBox({here.x, surface, here.y}, body.radius, body.height))) {
+                (!body.collide || !collision_.blockedByBox({here.x, rest, here.y}, body.radius, body.height))) {
                 ground = l;
                 nearest = gap;
             }
         }
         if (ground) {
             transform.layer = *ground;
-            transform.position = {here.x, grid_.heightAt(here, *ground), here.y};
-        } else if (glm::length(here - flat(arc.to)) <= glm::length(here - flat(arc.from))) {
+            transform.position = {here.x, restY(mover, here, *ground), here.y};
+        } else if (glm::length(grid_.delta(here, flat(arc.to))) <=
+                   glm::length(grid_.delta(here, flat(arc.from)))) {
             transform.layer = arc.layer;
             transform.position = arc.to;
         } else {
@@ -422,6 +467,7 @@ void MovementSystem::finishJump(entt::entity entity, bool interrupted) {
         transform.layer = arc.layer;
         transform.position = arc.to;
     }
+    canonicalise(transform);
     collision_.moved(entity);
     events_.push({WorldEvent::Kind::Landed, entity, entt::null, {}});
     if (!interrupted) {
@@ -449,6 +495,7 @@ void MovementSystem::finishClimb(entt::entity entity, bool interrupted) {
     } else {
         transform.layer = climb.layer;
     }
+    canonicalise(transform);
     collision_.moved(entity);
     events_.push({WorldEvent::Kind::ClimbEnd, entity, entt::null, {}});
     if (!interrupted) {
@@ -461,9 +508,10 @@ void MovementSystem::place(entt::entity entity, glm::vec3 position, int layer, b
     auto& transform = registry_.get<Transform>(entity);
     transform.layer = std::clamp(layer, 0, grid_.layerCount() - 1);
     if (!keepHeight) {
-        position.y = grid_.heightAt({position.x, position.z}, transform.layer);
+        position.y = grid_.heightAt({position.x, position.z}, transform.layer) + liftOf(entity);
     }
     transform.position = transform.previous = position;
+    canonicalise(transform);
     if (auto* mover = registry_.try_get<Mover>(entity)) {
         reset(*mover);
         mover->drive = glm::vec2(0);
@@ -516,6 +564,7 @@ bool MovementSystem::stepTowards(entt::entity entity, glm::vec2 delta) {
     if (!mover.collide) {
         transform.position.x += delta.x;
         transform.position.z += delta.y;
+        canonicalise(transform);
         collision_.moved(entity);
         mover.moved = mover.moved || length > 1e-5f;
         return length > 1e-5f;
@@ -532,10 +581,11 @@ bool MovementSystem::stepTowards(entt::entity entity, glm::vec2 delta) {
         const glm::vec2 ahead = to + move / distance * std::max(body.radius, SubStep);
         const int next = grid_.traverseLink(to, layer, move, mover.maxStep, mover.maxStep,
                                             !grid_.walkableAt(ahead, layer));
+        // Surfaces decide the step; the body itself is tested where its feet are.
         const float here = grid_.heightAt(p, layer);
         const float there = grid_.heightAt(to, next);
-        const glm::vec3 start(p.x, here, p.y);
-        const glm::vec3 probe(to.x, there, to.y);
+        const glm::vec3 start(p.x, here + mover.lift, p.y);
+        const glm::vec3 probe(to.x, there + mover.lift, to.y);
         if (!supported(to, body, next) || (!body.fly && std::abs(there - here) > mover.maxStep) ||
             collision_.blockedByBox(probe, body.radius, body.height) ||
             collision_.blocksMove(entity, start, probe, body.radius, body.height)) {
@@ -560,7 +610,8 @@ bool MovementSystem::stepTowards(entt::entity entity, glm::vec2 delta) {
         }
     }
     transform.layer = layer;
-    transform.position = {p.x, grid_.heightAt(p, layer), p.y};
+    transform.position = {p.x, restY(mover, p, layer), p.y};
+    canonicalise(transform);
     collision_.moved(entity);
     const bool moved = glm::length(p - start) > 1e-5f;
     mover.moved = mover.moved || moved;
@@ -574,11 +625,12 @@ void MovementSystem::advanceJump(entt::entity entity, float dt) {
     arc.time += dt;
     const float t = std::min(1.0f, arc.time / arc.duration);
     transform.position = glm::mix(arc.from, arc.to, t) + glm::vec3(0, 4 * arc.height * t * (1 - t), 0);
-    const glm::vec2 heading = flat(arc.to) - flat(arc.from);
+    const glm::vec2 heading = flat(arc.to) - flat(arc.from); // one sheet: see jumpTo
     if (glm::length(heading) > 1e-4f) {
         transform.facing = glm::normalize(heading);
     }
     mover.moved = true;
+    canonicalise(transform);
     collision_.moved(entity);
     if (t >= 1) {
         finishJump(entity, false);
@@ -608,6 +660,7 @@ void MovementSystem::advanceClimb(entt::entity entity, float dt) {
         points.erase(points.begin());
     }
     mover.moved = true;
+    canonicalise(transform);
     collision_.moved(entity);
     if (points.empty()) {
         finishClimb(entity, false);
@@ -629,8 +682,9 @@ void MovementSystem::advanceRoute(entt::entity entity, float dt) {
             // The jump takes over, carrying the rest of the route (the
             // reference `route` is moved from and then replaced).
             waypoints.erase(waypoints.begin());
-            const float length = glm::length(flat(waypoint.position) - flat(transform.position));
-            const float rise = std::abs(waypoint.position.y - transform.position.y);
+            const float length = glm::length(grid_.delta(flat(transform.position), flat(waypoint.position)));
+            // Surface to surface: a lifted body's arc is shaped by the ground, not its height.
+            const float rise = std::abs(waypoint.position.y - (transform.position.y - mover.lift));
             const float apex =
                 tuning.jumpArcBase + tuning.jumpArcPerUnit * length + tuning.jumpArcPerRise * rise;
             const float seconds = std::max(tuning.jumpMinimumSeconds, length / std::max(mover.speed, 0.1f));
@@ -653,20 +707,22 @@ void MovementSystem::advanceRoute(entt::entity entity, float dt) {
             }
             return;
         }
-        const glm::vec2 to = flat(waypoint.position) - flat(transform.position);
+        const glm::vec2 to = grid_.delta(flat(transform.position), flat(waypoint.position));
         const float distance = glm::length(to);
         if (distance > std::max(budget, tuning.snapDistance)) {
             stepTowards(entity, to / distance * budget);
             if (!mover.collide) {
-                transform.position.y = glm::mix(transform.position.y, waypoint.position.y, budget / distance);
+                transform.position.y =
+                    glm::mix(transform.position.y, waypoint.position.y + mover.lift, budget / distance);
             }
             break;
         }
         stepTowards(entity, to);
         if (!mover.collide) {
-            transform.position.y = waypoint.position.y;
+            transform.position.y = waypoint.position.y + mover.lift;
         }
-        if (glm::length(flat(transform.position) - flat(waypoint.position)) >= tuning.arriveDistance) {
+        if (glm::length(grid_.delta(flat(transform.position), flat(waypoint.position))) >=
+            tuning.arriveDistance) {
             break; // blocked short of the waypoint
         }
         if (waypoint.layer >= 0) {
@@ -678,7 +734,8 @@ void MovementSystem::advanceRoute(entt::entity entity, float dt) {
         budget -= distance;
         waypoints.erase(waypoints.begin());
     }
-    const float moved = glm::length(transform.position - before);
+    const auto travelled = grid_.delta(flat(before), flat(transform.position));
+    const float moved = glm::length(glm::vec3(travelled.x, transform.position.y - before.y, travelled.y));
     route.stuckTime = moved < step * tuning.stuckShare ? route.stuckTime + dt : 0;
     if (waypoints.empty()) {
         reset(mover);
@@ -694,6 +751,15 @@ void MovementSystem::update(double dt) {
     for (const auto entity : registry_.view<Transform, Mover>()) {
         auto& mover = registry_.get<Mover>(entity);
         mover.moved = false;
+        const float lift = mover.lift;
+        easeLift(mover, delta);
+        if (mover.lift != lift && mover.idle()) {
+            // Rising or sinking in place is not a motion (the idle clip plays),
+            // but the body is where its feet now rest.
+            auto& transform = registry_.get<Transform>(entity);
+            transform.position.y = restY(mover, flat(transform.position), transform.layer);
+            collision_.moved(entity);
+        }
         if (mover.airborne()) {
             mover.drive = glm::vec2(0); // steering waits until the body is back on its feet
             if (mover.as<Mover::Jump>()) {
@@ -711,14 +777,16 @@ void MovementSystem::update(double dt) {
             const auto before = registry_.get<Transform>(entity).position;
             stepTowards(entity, drive);
             const auto after = registry_.get<Transform>(entity).position;
-            if (mover.collide && glm::length(flat(after) - flat(before)) < 0.1f * glm::length(drive)) {
-                // Walking into a ladder climbs it.
+            if (mover.collide &&
+                glm::length(grid_.delta(flat(before), flat(after))) < 0.1f * glm::length(drive)) {
+                // Walking into a ladder climbs it (a lifted body flies past it).
                 const bool alongX = std::abs(drive.x) >= std::abs(drive.y);
                 const glm::ivec2 axis =
                     alongX ? glm::ivec2(drive.x > 0 ? 1 : -1, 0) : glm::ivec2(0, drive.y > 0 ? 1 : -1);
                 const float share = std::abs(alongX ? drive.x : drive.y) / glm::length(drive);
                 const auto from = cellOf(entity);
-                if (const auto* ladder = share > 0.7f ? grid_.ladderStep(from, axis) : nullptr) {
+                const auto* ladder = share > 0.7f && mover.lift <= 0 ? grid_.ladderStep(from, axis) : nullptr;
+                if (ladder) {
                     const auto to = from == ladder->foot() ? ladder->top() : ladder->foot();
                     const auto centre = cellCentre(to.x, to.z);
                     const glm::vec3 end{centre.x, grid_.heightAt(centre, to.layer), centre.y};
@@ -774,9 +842,16 @@ void MovementSystem::resolveAttachment(entt::entity entity, int depth) {
         resolveAttachment(transform.parent, depth + 1); // parents first
     }
     const auto& parent = registry_.get<Transform>(transform.parent);
-    transform.position = parent.position + rotateYaw(transform.offset, parent.yaw);
-    transform.previous = parent.previous + rotateYaw(transform.offset, parent.previousYaw);
+    glm::vec3 base = parent.position, before = parent.previous;
+    if (transform.ground) {
+        // A blob shadow: on the surface under the parent, however high it flies.
+        base.y = grid_.heightAt(flat(base), parent.layer);
+        before.y = grid_.heightAt(flat(before), parent.layer);
+    }
+    transform.position = base + rotateYaw(transform.offset, parent.yaw);
+    transform.previous = before + rotateYaw(transform.offset, parent.previousYaw);
     transform.layer = parent.layer;
+    canonicalise(transform);
     collision_.moved(entity);
 }
 
@@ -803,7 +878,9 @@ void MovementSystem::restoreCells() {
 // cannot stand on stops the horizontal part of the carry, sliding along it
 // where one axis is free; the vertical part always applies. `deck` and
 // `half` are the platform's new top and half size: a rider still on the deck
-// is supported by it whatever the grid says.
+// is supported by it whatever the grid says. Platforms and their decks are
+// measured in plain coordinates: on a wrapping map a platform stays inside
+// the canonical range and does not straddle the seam.
 void MovementSystem::carry(entt::entity rider, glm::vec3 delta, std::span<const entt::entity> aboard,
                            glm::vec3 deck, glm::vec2 half) {
     auto& carried = registry_.get<Transform>(rider);
@@ -830,6 +907,7 @@ void MovementSystem::carry(entt::entity rider, glm::vec3 delta, std::span<const 
         applied = delta;
     }
     carried.position += applied;
+    canonicalise(carried);
     collision_.moved(rider);
 }
 

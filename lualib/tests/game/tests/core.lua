@@ -847,6 +847,26 @@ return {
     fe.world.unload("rotate")
   end,
 
+  ["camera near and far planes are set from Lua and keep their order"] = function(t)
+    local world = fe.world.load("planes", "arena")
+    local cam = world:camera()
+    t.near(cam.near, 0.1)
+    t.near(cam.far, 300)
+    cam.far = 1000
+    t.near(cam.far, 1000, 1e-6, "far round-trips")
+    t.error(function() cam.near = 2000 end, "from 0.001 to 100")
+    cam.far = 10
+    t.error(function() cam.near = 20 end, "below far")
+    t.near(cam.near, 0.1, 1e-6, "a refused value changes nothing")
+    cam.near = 5
+    t.error(function() cam.far = 2 end, "above near")
+    t.error(function() cam.far = 200000 end, "from 1 to 100000")
+    t.near(cam.far, 10)
+    cam.near = 0.5
+    t.near(cam.near, 0.5)
+    fe.world.unload("planes")
+  end,
+
   ["i18n picks plural and select forms"] = function(t)
     i18n.defaults({ test = {
       items = "{count} {count|one:item|other:items}",

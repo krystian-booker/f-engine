@@ -5,6 +5,7 @@
 #include "engine/platform/Display.h"
 #include "engine/services/Audio.h"
 #include "engine/services/Canvas.h"
+#include "engine/services/Clipboard.h"
 #include "engine/services/InputState.h"
 #include "engine/services/PlatformServices.h"
 #include "engine/services/SaveStore.h"
@@ -41,6 +42,7 @@ struct EngineOptions {
     std::unique_ptr<Audio> audio;               // null = silent NullAudio
     std::unique_ptr<PlatformServices> platform; // null = LocalPlatformServices in userData
     std::unique_ptr<SaveBackend> saveBackend;   // null = files in userData
+    std::unique_ptr<Clipboard> clipboard;       // null = MemoryClipboard (headless, tests, replays)
     std::string locale = "en-US";               // the player's preferred locale, BCP 47
     // Decoded bytes the asset cache keeps before evicting assets no loaded
     // world references (see AssetCache).
@@ -74,8 +76,8 @@ struct WorldDraw {
 struct FrameStats {
     double luaUpdate = 0, luaDraw = 0; // milliseconds, last frame
     // Filled by the windowed runtime after each frame; 0 headless.
-    double frame = 0;              // milliseconds between the last two frames
-    std::uint32_t drawCalls = 0;   // world draw calls of the last frame
+    double frame = 0;            // milliseconds between the last two frames
+    std::uint32_t drawCalls = 0; // world draw calls of the last frame
     std::map<std::string, double> zones;
 };
 
@@ -117,6 +119,11 @@ public:
     [[nodiscard]] SaveStore& saves() { return saves_; }
     [[nodiscard]] AppRequests& requests() { return requests_; }
     [[nodiscard]] PlatformServices& platform() { return *platform_; }
+    [[nodiscard]] Clipboard& clipboard() { return *clipboard_; }
+    // Content packs laid over the game folder at start (<game>/packs/*.pak,
+    // then <user data>/packs/*.pak, each in name order): "packs/<name>.pak"
+    // or "user://packs/<name>.pak", in mount order; the last mounted wins.
+    [[nodiscard]] const std::vector<std::string>& packs() const { return packs_; }
     // The window and monitors; the windowed runtime keeps this current.
     [[nodiscard]] DisplayState& display() { return display_; }
     // Validates a display change against the known monitors, queues it for
@@ -193,6 +200,8 @@ private:
     SaveStore saves_;
     AppRequests requests_;
     std::unique_ptr<PlatformServices> platform_;
+    std::unique_ptr<Clipboard> clipboard_;
+    std::vector<std::string> packs_;
     DisplayState display_;
     std::string locale_;
     std::unique_ptr<WorldLoader> loader_;

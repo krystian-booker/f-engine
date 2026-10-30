@@ -5,6 +5,7 @@
 #include "engine/runtime/Headless.h"
 #include "engine/script/LuaHost.h"
 #include "engine/world/World.h"
+#include <cctype>
 #include <chrono>
 #include <cstdlib>
 #include <doctest/doctest.h>
@@ -187,6 +188,12 @@ TEST_CASE("display settings validate, merge and read back") {
     CHECK(run(engine, "return tostring(fe.app.display().hdr)") == "false");
     engine.display().hdr = true;
     CHECK(run(engine, "return tostring(fe.app.display().hdr)") == "true");
+    // Likewise the pixel density: 1 headless, what the window reports in the runtime.
+    CHECK(run(engine, "return fe.app.display().scale") == "1.0");
+    engine.display().scale = 2;
+    CHECK(run(engine, "return fe.app.display().scale") == "2.0");
+    run(engine, "fe.app.set_display{scale = 3}"); // not a setting: ignored like hdr
+    CHECK(run(engine, "return fe.app.display().scale") == "2.0");
     run(engine, "fe.app.set_display{width = 1600, height = 900, vsync = 'adaptive'}");
     run(engine, "fe.app.set_display{fullscreen = true}");
     CHECK(run(engine, "local d = fe.app.display() return d.fullscreen, d.width, d.vsync") ==
@@ -292,8 +299,10 @@ TEST_CASE("cancelled background loads are dropped and never create a world") {
     const auto later = std::stoi(run(engine, "return fe.world.load_async('field', 'arena')"));
     tickUntil(engine, [&] { return engine.loadProgress(later) >= 1; });
     engine.cancelLoad(later);
-    CHECK_THROWS_WITH_AS(engine.finishLoad(later), doctest::Contains("Unknown world load"), std::runtime_error);
-    CHECK(run(engine, "return fe.world.finish_load(fe.world.load_async('field', 'arena')).map_id") == "arena");
+    CHECK_THROWS_WITH_AS(engine.finishLoad(later), doctest::Contains("Unknown world load"),
+                         std::runtime_error);
+    CHECK(run(engine, "return fe.world.finish_load(fe.world.load_async('field', 'arena')).map_id") ==
+          "arena");
     REQUIRE(engine.world("field"));
 }
 
@@ -370,6 +379,46 @@ TEST_CASE("a port can plug in its own platform backend") {
     CHECK(platform->stats["time"] == 3.5);
     CHECK(platform->updates == 1);
     CHECK(run(engine, "fe.platform.name()") == "memory");
+}
+
+namespace {
+class UpperClipboard final : public Clipboard {
+public:
+    [[nodiscard]] std::optional<std::string> read() override { return text; }
+    void write(const std::string& value) override {
+        text = value;
+        for (auto& c : *text) {
+            c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        }
+    }
+    std::optional<std::string> text;
+};
+} // namespace
+
+TEST_CASE("the clipboard is a string of the engine's own unless the runtime supplies one") {
+    Engine engine(options());
+    CHECK(run(engine, "return fe.app.clipboard()") == "nil");
+    run(engine, "fe.app.set_clipboard('Aria')");
+    CHECK(run(engine, "return fe.app.clipboard()") == "Aria");
+    run(engine, "fe.app.set_clipboard('')");
+    CHECK(run(engine, "return fe.app.clipboard()") == "nil");
+    CHECK(failure(engine, "fe.app.set_clipboard(string.rep('x', 64 * 1024 + 1))").find("64 KiB") !=
+          std::string::npos);
+    run(engine, "fe.app.set_clipboard(string.rep('x', 64 * 1024))");
+    CHECK(run(engine, "return #fe.app.clipboard()") == "65536");
+    // Text another program put there is cut at a character boundary.
+    engine.clipboard().write(std::string(MaxClipboardBytes - 1, 'a') + "\xe6\xbc\xa2" + "b");
+    CHECK(run(engine, "local c = fe.app.clipboard() return #c, c:sub(-1)") ==
+          std::to_string(MaxClipboardBytes - 1) + "\ta");
+
+    auto custom = options();
+    auto backend = std::make_unique<UpperClipboard>();
+    auto* clipboard = backend.get();
+    custom.clipboard = std::move(backend);
+    Engine port(std::move(custom));
+    run(port, "fe.app.set_clipboard('quiet')");
+    CHECK(clipboard->text == "QUIET");
+    CHECK(run(port, "return fe.app.clipboard()") == "QUIET");
 }
 
 TEST_CASE("bindings read the tables scripts pass raw, never running their metamethods") {
