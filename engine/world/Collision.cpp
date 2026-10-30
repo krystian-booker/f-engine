@@ -441,7 +441,7 @@ std::unordered_set<std::int64_t> boxBlockedCells(const Grid& grid, const std::ve
                         continue; // already unwalkable: nothing to add
                     }
                     const float surface = grid.heightAt(centre, layer);
-                    if (lo.y < surface + bodyHeight && hi.y > surface + stepUp) {
+                    if (lo.y < surface + bodyHeight && hi.y > surface + stepUp + 1e-3f) {
                         blocked.insert(cellKey({x, z, layer}));
                     }
                 }

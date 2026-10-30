@@ -6,7 +6,7 @@
 --- ```lua
 --- stats.resources({ ..., lp = { max = 3, start = 0, name = "LP", battle_only = true } })
 --- -- skills.json: {"id": "starfall", "type": "divine", "cost": {"lp": 3}, ...}
---- battle.rules = limit.rules()        -- or inside another kit's layer: shields.rules(limit.rules())
+--- battle.rules = limit.rules()        -- or inside another kit's layer: assist.rules(limit.rules())
 --- ```
 --- A class command naming the skill type ("divine") lists those skills in
 --- the side-view menu; they are usable once the gauge holds their cost.
@@ -14,7 +14,6 @@
 --- Gains (settings, 0 turns one off), for battlers on `settings.sides`
 --- whose maximum of the resource is above 0:
 ---   damaged: per action that damages the battler
----   breaks: per enemy the battler breaks (fe.battle.break's on_break)
 ---   ally_down: per ally knocked out
 --- Events: "limit_ready" (battler) when the gauge becomes full.
 local stats = require("fe.rpg.stats")
@@ -23,7 +22,6 @@ local limit = {
   settings = {
     resource = "lp",
     damaged = 1,
-    breaks = 1,
     ally_down = 1,
     sides = { party = true },
   },
@@ -64,10 +62,6 @@ function limit.rules(extra)
         limit.gain(battle, b, settings.damaged)
       end
     end
-  end
-
-  function layer.on_break(battle, _, breaker)
-    if breaker then limit.gain(battle, breaker, settings.breaks) end
   end
 
   function layer.on_knocked_out(battle, fallen)

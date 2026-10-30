@@ -133,6 +133,15 @@ return {
     scene.clear()
   end,
 
+  ["without an editor the game may always leave a map"] = function(t)
+    t.eq(fe.dev.leave_map("field"), "ok")
+    t.eq(fe.dev.leave_map_result(), nil)
+    fresh()
+    field.start("arena", "start")
+    t.ok(require("fe.field.warp").editor_allows_leaving())
+    scene.clear()
+  end,
+
   ["an action door warps from its interaction and returns control"] = function(t)
     fresh()
     field.settings.autosave = false
@@ -698,5 +707,43 @@ return {
     t.eq(ran_paused, false, "the page ran with the field world running")
     t.eq(ran_in, nil, "in a detached task")
     scene.clear()
+  end,
+
+  ["the bridge layer carries the player over the river"] = function(t)
+    fresh()
+    field.start("arena", "start")
+    field.player:place({ x = 5.5, z = 7.5 }, 0)
+    fe.input.feed("key:Right", 1)
+    t.wait_until(function() return field.player.position.x > 7.6 end, 300)
+    t.eq(field.player.layer, 1)
+    t.ok(field.player.position.y > 0.9)
+    fe.input.feed("key:Right", 0)
+    t.tick(2)
+    scene.clear()
+  end,
+
+  ["encounter symbols wander near home and chase at their own speed"] = function(t)
+    local encounter = require("fe.encounter")
+    local world = fe.world.load("symbol_test", "arena")
+    local symbol = encounter.symbol(world, { troop = "slimes", position = { x = 8.5, z = 7.5 }, sprite = "", speed = 3,
+      wander = 1.5 })
+    local player = { position = { x = 1.5, z = 1.5 } }
+    local moved = false
+    for _ = 1, 300 do
+      encounter.update_symbols(world, player)
+      t.tick(1)
+      local p = symbol.position
+      if math.abs(p.x - 8.5) + math.abs(p.z - 7.5) > 0.2 then moved = true end
+      t.ok(math.sqrt((p.x - 8.5) ^ 2 + (p.z - 7.5) ^ 2) < 2.2, "stays near home")
+    end
+    t.ok(moved, "it wanders")
+    player.position = { x = symbol.position.x + 3, z = symbol.position.z }
+    local before = symbol.position.x
+    for _ = 1, 30 do
+      encounter.update_symbols(world, player)
+      t.tick(1)
+    end
+    t.ok(symbol.position.x - before > 1.2, "chases at speed 3 (" .. (symbol.position.x - before) .. ")")
+    fe.world.unload("symbol_test")
   end,
 }

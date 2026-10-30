@@ -19,9 +19,13 @@ int runTests(const std::filesystem::path& game, const std::filesystem::path& lua
              const std::string& filter, double watchdog = 3.0);
 // Loads every map, sprite and model a game references and runs main.validate().
 int checkGame(const std::filesystem::path& game, const std::filesystem::path& lualib);
+// Bakes every map's walkability from its geometry and placed models and
+// writes the maps back (fengine_headless --bake <game>); with `checkOnly`
+// nothing is written and a map whose bake is out of date fails the run.
+int bakeGame(const std::filesystem::path& game, const std::filesystem::path& lualib, bool checkOnly);
 // Writes fengine.d.lua (LuaLS stubs) and api.md into a folder.
 int writeApi(const std::filesystem::path& lualib, const std::filesystem::path& folder);
-// Shared command-line handling for --test/--check/--write-api; returns -1
+// Shared command-line handling for --test/--check/--bake/--write-api; returns -1
 // when none of them was requested.
 int runHeadlessCommand(int argc, char** argv);
 } // namespace fe

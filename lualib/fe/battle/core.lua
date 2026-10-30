@@ -3,15 +3,15 @@
 --- A Battle holds battlers and building blocks: deciding actions, paying
 --- costs, resolving effects through fe.effects, turn upkeep, outcome checks
 --- and rewards. A *scheduler* (fe.battle.schedulers.*) owns the turn loop
---- (ATB, round order, initiative), and a *presenter* (side-view, tactical,
---- or a game's own) shows what happens; both are plain Lua tables, so games
+--- (ATB, round order), and a *presenter* (side-view, or a game's own)
+--- shows what happens; both are plain Lua tables, so games
 --- can write their own. The core never reads presentation state (entities,
 --- sprites): presenters keep themselves in sync from events.
 ---
 --- Rules are tables of optional hooks. A battle has several *rule layers*,
 --- from general to specific: fe.battle.rules (the game's), the caller's
 --- `rules`, the troop's script, layers added by kits (`battle:add_rules`,
---- e.g. tactical objectives) and finally `battle.rules`, the battle's own
+--- e.g. fe.battle.limit) and finally `battle.rules`, the battle's own
 --- table. A layer's `layers` list holds more layers, each added right after
 --- it (more specific), so kits combine without overwriting each other's
 --- hooks. Every layer's hooks run:
@@ -34,12 +34,11 @@
 ---   * usable(battle, b, skill) -> false vetoes a skill in any layer
 ---     (Battle:usable; menus, AI and Battle:perform respect it)
 ---   * skip_turn(battle, b) -> true in any layer makes the battler's next
----     turn upkeep-only (Battle:skips_turn; every scheduler and the tactical
----     turn honour it; the ambush/pre-emptive opening uses it)
+---     turn upkeep-only (Battle:skips_turn; every scheduler honours it; the
+---     ambush/pre-emptive opening uses it)
 ---   * single-answer hooks use the most specific layer defining them:
----     player_controller(battle, b) -> action (default: presenter:command;
----     the tactical kit's controller returns a plan, see
----     fe.battle.tactical.rules), escape_chance(battle, b) -> 0..1,
+---     player_controller(battle, b) -> action (default: presenter:command),
+---     escape_chance(battle, b) -> 0..1,
 ---     rewards(battle) -> table, reaction(battle, b, action, results) ->
 ---     action|nil (a counter or other response by a battler the action
 ---     affected; reactions do not react; fe.battle.reactions has ready-made
@@ -54,8 +53,7 @@
 --- battler_removed, dismissed, reaction, defend, flee, escaped,
 --- escape_failed, exp (experience gained per action, see
 --- settings.exp_per_action) and finish come from the core; schedulers add
---- round and order (round_order, initiative) and turn (initiative; the
---- tactical kit presents turns through it); kits and games add their own.
+--- round and order (round_order); kits and games add their own.
 ---
 --- Line-ups change mid-battle three ways: `battle:add` (reinforcements),
 --- `battle:summon` (temporary battlers that leave by themselves) and
@@ -63,8 +61,7 @@
 --- An enemy whose data gives `actions` (a number, or a function path
 --- "module.fn" returning one per turn) acts that many times in each of its
 --- turns (Octopath Traveler's bosses) through Battle:turn; every action is
---- presented (tactical turns stay one move and one action). The
---- core needs nothing from fe.rpg: items and rewards go through
+--- presented. The core needs nothing from fe.rpg: items and rewards go through
 --- Battle.settings.inventory and Battle.settings.party, which fe.battle
 --- points at the RPG kit.
 local Battler = require("fe.battle.battler")
@@ -100,11 +97,9 @@ Battle.settings = {
   speed = nil,
   --- Scheduler constants (the schedulers' own `settings` override them):
   --- ATB gauges fill at (speed + rate_offset) / rate_divisor per second and
-  --- start between 0 and start_fill full; initiative CT starts within
-  --- start_fill of the threshold; round order multiplies a skill's
+  --- start between 0 and start_fill full; round order multiplies a skill's
   --- `priority` by priority_scale before adding the speed key.
   atb = { rate_offset = 20, rate_divisor = 100, start_fill = 0.3 },
-  initiative = { start_fill = 0.25 },
   priority_scale = 10000,
 }
 
@@ -396,16 +391,11 @@ function Battle:side(side, include_dead)
   end)
 end
 
---- Battlers on other sides, without obstacles.
+--- Battlers on other sides.
 function Battle:opponents(battler, include_dead)
   return tablex.filter(self.battlers, function(b)
-    return b.side ~= battler.side and not b.obstacle and (include_dead or b:alive())
+    return b.side ~= battler.side and (include_dead or b:alive())
   end)
-end
-
---- Obstacles still standing (or all of them).
-function Battle:obstacles(include_destroyed)
-  return tablex.filter(self.battlers, function(b) return b.obstacle and (include_destroyed or b:alive()) end)
 end
 
 function Battle:allies(battler, include_dead)
@@ -427,7 +417,7 @@ function Battle:targets_for(user, kind)
   elseif kind == "self" then
     return { user }
   elseif kind == "any" or kind == "everyone" then
-    return tablex.filter(self:living(), function(b) return not b.obstacle end)
+    return self:living()
   end
   return {}
 end
@@ -603,7 +593,7 @@ function Battle:perform(action)
       local targets = tablex.filter(action.targets or {}, function(t)
         return t:alive() or source.target == "dead_ally"
       end)
-      if #targets == 0 and source.target ~= "dead_ally" and not action.cell then
+      if #targets == 0 and source.target ~= "dead_ally" then
         targets = self:retarget(user, source.target)
       end
       action.targets = targets
@@ -718,12 +708,11 @@ function Battle:outcome()
   return nil
 end
 
---- Default rewards: the fallen opponents' exp, money, jp and drops
---- (destroyed obstacles give none).
+--- Default rewards: the fallen opponents' exp, money, jp and drops.
 function Battle:default_rewards()
   local rewards = { exp = 0, money = 0, jp = 0, items = {} }
   for _, b in ipairs(self.battlers) do
-    if b.def and b.side ~= "party" and not b.obstacle and not b:alive() then
+    if b.def and b.side ~= "party" and not b:alive() then
       local r = b.def.rewards
       rewards.exp = rewards.exp + (r.exp or 0)
       rewards.money = rewards.money + (r.money or 0)
@@ -797,8 +786,8 @@ end
 --- End a battle that stopped without finishing (its task raised or was
 --- cancelled; fe.battle.start calls this): per-battle effect hooks stop,
 --- actors lose their battle-only resources and "battle_end" states as at a
---- normal end, and every rule layer's `on_abort(battle)` runs (the tactical
---- kit reverts its terrain there). There is no outcome, no rewards, no
+--- normal end, and every rule layer's `on_abort(battle)` runs. There is no
+--- outcome, no rewards, no
 --- `on_end` and no `finish` event. Does nothing once the battle finished
 --- or was aborted. Must not wait.
 function Battle:abort()

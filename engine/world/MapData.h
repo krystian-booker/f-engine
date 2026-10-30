@@ -3,6 +3,7 @@
 #include <cmath>
 #include <glm/glm.hpp>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -181,13 +182,44 @@ struct Box {
     glm::vec3 min{0}, max{0};
 };
 
+// An author's correction to derived walkability: a rectangle of `w` x `d`
+// cells from (x, z) on `layer` whose listed fields replace what the bake
+// wrote. Overrides apply in order after every bake, so they survive re-bakes.
+struct CellOverride {
+    int x = 0, z = 0, layer = 0, w = 1, d = 1;
+    std::optional<bool> walkable;
+    std::optional<float> height;
+    std::optional<Ramp> ramp; // with `rise`
+    float rise = 1;
+    std::vector<std::string> tags, untags; // tag names added and removed
+};
+
+// Derived walkability: what the editor's bake (engine/editor/WalkBake.h)
+// wrote from the terrain and the placed models, kept apart from authored
+// data. `colliders` are the quarter-cell boxes of partly covered cells; the
+// runtime adds them to `MapData::colliders`. `options` holds the bake's
+// settings as JSON (the engine does not read them), `fingerprint` names the
+// inputs they were baked from (empty: never baked) and `autoBake` says
+// whether the editor re-bakes as placements change.
+struct BakeData {
+    bool autoBake = true;
+    std::string fingerprint;
+    Json options = Json::object();
+    std::vector<Box> colliders;
+    std::vector<CellOverride> overrides;
+    // Nothing worth writing: a map that was never baked.
+    [[nodiscard]] bool empty() const {
+        return autoBake && fingerprint.empty() && options.empty() && colliders.empty() && overrides.empty();
+    }
+};
+
 struct MapEmitter {
     glm::vec3 position{0};
     EmitterSettings settings;
 };
 
 // A map file (format 2). The engine understands geometry, the grid, lights,
-// emitters, colliders and environment; everything game-specific is a
+// emitters, colliders, the bake and environment; everything game-specific is a
 // placement, zone or prop that scripts interpret.
 struct MapData {
     std::string id, name, geometry = "geometry.glb";
@@ -198,6 +230,7 @@ struct MapData {
     std::vector<LightSettings> lights;
     std::vector<MapEmitter> emitters;
     std::vector<Box> colliders;
+    BakeData bake;
     Environment environment;
     Json props = Json::object();
 

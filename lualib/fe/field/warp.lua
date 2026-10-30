@@ -94,6 +94,23 @@ function warp.load_world(map_id)
   return fe.world.finish_load(ticket)
 end
 
+--- Whether the development editor lets the game leave the field's map now.
+--- With unsaved map edits the editor asks (save, discard or stay) and this
+--- waits for the answer; without an editor it is always true. Call from a
+--- task.
+---@return boolean
+function warp.editor_allows_leaving()
+  if not (fe.dev and fe.dev.leave_map) then return true end
+  local decision = fe.dev.leave_map(field().settings.world_name)
+  if decision == "pending" then
+    task.wait_until(function()
+      decision = fe.dev.leave_map_result()
+      return decision ~= nil
+    end)
+  end
+  return decision ~= "cancel"
+end
+
 -- Whether the current task is `job` or was started by it.
 local function inside(job)
   local current = task.current()
@@ -115,6 +132,7 @@ end
 function warp.warp(map_id, point, options)
   options = options or {}
   local f = field()
+  if not warp.editor_allows_leaving() then return end
   local kind = options.transition or "fade"
   local duration = options.duration or 0.35
   local covered = task.skipping()

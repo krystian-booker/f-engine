@@ -1,5 +1,0 @@
-[
-  {"id": "wolves", "members": [{"enemy": "wolf"}, {"enemy": "wolf"}], "music": "battle"},
-  {"id": "bandits", "members": [{"enemy": "bandit_chief"}, {"enemy": "ember_wisp"}], "music": "battle"},
-  {"id": "wisps", "members": [{"enemy": "ember_wisp"}, {"enemy": "ember_wisp"}], "music": "battle"}
-]

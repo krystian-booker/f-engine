@@ -147,6 +147,9 @@ void Editor::importGeometry(World& w, const std::filesystem::path& file) {
     }
     engine_.assets().release(w.geometryPath());
     importMarkers(w);
+    if (w.authored().bake.autoBake && !w.authored().bake.empty()) {
+        rebake(w, std::nullopt, false);
+    }
     status_ = "Imported " + file.filename().string() + " as the map's geometry; " + status_ +
               ". Save the map to keep the markers.";
 }

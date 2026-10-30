@@ -475,24 +475,43 @@ TEST_CASE("a wide mover descends a rise-1 ramp through its directed link on a pl
     CHECK(count(events, WorldEvent::Kind::Blocked) == 0);
 }
 
-TEST_CASE("walkers cross the Riverford bridge both ways along the planned path") {
-    const auto game = std::filesystem::path(FENGINE_LUALIB).parent_path() / "samples" / "wayfarers";
+TEST_CASE("static boxes come from the map's authored and baked lists") {
+    AssetCache assets{FENGINE_TEST_GAME, FENGINE_LUALIB};
+    auto map = MapData::load(std::filesystem::path(FENGINE_TEST_GAME) / "maps/arena/map.json");
+    map.colliders.push_back({{2, 0, 6}, {3, 1, 7}});
+    map.bake.colliders.push_back({{4, 0, 6}, {5, 1, 7}});
+    World world{"boxes", map, assets, 1};
+    const auto& blocked = world.boxBlockedCells();
+    CHECK(blocked.contains(cellKey({2, 6, 0})));
+    CHECK(blocked.contains(cellKey({4, 6, 0})));
+    CHECK_FALSE(blocked.contains(cellKey({3, 6, 0})));
+    // A live edit of the derived list reaches collision at once, like the authored one.
+    world.map().bake.colliders.clear();
+    world.rebuildStatic();
+    CHECK_FALSE(world.boxBlockedCells().contains(cellKey({4, 6, 0})));
+    CHECK(world.boxBlockedCells().contains(cellKey({2, 6, 0})));
+}
+
+TEST_CASE("walkers climb onto the arena bridge deck and back down along the planned path") {
+    // The arena's directed link at (6, 7) joins the ground to a deck one unit
+    // up on layer 1 (cells 6..8 of row 7).
+    const auto game = std::filesystem::path(FENGINE_TEST_GAME);
     AssetCache assets(game, FENGINE_LUALIB);
-    World world("riverford", MapData::load(game / "maps/riverford/map.json"), assets, 1);
+    World world("arena", MapData::load(game / "maps/arena/map.json"), assets, 1);
     const auto e = world.spawn("", {2.5f, 0, 7.5f});
     world.registry().emplace<Mover>(e);
-    for (const float x : {19.5f, 2.5f}) {
-        world.moveTo(e, {x, 0, 7.5f}, true);
-        bool climbed = false;
+    for (const auto& [x, layer] : {std::pair{8.5f, 1}, std::pair{2.5f, 0}}) {
+        world.moveTo(e, {x, static_cast<float>(layer), 7.5f}, true, layer);
+        bool onDeck = false;
         for (int i = 0; i < 600 && world.moving(e); ++i) {
             world.beginTick();
             world.tick(1.0 / 60);
-            climbed = climbed || world.registry().get<Transform>(e).layer == 1;
+            onDeck = onDeck || world.registry().get<Transform>(e).layer == 1;
         }
-        CHECK(climbed);
+        CHECK(onDeck);
         CHECK(count(world.takeEvents(), WorldEvent::Kind::Arrived) == 1);
         CHECK(world.registry().get<Transform>(e).position.x == doctest::Approx(x).epsilon(0.02));
-        CHECK(world.registry().get<Transform>(e).layer == 0);
+        CHECK(world.registry().get<Transform>(e).layer == layer);
     }
 }
 
@@ -825,7 +844,7 @@ TEST_CASE("the engine skips paused worlds and scales their time") {
     }
     CHECK(world->timeScale == doctest::Approx(0.5f));
     CHECK(engine.lua()
-              .console("fe.world.get('main'):path({x=2,z=2}, {x=3,z=2}, {tag_costs={water=-1}})")
+              .console("fe.world.get('main'):path({x=2,z=2}, {x=3,z=2}, {max_step=-1})")
               .find("non-negative") != std::string::npos);
 }
 
@@ -903,15 +922,12 @@ TEST_CASE("movers jump gaps on planned and given routes") {
     CHECK(t.position.y == doctest::Approx(0));
     CHECK(kinds(s.world.takeEvents()) ==
           std::vector{WorldEvent::Kind::JumpStart, WorldEvent::Kind::Landed, WorldEvent::Kind::Arrived});
-    // A reach path from world:reachable carries the jump mark to the mover.
+    // A planned route carries the jump mark to the mover.
     StepRules rules;
     rules.jump = {2, 0.6f, 0.6f, false};
-    const auto cells = reachable(s.world.grid(), {5, 1, 0}, 5, rules);
     std::vector<Waypoint> route;
-    for (const auto& cell : reachPath(cells, {0, 1, 0})) {
-        const auto found =
-            std::find_if(cells.begin(), cells.end(), [&](const ReachCell& c) { return c.pos == cell; });
-        route.push_back({centre(cell.x, cell.z), cell.layer, found->kind});
+    for (const auto& step : findRoute(s.world.grid(), {5, 1, 0}, {0, 1, 0}, rules).steps) {
+        route.push_back({centre(step.cell.x, step.cell.z), step.cell.layer, step.kind});
     }
     s.world.follow(e, route);
     s.step(240);
@@ -1135,7 +1151,7 @@ TEST_CASE("Lua opts into diagonal gap jumps and raycasts through triggers") {
                       "== zone") == "true");
 }
 
-TEST_CASE("Lua sees jump and climb marks, zoc, cost callbacks, routes and raycasts") {
+TEST_CASE("Lua sees jump and climb marks, cost callbacks, routes and raycasts") {
     EngineOptions options;
     options.gameRoot = FENGINE_TEST_GAME;
     options.libraryRoot = FENGINE_LUALIB;
@@ -1146,8 +1162,6 @@ TEST_CASE("Lua sees jump and climb marks, zoc, cost callbacks, routes and raycas
     auto& lua = engine.lua();
     lua.console("w = fe.world.load('main', 'arena')");
     CHECK(lua.console("#w:path({x=1,z=5}, {x=3,z=5})") == "2");
-    CHECK(lua.console("#w:path({x=1,z=5}, {x=3,z=5}, {zoc = {{x=2,z=5}}})") == "4");
-    CHECK(lua.console("#w:path({x=1,z=5}, {x=2,z=5}, {zoc = {{x=2,z=5}}})") == "1");
     CHECK(lua.console("#w:path({x=1,z=5}, {x=3,z=5}, {cost = function(a, b, base) "
                       "if b.x == 2 and b.z == 5 then return false end return base end})") == "4");
     CHECK(lua.console("w:path({x=1,z=5}, {x=3,z=5}, {cost = function() error('nope') end})").find("nope") !=
@@ -1158,9 +1172,6 @@ TEST_CASE("Lua sees jump and climb marks, zoc, cost callbacks, routes and raycas
     CHECK(lua.console(
               "local p = w:path({x=1,z=5}, {x=3,z=5}, {jump = {distance = 1}}); return #p, p[1].jump") ==
           "1	true");
-    CHECK(lua.console("local r = w:reachable({x=1,z=5}, 2, {jump = {distance = 1}}); "
-                      "for _, c in ipairs(r) do if c.x == 3 and c.z == 5 then return c.jump end end") ==
-          "true");
     CHECK(lua.console("w:set_cell({x = 7, z = 2}, {rise = 2}); return w:cell({x = 7, z = 2}).rise") == "2.0");
     lua.console("hero = w:spawn{position = {x = 1.5, z = 5.5}, mover = {speed = 4, jump = {distance = 1}}, "
                 "collider = {}}");
@@ -1210,7 +1221,7 @@ TEST_CASE("standing room inside a link cell counts every link of the cell") {
     CHECK_FALSE(s.world.canOccupy(e, {1.5f, 0, 1.5f}, 0));
 }
 
-TEST_CASE("Lua path and reach rules can leave ladders out") {
+TEST_CASE("Lua path rules can leave ladders out") {
     const auto game = Scratch::prepare(
         "ladder-rules",
         {{"game.json", R"({"title": "Ladders"})"},
@@ -1229,10 +1240,7 @@ TEST_CASE("Lua path and reach rules can leave ladders out") {
     lua.console("w = fe.world.load('main', 'cliff')");
     CHECK(lua.console("local p = w:path({x=0,z=2}, {x=0,z=0}); return #p > 0, p.truncated") == "true	nil");
     CHECK(lua.console("return #w:path({x=0,z=2}, {x=0,z=0}, {ladders = false})") == "0");
-    CHECK(lua.console("for _, c in ipairs(w:reachable({x=2,z=1}, 3, {ladders = false})) do "
-                      "if c.z == 0 then return 'top' end end return 'none'") == "none");
-    CHECK(lua.console("for _, c in ipairs(w:reachable({x=2,z=1}, 3)) do "
-                      "if c.z == 0 then return c.climb end end") == "true");
+    CHECK(lua.console("local p = w:path({x=2,z=1}, {x=2,z=0}); return #p, p[1].climb") == "1\ttrue");
     CHECK(engine.lua().errors().empty());
 }
 

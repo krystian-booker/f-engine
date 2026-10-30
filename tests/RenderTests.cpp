@@ -506,7 +506,7 @@ TEST_CASE("generated tangents follow +u and record mirrored UVs") {
 
 TEST_CASE("glTF normal and emissive maps, emissive strength and generated tangents are imported") {
     const auto file =
-        std::filesystem::path(FENGINE_LUALIB) / ".." / "samples" / "wayfarers" / "fx" / "crate.gltf";
+        std::filesystem::path(FENGINE_LUALIB) / ".." / "samples" / "vale" / "fx" / "crate.gltf";
     const auto model = Model::load(file);
     REQUIRE(model.parts.size() == 1);
     const auto& material = model.parts[0].material;

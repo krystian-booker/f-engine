@@ -75,6 +75,26 @@ return {
     t.eq(inventory.count("vale_crystal"), 1)
   end,
 
+  ["the inn is a placed model that routes go around"] = function(t)
+    new_game(t)
+    local world = field.world
+    -- The inn stands on cells 2..5 x 2..4; from its west side to its east side
+    -- the straight line is five steps, so a route has to go round.
+    local path = world:path({ x = 1, z = 3 }, { x = 6, z = 3 })
+    t.ok(#path > 5, "the route goes around the inn (" .. #path .. " steps)")
+    for _, cell in ipairs(path) do
+      t.ok(not (cell.x >= 2 and cell.x <= 5 and cell.z >= 2 and cell.z <= 4), "never through it")
+    end
+    t.ok(not world:cell({ x = 3, z = 3 }).walkable, "its cells are blocked by the bake")
+    local villager = world:find("villager")
+    villager:place({ x = 1.5, z = 3.5 })
+    villager:move_to({ x = 6.5, z = 3.5 })
+    t.wait_until(function()
+      local p = villager.position
+      return math.abs(p.x - 6.5) < 0.3 and math.abs(p.z - 3.5) < 0.3
+    end, 900)
+  end,
+
   ["saves restore the party, money and location"] = function(t)
     new_game(t)
     inventory.add_money(77)

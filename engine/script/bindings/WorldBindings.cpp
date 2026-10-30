@@ -145,32 +145,9 @@ StepRules stepRules(LuaHost& host, World& world, const sol::object& value) {
     }
     rules.blockedTags = world.grid().tagMask(lua::strings(lua::field(t, "blocked_tags")));
     rules.requiredTags = gridTagBits(world.grid(), lua::field(t, "required_tags"), "rules.required_tags");
-    if (const auto costs = lua::options(lua::field(t, "tag_costs"), "Field 'tag_costs'")) {
-        for (const auto& [key, value] : *costs) {
-            if (key.get_type() != sol::type::string) {
-                throw std::runtime_error("tag_costs keys must be tag names, got " + lua::describe(key));
-            }
-            const auto tag = key.as<std::string>();
-            const auto cost = lua::convert<float>(value).value_or(-1.0f);
-            if (cost < 0) {
-                throw std::runtime_error("tag_costs['" + tag + "'] must be a non-negative number");
-            }
-            if (const auto mask = world.grid().tagMask({tag})) {
-                rules.tagCosts.emplace_back(mask, cost);
-            }
-        }
-        // Deterministic order whatever the Lua table iteration order was.
-        std::sort(rules.tagCosts.begin(), rules.tagCosts.end());
-    }
-    for (const char* key : {"blocked", "no_stop", "zoc"}) {
-        const auto cells = lua::field(t, key);
-        if (lua::absent(cells)) {
-            continue;
-        }
-        const std::string name = key;
-        auto& set = name == "blocked" ? rules.blocked : name == "no_stop" ? rules.noStop : rules.zoc;
-        for (const auto& cell : lua::cells(cells, key)) {
-            set.insert(cellKey(cell));
+    if (const auto cells = lua::field(t, "blocked"); !lua::absent(cells)) {
+        for (const auto& cell : lua::cells(cells, "blocked")) {
+            rules.blocked.insert(cellKey(cell));
         }
     }
     if (const auto jumpRules = lua::options(lua::field(t, "jump"), "Field 'jump'")) {
@@ -281,34 +258,6 @@ glm::vec2 canvasToNdc(Engine& engine, float x, float y) {
             1 - window.y / static_cast<float>(viewport.y) * 2};
 }
 
-// Overlays are drawn every frame, so their size is bounded.
-constexpr std::size_t MaxOverlays = 256;
-constexpr std::size_t MaxOverlayCells = 65536;
-
-// What world:overlay and world:overlay_path share: the entry named `name` in
-// `entries` (a map of layers or paths, `plural` in messages), made or
-// replaced with the validated `cells` and the colour of `options` (kept when
-// the options have none). Throws when `entries` is full and `name` is new, or
-// the cells are too many.
-template<class Entry>
-Entry& overlayEntry(std::map<std::string, Entry>& entries, const std::string& name, const sol::object& cells,
-                    const std::optional<sol::table>& options, const char* what, const char* plural) {
-    const std::string cellsWhat = std::string(what) + " cells";
-    if (lua::length(lua::tableArg(cells, cellsWhat.c_str())) > MaxOverlayCells) {
-        throw std::runtime_error(cellsWhat + ": at most 65536 cells");
-    }
-    auto list = lua::cells(cells, cellsWhat.c_str());
-    if (!entries.contains(name) && entries.size() >= MaxOverlays) {
-        throw std::runtime_error("A world shows at most 256 " + std::string(plural) + "; clear some first");
-    }
-    auto& entry = entries[name];
-    entry.cells = std::move(list);
-    if (options) {
-        entry.color = lua::color(lua::field(*options, "color"), entry.color);
-    }
-    return entry;
-}
-
 float aspect(Engine& engine) {
     return static_cast<float>(engine.viewport().x) / static_cast<float>(engine.viewport().y);
 }
@@ -397,24 +346,6 @@ void bindGrid(TypeBinder<WorldRef>& type) {
             "Change a cell at runtime (burning grass, frozen water, collapsing bridges); a cell outside the "
             "grid is an error. `height` is within -1000000 to 1000000 and `rise` 0 to 1000000.")
         .method(
-            "cells_with_tag",
-            [](sol::this_state s, const WorldRef& w, const std::string& tag) {
-                const auto& grid = w.get().grid();
-                const auto mask = grid.tagMask({tag});
-                std::vector<GridPos> cells;
-                for (int l = 0; mask && l < grid.layerCount(); ++l) {
-                    for (int z = 0; z < grid.depth(); ++z) {
-                        for (int x = 0; x < grid.width(); ++x) {
-                            if (grid.at(x, z, l).tags & mask) {
-                                cells.push_back({x, z, l});
-                            }
-                        }
-                    }
-                }
-                return cellList(s, cells);
-            },
-            "fun(tag: string): Cell[]", "All cells carrying a tag.")
-        .method(
             "height_at",
             [](const WorldRef& w, sol::object position, sol::object layer) {
                 const auto p = lua::position(position);
@@ -440,9 +371,8 @@ void bindGrid(TypeBinder<WorldRef>& type) {
             "footprint (1 to 8 cells per side, anchored at the cell towards +x and +z), fly (unwalkable "
             "cells and height steps are ignored), "
             "blocked_tags, required_tags (cells with none of them cannot be entered; every name must be "
-            "in the map's tag list), tag_costs (non-negative extra cost per tag), blocked, no_stop, zoc "
-            "(cells that "
-            "end movement), jump = {distance, max_up?, max_down?, diagonal?} (gap jumps along the axes, and "
+            "in the map's tag list), blocked (cells that cannot be entered), jump = {distance, max_up?, "
+            "max_down?, diagonal?} (gap jumps along the axes, and "
             "with diagonal = true the diagonals, over up to `distance` unwalkable, blocked-tag or sunken "
             "cells), ladders (default true; false never climbs ladder links), cost = fun(from, to, base): "
             "number|false (per step; false = impassable; the two cell tables are reused between calls; it "
@@ -452,56 +382,6 @@ void bindGrid(TypeBinder<WorldRef>& type) {
             "marked `jump`/`climb`. The search expands at most 200000 cells; when it stops there before "
             "reaching the goal the list has `truncated = true` and is empty or a route that may not be the "
             "cheapest.")
-        .method(
-            "reachable",
-            [](sol::this_state s, const WorldRef& w, sol::object start, sol::object budget,
-               sol::object rules) {
-                sol::state_view lua(s);
-                const auto world = w.lock();
-                const auto from = lua::cell(start);
-                const auto limit = lua::atLeast(lua::as<float>(budget, "budget"), 0.0f, "budget");
-                const auto parsed = stepRules(w.engine->lua(), *world, rules);
-                const auto reach = findReachable(world->grid(), from, limit, parsed);
-                const auto& cells = reach.cells;
-                auto out = lua.create_table(static_cast<int>(cells.size()), 0);
-                if (reach.truncated) {
-                    out["truncated"] = true;
-                }
-                for (std::size_t i = 0; i < cells.size(); ++i) {
-                    const auto& c = cells[i];
-                    auto entry = lua.create_table_with("x", c.pos.x, "z", c.pos.z, "layer", c.pos.layer,
-                                                       "cost", c.cost, "stop", c.stoppable);
-                    if (c.parent >= 0) {
-                        entry["parent"] = c.parent + 1;
-                    }
-                    markStep(entry, c.kind);
-                    out[i + 1] = entry;
-                }
-                return out;
-            },
-            "fun(start: Cell, budget: number, rules?: table): {truncated?: true, [integer]: {x: integer, z: "
-            "integer, layer: integer, cost: number, parent?: integer, stop: boolean, jump?: true, climb?: "
-            "true}}",
-            "Every cell reachable within a movement budget (tactical move ranges), with the rules of "
-            "world:path. The first entry is the start cell, which has no `parent`; every other entry's "
-            "`parent` is the index in this list of the cell it is reached from, so `while c.parent do c = "
-            "list[c.parent] end` walks back to the start. `jump`/`climb` mark how the step from the parent "
-            "enters the cell. Zone-of-control cells are reachable but nothing is reached through them. Like "
-            "world:path the search expands at most 200000 cells; when it stops there the list has "
-            "`truncated = true` and may be incomplete.")
-        .method(
-            "line_of_sight",
-            [](const WorldRef& w, sol::object from, sol::object to, sol::object layer, sol::object blocking) {
-                auto& grid = w.get().grid();
-                return lineOfSight(grid, lua::position(from), lua::position(to),
-                                   lua::opt<int>(layer, "layer").value_or(0),
-                                   grid.tagMask(lua::strings(blocking)));
-            },
-            "fun(from: Vec3, to: Vec3, layer?: integer, blocking_tags?: string[]): boolean",
-            "Whether terrain blocks the straight line between two points: ground cells, walkable upper-layer "
-            "surfaces it passes through and cells with a blocking tag. `layer` is the shooter's layer; its "
-            "own "
-            "cell is ignored.")
         .method(
             "area",
             [](sol::this_state s, const WorldRef& w, sol::object centre, const std::string& shape,
@@ -531,23 +411,6 @@ void bindGrid(TypeBinder<WorldRef>& type) {
             "Cells covered by a shape around a cell (attack ranges, areas of effect), within the grid. "
             "0 <= min <= max <= 64. `direction` (default south, {x = 0, z = 1}) snaps to the nearest of 8 "
             "directions; diagonal lines and cones follow the diagonal.")
-        .method(
-            "pick",
-            [](sol::this_state s, const WorldRef& w, float x, float y,
-               sol::object alpha) -> std::tuple<sol::object, sol::object> {
-                auto& world = w.get();
-                glm::vec3 origin, direction;
-                world.camera().ray(canvasToNdc(*w.engine, x, y), aspect(*w.engine), origin, direction,
-                                   lua::opt<double>(alpha, "alpha").value_or(w.engine->drawAlpha()));
-                const auto hit = raycastGrid(world.grid(), origin, direction, world.camera().farPlane);
-                if (!hit) {
-                    return {sol::lua_nil, sol::lua_nil};
-                }
-                return {lua::table(s, hit->cell), lua::table(s, hit->point)};
-            },
-            "fun(x: number, y: number, alpha?: number): Cell?, Vec3?",
-            "Grid cell and point under a canvas position (mouse picking). Cliff faces stop the ray. Pass "
-            "draw's `alpha` to pick against the camera as rendered.")
         .method(
             "pick_entity",
             [](const WorldRef& w, float x, float y, sol::object alpha) -> sol::optional<EntityRef> {
@@ -614,61 +477,8 @@ void bindGrid(TypeBinder<WorldRef>& type) {
             "false. `collider` is the 1-based index of the map collider hit.");
 }
 
-void bindOverlays(TypeBinder<WorldRef>& type) {
+void bindParticles(TypeBinder<WorldRef>& type) {
     type.method(
-            "overlay",
-            [](const WorldRef& w, const std::string& name, sol::object cells, sol::object settings) {
-                const auto options = lua::options(settings, "overlay options");
-                auto& layer = overlayEntry(w.get().overlays(), name, cells, options, "overlay", "overlays");
-                if (options) {
-                    layer.pulse = lua::get(*options, "pulse", layer.pulse);
-                    layer.order = lua::get(*options, "order", layer.order);
-                    layer.border = lua::get(*options, "border", layer.border);
-                    layer.visible = lua::get(*options, "visible", true);
-                }
-            },
-            "fun(name: string, cells: Cell[], options?: {color?: Color, pulse?: number, order?: integer, "
-            "border?: boolean, visible?: boolean})",
-            "Highlight grid cells (move and attack ranges): at most 65536 cells, in at most 256 overlays "
-            "per world.")
-        .method(
-            "clear_overlay",
-            [](const WorldRef& w, sol::object overlay) {
-                if (const auto name = lua::opt<std::string>(overlay, "name")) {
-                    w.get().overlays().erase(*name);
-                    w.get().overlayPaths().erase(*name);
-                } else {
-                    w.get().overlays().clear();
-                    w.get().overlayPaths().clear();
-                }
-            },
-            "fun(name?: string)", "Remove one overlay or all of them.")
-        .method(
-            "overlay_path",
-            [](const WorldRef& w, const std::string& name, sol::object cells, sol::object settings) {
-                const auto options = lua::options(settings, "overlay_path options");
-                overlayEntry(w.get().overlayPaths(), name, cells, options, "overlay_path", "overlay paths");
-            },
-            "fun(name: string, cells: Cell[], options?: {color?: Color})",
-            "Draw a path arrow through cells (at most 65536, in at most 256 paths per world); the colour is "
-            "kept until an options table changes it.")
-        .method(
-            "cursor",
-            [](const WorldRef& w, sol::object cell, sol::object settings) {
-                const auto options = lua::options(settings, "cursor options");
-                auto& cursor = w.get().cursor();
-                if (!lua::absent(cell)) {
-                    cursor.cell = lua::cell(cell);
-                }
-                cursor.visible = !lua::absent(cell);
-                if (options) {
-                    cursor.color = lua::color(lua::field(*options, "color"), cursor.color);
-                }
-            },
-            "fun(cell: Cell|nil, options?: {color?: Color})",
-            "Show the grid cursor on a cell; nil hides it. The colour is kept until an options table changes "
-            "it.")
-        .method(
             "burst",
             [](const WorldRef& w, sol::object position, sol::table settings, sol::object count) {
                 const auto parsed = EmitterSettings::fromJson(lua::emitterJson(settings));
@@ -973,7 +783,7 @@ void bindEntities(TypeBinder<WorldRef>& type) {
             "Entities with a tag and/or within a radius (XZ distance from `near`). With `fields` the result "
             "is a struct of arrays instead of a list of handles: `n` entities and one array per requested "
             "field (`entity` handles, `x`, `y`, `z` positions, `layer`, `id`, `cell_x`, `cell_z`), so a HUD "
-            "or a tactics kit reads two hundred positions a tick with a handful of tables rather than a "
+            "or a kit reads two hundred positions a tick with a handful of tables rather than a "
             "handle and a table per entity.")
         .method(
             "events",
@@ -1052,7 +862,7 @@ void bindWorld(Engine& engine) {
     bindMapData(type);
     bindEntities(type);
     bindGrid(type);
-    bindOverlays(type);
+    bindParticles(type);
     ModuleBinder(host, engine.docs(), "fe.world",
                  "Load and manage worlds (maps). Several can be loaded at once.")
         .fn(

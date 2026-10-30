@@ -63,6 +63,15 @@ struct AppRequests {
     std::vector<std::filesystem::path> sceneCaptures;
 };
 
+// What the development editor answers scripts (set by the windowed runtime
+// when the editor exists). `leaveMap(world)` is asked before the game leaves a
+// world's map: "ok", or "pending" while the editor prompts about unsaved
+// edits; `leaveResult()` then reads the answer, "continue" or "cancel".
+struct EditorHooks {
+    std::function<std::string(const std::string& world)> leaveMap;
+    std::function<std::optional<std::string>()> leaveResult;
+};
+
 // One world:draw call. With no rect the world fills the screen; a rect (canvas
 // pixels) places it on screen, or sizes the named render target it draws into.
 struct WorldDraw {
@@ -124,6 +133,7 @@ public:
     [[nodiscard]] Audio& audio() { return *audio_; }
     [[nodiscard]] SaveStore& saves() { return saves_; }
     [[nodiscard]] AppRequests& requests() { return requests_; }
+    [[nodiscard]] EditorHooks& editorHooks() { return editorHooks_; }
     [[nodiscard]] PlatformServices& platform() { return *platform_; }
     [[nodiscard]] Clipboard& clipboard() { return *clipboard_; }
     // Content packs laid over the game folder at start (<game>/packs/*.pak,
@@ -205,6 +215,7 @@ private:
     std::unique_ptr<Audio> audio_;
     SaveStore saves_;
     AppRequests requests_;
+    EditorHooks editorHooks_;
     std::unique_ptr<PlatformServices> platform_;
     std::unique_ptr<Clipboard> clipboard_;
     std::vector<std::string> packs_;

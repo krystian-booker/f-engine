@@ -4,15 +4,14 @@
 ---
 --- ```lua
 --- battle.settings.scheduler = function() return require("fe.battle.schedulers.round_order").new() end
---- battle.settings.presentation = "fe.battle.sideview"      -- or "fe.battle.tactical", or a game module
+--- battle.settings.presentation = "fe.battle.sideview"      -- or a game module
 --- battle.rules.on_start = function(b) ... end              -- game rules
 --- local outcome = battle.start{troop = "slimes"}           -- inside a task
 --- ```
 ---
 --- Rule layers, general to specific (see fe.battle.core for how hooks
 --- combine): `battle.rules` (the game's), `options.rules`, the troop's
---- `script` module, then whatever the presentation adds (tactical
---- objectives). Every layer's notification hooks run; none overwrites
+--- `script` module, then whatever the presentation adds. Every layer's notification hooks run; none overwrites
 --- another.
 ---
 --- A presentation module provides `new(battle, options) -> presenter` and
@@ -101,8 +100,7 @@ end
 --- `abort(battle)` (remove its scene, sprites and battle world at once)
 --- run, `battle.active` is cleared, `finished` is not emitted and the error
 --- propagates. Other
---- options are passed to the presentation (tactical: map, units, enemies,
---- deploy, win, lose, auto). `opening = "ambush"` makes the party skip its
+--- options are passed to the presentation. `opening = "ambush"` makes the party skip its
 --- first turns, `"preemptive"` the enemies (Battle.opening_rules).
 --- `presentation` is a module name or the module table itself.
 ---@param options {troop?: string, stage?: string, music?: string, escapable?: boolean, scheduler?: table, rules?: table, presentation?: string|table, setup?: fun(b: table), allow_defeat?: boolean, random?: RandomStream, opening?: "ambush"|"preemptive"}

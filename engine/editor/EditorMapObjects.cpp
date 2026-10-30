@@ -152,23 +152,28 @@ void Editor::drawPlacementForm(World& w, std::size_t index) {
         changed = respawn = true;
     }
     if (const auto modelPath = p.props.find("model"); modelPath != p.props.end() && modelPath->is_string()) {
-        if (ImGui::Button(ICON_FA_CUBE " Add collider box from the model")) {
-            if (const auto model = engine_.assets().tryModel(modelPath->get<std::string>())) {
-                const auto box = boxForModel(*model, p, 0.05f);
-                gesture_ = false;
-                edit(w, [&](MapData& m) {
-                    m.colliders.push_back(box);
-                    m.colliders = mergeBoxes(std::move(m.colliders));
-                });
-                gesture_ = false;
-                status_ = "Added a collider box around " + p.id + "; routes now go around it";
+        ImGui::SeparatorText("Collision");
+        if (const auto model = engine_.assets().tryModel(modelPath->get<std::string>())) {
+            const auto footprint = footprintCells(*model, p);
+            if (p.props.contains("pages")) {
+                ImGui::TextDisabled("Round collider while solid: a scripted prop shows and hides itself,\n"
+                                    "so the walkability bake leaves it out.");
+            } else if (const auto solid = p.props.find("solid");
+                       solid != p.props.end() && solid->is_boolean() && !solid->get<bool>()) {
+                ImGui::TextDisabled("None (solid = false): decoration bodies walk through.");
+            } else if (!w.authored().bake.empty()) {
+                ImGui::TextDisabled("Blocks through the walkability bake, from the model's %s.",
+                                    hasCollisionNodes(*model) ? "collision node(s)" : "visible mesh");
             } else {
-                status_ = "Model not found: " + modelPath->get<std::string>();
+                ImGui::TextDisabled("Blocks once the map's walkability is baked (Map tab: Bake now).");
             }
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Sub-cell blocking: bodies are stopped by the box and planned routes avoid\n"
-                              "the cells its centre covers, so the cell itself can stay walkable.");
+            ImGui::TextDisabled("Footprint: %d x %d cell(s)", footprint.x, footprint.y);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Model props with their origin at the centre of the base and a footprint of whole\n"
+                                  "cells; a hidden node marked {\"collision\": true} stands in for the visible mesh.");
+            }
+        } else {
+            ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "Model not found: %s", modelPath->get<std::string>().c_str());
         }
     }
     const bool duplicate = std::any_of(placements.begin(), placements.end(), [&](const Placement& other) {

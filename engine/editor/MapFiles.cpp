@@ -1,9 +1,78 @@
 #include "engine/editor/MapFiles.h"
 #include "engine/core/Paths.h"
+#include "engine/editor/WalkBake.h"
 #include <algorithm>
+#include <cstdint>
+#include <vector>
 #include <stdexcept>
 
 namespace fe {
+namespace {
+std::string base64(const std::vector<unsigned char>& bytes) {
+    static constexpr char Alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    for (std::size_t i = 0; i < bytes.size(); i += 3) {
+        const unsigned int a = bytes[i], b = i + 1 < bytes.size() ? bytes[i + 1] : 0,
+                           c = i + 2 < bytes.size() ? bytes[i + 2] : 0;
+        const unsigned int triple = (a << 16) | (b << 8) | c;
+        out += Alphabet[(triple >> 18) & 63];
+        out += Alphabet[(triple >> 12) & 63];
+        out += i + 1 < bytes.size() ? Alphabet[(triple >> 6) & 63] : '=';
+        out += i + 2 < bytes.size() ? Alphabet[triple & 63] : '=';
+    }
+    return out;
+}
+
+template<class T> void append(std::vector<unsigned char>& out, const T& value) {
+    const auto* bytes = reinterpret_cast<const unsigned char*>(&value);
+    out.insert(out.end(), bytes, bytes + sizeof(T));
+}
+} // namespace
+
+Json groundQuadGltf(float width, float depth) {
+    // Four vertices (position, normal, colour), two triangles, one buffer as a data URI.
+    std::vector<unsigned char> buffer;
+    const float positions[4][3] = {{0, 0, 0}, {width, 0, 0}, {width, 0, depth}, {0, 0, depth}};
+    for (const auto& p : positions) {
+        append(buffer, p[0]);
+        append(buffer, p[1]);
+        append(buffer, p[2]);
+    }
+    for (int i = 0; i < 4; ++i) {
+        append(buffer, 0.0f);
+        append(buffer, 1.0f);
+        append(buffer, 0.0f);
+    }
+    for (int i = 0; i < 4; ++i) { // a grey-green ground, linear
+        append(buffer, 0.3f);
+        append(buffer, 0.42f);
+        append(buffer, 0.28f);
+        append(buffer, 1.0f);
+    }
+    const std::uint16_t indices[6] = {0, 2, 1, 0, 3, 2};
+    for (const auto index : indices) {
+        append(buffer, index);
+    }
+    const auto positionsBytes = 4 * 12, normalsBytes = 4 * 12, coloursBytes = 4 * 16, indicesBytes = 6 * 2;
+    return {{"asset", {{"version", "2.0"}, {"generator", "f-engine editor"}}},
+            {"scene", 0},
+            {"scenes", Json::array({{{"nodes", Json::array({0})}}})},
+            {"nodes", Json::array({{{"mesh", 0}, {"name", "ground"}}})},
+            {"meshes", Json::array({{{"primitives", Json::array({{{"attributes", {{"POSITION", 0}, {"NORMAL", 1}, {"COLOR_0", 2}}},
+                                                                   {"indices", 3},
+                                                                   {"material", 0}}})}}})},
+            {"materials", Json::array({{{"pbrMetallicRoughness", {{"baseColorFactor", {1, 1, 1, 1}}}}, {"doubleSided", true}}})},
+            {"buffers", Json::array({{{"byteLength", buffer.size()}, {"uri", "data:application/octet-stream;base64," + base64(buffer)}}})},
+            {"bufferViews", Json::array({{{"buffer", 0}, {"byteOffset", 0}, {"byteLength", positionsBytes}, {"target", 34962}},
+                                         {{"buffer", 0}, {"byteOffset", positionsBytes}, {"byteLength", normalsBytes}, {"target", 34962}},
+                                         {{"buffer", 0}, {"byteOffset", positionsBytes + normalsBytes}, {"byteLength", coloursBytes}, {"target", 34962}},
+                                         {{"buffer", 0}, {"byteOffset", positionsBytes + normalsBytes + coloursBytes}, {"byteLength", indicesBytes}, {"target", 34963}}})},
+            {"accessors", Json::array({{{"bufferView", 0}, {"componentType", 5126}, {"count", 4}, {"type", "VEC3"}, {"min", {0, 0, 0}}, {"max", {width, 0, depth}}},
+                                       {{"bufferView", 1}, {"componentType", 5126}, {"count", 4}, {"type", "VEC3"}},
+                                       {{"bufferView", 2}, {"componentType", 5126}, {"count", 4}, {"type", "VEC4"}},
+                                       {{"bufferView", 3}, {"componentType", 5123}, {"count", 6}, {"type", "SCALAR"}}})}};
+}
+
 bool validMapId(std::string_view id) {
     return !id.empty() && id.size() <= 64 && std::all_of(id.begin(), id.end(), [](char c) {
         return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
@@ -39,7 +108,10 @@ MapData makeBlankMap(const std::string& id, const std::string& name, int width, 
                     {{"position", {static_cast<float>(width) * 0.5f, 0, static_cast<float>(depth) * 0.5f}},
                      {"facing", {0, 1}},
                      {"layer", 0}}}}}};
-    return MapData::fromJson(json);
+    auto map = MapData::fromJson(json);
+    // A new map derives its walkability: the editor bakes it as soon as it opens.
+    map.bake.options = BakeOptions{}.toJson();
+    return map;
 }
 
 void writeMap(const std::filesystem::path& gameRoot, const MapData& map, const std::filesystem::path& geometry) {
@@ -65,13 +137,11 @@ void writeMap(const std::filesystem::path& gameRoot, const MapData& map, const s
         }
     }
     if (geometry.empty() && !isFile(folder / map.geometry)) {
-        // An empty scene: the map is flat ground until a Blender export replaces it.
-        const Json empty = {{"asset", {{"version", "2.0"}, {"generator", "f-engine editor"}}},
-                            {"scenes", Json::array({{{"nodes", Json::array()}}})},
-                            {"scene", 0}};
+        // Flat ground the size of the grid: something to stand on and to drop kit
+        // pieces onto until a Blender export replaces it.
         auto blank = json;
         blank["geometry"] = "geometry.gltf";
-        writeJson(folder / "geometry.gltf", empty);
+        writeJson(folder / "geometry.gltf", groundQuadGltf(static_cast<float>(map.grid.width()), static_cast<float>(map.grid.depth())));
         writeJson(folder / "map.json", blank);
         return;
     }

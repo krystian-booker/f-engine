@@ -271,7 +271,29 @@ void bindDev(Engine& engine) {
                 return list;
             },
             "fun(): {message: string, time: number}[]", "Recent script errors.")
-        .fn("clear_errors", [&host] { host.clearErrors(); }, "fun()", "Clear the recorded script errors.");
+        .fn("clear_errors", [&host] { host.clearErrors(); }, "fun()", "Clear the recorded script errors.")
+        .fn(
+            "leave_map",
+            [&engine](const std::string& world) {
+                const auto& hooks = engine.editorHooks();
+                return hooks.leaveMap ? hooks.leaveMap(world) : std::string("ok");
+            },
+            "fun(world: string): 'ok'|'pending'",
+            "Ask the development editor whether the game may leave a world's map: 'ok' (also without an "
+            "editor), or 'pending' while it asks about unsaved edits; then poll leave_map_result. The field's "
+            "warp does this, so a door or a zone never discards map edits.")
+        .fn(
+            "leave_map_result",
+            [&engine]() -> sol::optional<std::string> {
+                const auto& hooks = engine.editorHooks();
+                if (const auto result = hooks.leaveResult ? hooks.leaveResult() : std::nullopt) {
+                    return *result;
+                }
+                return sol::nullopt;
+            },
+            "fun(): ('continue'|'cancel')?",
+            "The editor's answer to a pending leave_map: 'continue' (edits saved or discarded), 'cancel' (stay on "
+            "the map), or nil while it is still asking.");
     if (engine.devBindings()) {
         ModuleBinder(host, engine.docs(), "fe.dev", "")
             .fn(

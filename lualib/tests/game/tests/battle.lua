@@ -29,7 +29,6 @@ end
 local schedulers = {
   round_order = function() return require("fe.battle.schedulers.round_order").new() end,
   atb = function() return require("fe.battle.schedulers.atb").new({ mode = "active", speed = 8 }) end,
-  initiative = function() return require("fe.battle.schedulers.initiative").new() end,
 }
 
 local function count(events, name, predicate)
@@ -62,35 +61,10 @@ return {
     t.eq(inventory.count("potion"), 2)
   end,
 
-  ["initiative preview is deterministic and matches turns taken"] = function(t)
-    setup()
-    local scheduler = require("fe.battle.schedulers.initiative").new()
-    local b = battle_with(scheduler, "golem")
-    for _, battler in ipairs(b.battlers) do battler.data.ct = 0 end
-    local preview = scheduler.preview(b, 4)
-    t.eq(#preview, 4)
-    t.eq(preview[1]:name(), "Hero")
-    local first = scheduler.next(b)
-    t.ok(first == preview[1])
-  end,
-
-  ["initiative previews the order after a CT cost"] = function(t)
-    setup()
-    local scheduler = require("fe.battle.schedulers.initiative").new()
-    local b = battle_with(scheduler, "golem")
-    for _, battler in ipairs(b.battlers) do battler.data.ct = 0 end
-    local hero = scheduler.next(b)
-    t.eq(hero:name(), "Hero")
-    local cheap = scheduler.preview(b, 3, { battler = hero, cost = 10 })
-    local full = scheduler.preview(b, 3, { battler = hero, cost = 100 })
-    t.ok(cheap[1] == hero, "a cheap turn acts again first")
-    t.ok(full[1] ~= hero, "a full-cost turn waits")
-  end,
-
 
 
   ["every scheduler gives upkeep turns to battlers that cannot act"] = function(t)
-    for _, name in ipairs({ "round_order", "atb", "initiative" }) do
+    for _, name in ipairs({ "round_order", "atb" }) do
       setup()
       local hero_turns, hero_acted = 0, false
       local rules = {
@@ -661,45 +635,24 @@ return {
     Battle.settings.inventory, Battle.settings.party = rpg_inventory, rpg_party
   end,
 
-  ["revealed weaknesses are remembered per enemy type"] = function(t)
-    setup()
-    local shields = require("fe.battle.break")
-    local breaker
-    local b = battle_with(round_order.new(), "wisps", 1, shields.rules({ on_break = function(_, _, by) breaker = by end }))
-    b:notify("setup")
-    local sage, wisp = b.battlers[2], b.battlers[3]
-    t.ok(not shields.revealed(wisp, "fire"))
-    b:perform({ kind = "skill", user = sage, skill = "fire", targets = { wisp } })
-    t.ok(shields.is_broken(wisp))
-    t.ok(breaker == sage, "on_break names the breaker")
-    t.eq(shields.known("wisp"), { "fire" })
-    local again = battle_with(round_order.new(), "wisps", 1, shields.rules())
-    again:notify("setup")
-    t.ok(shields.revealed(again.battlers[3], "fire"), "known from the last battle")
-    shields.settings.remember = false
-    t.ok(not shields.revealed(again.battlers[3], "fire"))
-    shields.settings.remember = true
-  end,
-
   ["reloading battle modules mid-battle keeps the battle working"] = function(t)
     setup()
-    local shields = require("fe.battle.break")
     local function ids(phase)
       return tablex.map(effects.hooks[phase], function(h) return tostring(h.id) .. "@" .. h.priority end)
     end
     local before = { modify = ids("modify"), hit = ids("hit") }
-    local rules = shields.rules({
+    local rules = {
       player_controller = function(_, b) return { kind = "wait", user = b } end,
       actions = { wait = function() task.wait(0.05) return {} end },
       outcome = function(b) if b.round > 4 then return "victory" end end,
-    })
+    }
     local b = battle_with(round_order.new({ choose = "turn" }), "wisps", 6, rules)
     for _, enemy in ipairs(b:side("enemy")) do enemy:set_resource("hp", 9999) end
     local outcome
     local job = task.spawn(function() outcome = b:run() end)
     t.wait_until(function() return b.round >= 2 end, 600)
     for _, name in ipairs({ "fe.effects", "fe.battle.core", "fe.battle.battler", "fe.battle.ai", "fe.battle",
-      "fe.battle.schedulers.round_order", "fe.battle.schedulers.atb", "fe.battle.break", "fe.battle.reactions",
+      "fe.battle.schedulers.round_order", "fe.battle.schedulers.atb", "fe.battle.reactions",
       "fe.battle.presenter_common", "fe.battle.sideview", "fe.battle.sideview_hud", "fe.battle.sideview_commands",
       "fe.rpg.party", "fe.rpg.actor", "fe.rpg.combatant", "fe.rpg.database" }) do
       t.ok(fe.harness.reload(name), "reloaded " .. name)
@@ -710,11 +663,11 @@ return {
     t.eq(ids("modify"), before.modify, "no effect hook was duplicated or lost")
     t.eq(ids("hit"), before.hit)
     t.ok(Battle.settings.inventory == inventory)
-    local next_battle = battle_with(round_order.new(), "wisps", 1, shields.rules())
+    local next_battle = battle_with(round_order.new(), "wisps", 1, {})
     next_battle:notify("setup")
     local wisp = next_battle.battlers[3]
     next_battle:perform({ kind = "skill", user = next_battle.battlers[2], skill = "fire", targets = { wisp } })
-    t.ok(shields.is_broken(wisp), "the reloaded break rules apply")
+    t.ok(wisp:resource("hp") < wisp:max_resource("hp"), "the reloaded rules still resolve damage")
   end,
   ["side view: a summon knocked out and dismissed at once leaves the presenter nothing to touch"] = function(t)
     setup()
@@ -844,67 +797,6 @@ return {
     end
   end,
 
-  ["boost is paid only when the action goes ahead, and multiplies the attack's own hits"] = function(t)
-    setup()
-    local shields = require("fe.battle.break")
-    local saved = stats.resource_list
-    local map = {}
-    for _, d in ipairs(saved) do map[d.id] = d end
-    map.bp = { max = 5, start = 1, name = "BP", battle_only = true }
-    stats.resources(map)
-    local cancel = false
-    local b = Battle({ layers = { shields.rules(), { before_action = function(_, a) a.cancelled = cancel end } },
-      scheduler = { run = function() end }, random = fe.random.new(1) })
-    b:populate(party.members(), "wisps")
-    local hero, wisp = b.battlers[1], b:side("enemy")[1]
-    wisp:set_resource("hp", 200)
-    hero:set_resource("bp", 3)
-    cancel = true
-    local action = { kind = "skill", user = hero, skill = "attack", targets = { wisp } }
-    shields.boost(action, 2)
-    t.eq(b:perform(action), nil)
-    t.eq(hero:resource("bp"), 3, "a cancelled action costs no BP")
-    cancel = false
-    local attack_skill = Battle.settings.attack_skill
-    Battle.settings.attack_skill = "flurry"
-    action = { kind = "skill", user = hero, skill = "flurry", targets = { wisp } }
-    shields.boost(action, 2)
-    hero:set_resource("bp", 1)
-    local results = b:perform(action)
-    t.eq(action.boost, 1, "only the points the hero still had were paid")
-    t.eq(#results, 6, "three hits, repeated once per point paid")
-    t.eq(hero:resource("bp"), 0)
-    Battle.settings.attack_skill = attack_skill
-    stats.resources(map)
-    stats.resource_list, stats.resource_by_id = saved, {}
-    for _, d in ipairs(saved) do stats.resource_by_id[d.id] = d end
-  end,
-
-  ["a killing weakness hit still reveals the weakness and takes the shield point"] = function(t)
-    setup()
-    local shields = require("fe.battle.break")
-    local b = battle_with(round_order.new(), "wisps", 1, shields.rules())
-    b:notify("setup")
-    local sage, wisp = b.battlers[2], b.battlers[3]
-    wisp:set_resource("hp", 1)
-    b:perform({ kind = "skill", user = sage, skill = "fire", targets = { wisp } })
-    t.ok(not wisp:alive())
-    t.ok(shields.revealed(wisp, "fire"))
-    t.eq(wisp.data.shield, 0)
-    t.ok(not shields.is_broken(wisp), "the fallen do not break")
-  end,
-
-  ["obstacles take no side and give no rewards"] = function(t)
-    setup()
-    local Battler = require("fe.battle.battler")
-    t.error(function() Battler({ enemy = "crate", side = "enemy" }) end, "cannot take side")
-    local b = battle_with(round_order.new(), "slimes")
-    local block = b:add({ enemy = "slime", obstacle = true })
-    t.eq(block.side, "obstacle")
-    block:set_resource("hp", 0)
-    t.eq(b:default_rewards().exp, 0, "a destroyed obstacle is no fallen foe")
-  end,
-
   ["enemies with several actions per turn act that many times, each one presented"] = function(t)
     setup()
     for _, enemy in ipairs({ "hydra", "warlock" }) do
@@ -940,46 +832,21 @@ return {
 
   ["kit rules(extra) adds extra as its own layer instead of overwriting hooks"] = function(t)
     setup()
-    local shields = require("fe.battle.break")
     local limit = require("fe.battle.limit")
     local saved = stats.resource_list
     local map = {}
     for _, d in ipairs(saved) do map[d.id] = d end
-    map.bp = { max = 5, start = 1, name = "BP", battle_only = true }
+    map.lp = { max = 3, start = 0, name = "LP", battle_only = true }
     stats.resources(map)
-    local rounds = {}
-    local layer = shields.rules(limit.rules({ on_round = function(_, r) rounds[#rounds + 1] = r end }))
+    local fallen = {}
+    local layer = limit.rules({ on_knocked_out = function(_, b) fallen[#fallen + 1] = b end })
     local b = battle_with(round_order.new(), "slimes", 1, layer)
-    local hero = b.battlers[1]
-    hero:set_resource("bp", 1)
-    b:notify("on_round", 2)
-    t.eq(hero:resource("bp"), 2, "the boost layer still gains BP")
-    t.eq(rounds, { 2 }, "and the extra on_round ran too")
-    t.ok(b:rule("on_round") ~= layer.on_round, "the extra layer is more specific")
-    stats.resource_list, stats.resource_by_id = saved, {}
-    for _, d in ipairs(saved) do stats.resource_by_id[d.id] = d end
-  end,
-
-  ["TP: gained each turn, spent on skills; a quietus works once per battle"] = function(t)
-    setup()
-    local tp = require("fe.battle.tp")
-    local saved = stats.resource_list
-    tp.declare({ max = 4, start = 1 })
-    local b = battle_with(round_order.new(), "golem", 1, tp.rules())
-    local hero, golem = b.battlers[1], b:side("enemy")[1]
-    hero:reset_battle_resources()
-    t.eq(hero:resource("tp"), 1, "battles start at the start value")
-    b:turn_start(hero)
-    t.eq(hero:resource("tp"), 2)
-    local strike = data.get("skills", "last_stand")
-    t.ok(b:usable(hero, strike))
-    t.ok(b:perform({ kind = "skill", user = hero, skill = "last_stand", targets = { golem } }) ~= nil)
-    t.eq(hero:resource("tp"), 0)
-    for _ = 1, 3 do b:turn_start(hero) end
-    t.eq(hero:resource("tp"), 3)
-    t.ok(not b:usable(hero, strike), "a quietus is spent for the rest of the battle")
-    t.eq(b:perform({ kind = "skill", user = hero, skill = "last_stand", targets = { golem } }), nil)
-    t.eq(hero:resource("tp"), 3, "and costs nothing when refused")
+    local hero, sage = b.battlers[1], b.battlers[2]
+    hero:set_resource("lp", 0)
+    b:notify("on_knocked_out", sage)
+    t.eq(hero:resource("lp"), 1, "the limit layer still fills the gauge")
+    t.eq(fallen, { sage }, "and the extra on_knocked_out ran too")
+    t.ok(b:rule("on_knocked_out") ~= layer.on_knocked_out, "the extra layer is more specific")
     stats.resource_list, stats.resource_by_id = saved, {}
     for _, d in ipairs(saved) do stats.resource_by_id[d.id] = d end
   end,
@@ -1095,24 +962,6 @@ return {
     t.eq(named, { "hero", "scout", "sage*" })
   end,
 
-  ["a revived enemy comes back with full shields"] = function(t)
-    setup()
-    local shields = require("fe.battle.break")
-    local b = battle_with(round_order.new(), "wisps", 1, shields.rules())
-    b:notify("setup")
-    local events = record(b)
-    local sage, wisp = b.battlers[2], b.battlers[3]
-    wisp:set_resource("hp", 1)
-    b:perform({ kind = "skill", user = sage, skill = "fire", targets = { wisp } })
-    t.ok(not wisp:alive())
-    t.eq(wisp.data.shield, 0)
-    wisp:set_resource("hp", 50)
-    b:settle()
-    t.eq(wisp.data.shield, wisp.data.max_shield, "refilled on revival")
-    t.ok(not shields.is_broken(wisp))
-    t.eq(count(events, "shield_restored"), 1)
-  end,
-
   ["ATB cancels a player's decision when the chooser falls"] = function(t)
     setup()
     local scheduler = require("fe.battle.schedulers.atb").new({ mode = "active", speed = 8 })
@@ -1155,7 +1004,7 @@ return {
   end,
 
   ["ambushes and pre-emptive strikes skip one side's first turns in every scheduler"] = function(t)
-    for _, name in ipairs({ "round_order", "atb", "initiative" }) do
+    for _, name in ipairs({ "round_order", "atb" }) do
       for opening, skipping in pairs({ ambush = "party", preemptive = "enemy" }) do
         setup()
         local turns, first_action, openings = {}, {}, {}
@@ -1253,25 +1102,6 @@ return {
       random = b.random })[1].amount > 5)
   end,
 
-  ["weaknesses can be revealed and changed mid-battle"] = function(t)
-    setup()
-    local shields = require("fe.battle.break")
-    local b = battle_with(round_order.new(), "wisps", 1, shields.rules())
-    b:notify("setup")
-    local events = record(b)
-    local hero, wisp = b.battlers[1], b.battlers[3]
-    t.ok(shields.reveal(b, wisp, "fire"), "hidden until now")
-    t.ok(shields.revealed(wisp, "fire"))
-    t.ok(not shields.reveal(b, wisp, "fire"), "already known")
-    t.eq(count(events, "weakness_revealed"), 1)
-    shields.set_weaknesses(wisp, { "sword" })
-    t.eq(shields.weaknesses(wisp), { "sword" })
-    b:perform({ kind = "skill", user = hero, skill = "attack", targets = { wisp } })
-    t.ok(shields.is_broken(wisp), "the sword is a weakness now")
-    shields.set_weaknesses(wisp, nil)
-    t.eq(shields.weaknesses(wisp), { "fire" }, "back to the data")
-  end,
-
   ["experience per action is granted at once and presented"] = function(t)
     setup()
     Battle.settings.exp_per_action = function(_, action) return action.kind == "skill" and 30 or 0 end
@@ -1344,7 +1174,6 @@ return {
     setup()
     local function problems(effect) return effects.validate(effect, "e") end
     t.eq(problems({ type = "damage", formula = "physical", power = 100 }), {})
-    t.eq(problems({ type = "push", distance = 1 }), {}, "the tactical kit's push is known through its provider")
     t.ok(problems({ type = "steal" })[1]:find("no effect handler"), "a type without a handler")
     effects.handler("steal", function() return {} end)
     t.eq(problems({ type = "steal", anything = true }), {}, "a handler without a schema accepts anything")
@@ -1356,12 +1185,8 @@ return {
     t.ok(problems({ power = 3 })[1]:find("type: missing"))
     local database = require("fe.rpg.database")
     t.eq(database.validate_effects("skills"), {})
-    local member = data.get("troops", "arena_slimes").members[1]
-    t.eq(member.id, "left")
-    t.eq(member.facing, { x = 1, z = 0 })
-    t.eq(member.position.layer, 0)
-    t.ok(data.validate("troops", { { id = "bad", members = { { enemy = "slime", facing = { x = "east" } } } } }) == false)
-    t.ok(data.get("skills", "attack").uses_weapon == true and data.get("skills", "longshot").los == true)
+    t.ok(data.validate("troops", { { id = "bad", members = { { enemy = "slime", position = { slot = "front" } } } } }) == false)
+    t.ok(data.get("skills", "attack").uses_weapon == true and data.get("skills", "heal").scope == "both")
     t.eq(data.get("skills", "fire").uses_weapon, false, "schema defaults")
   end,
 }

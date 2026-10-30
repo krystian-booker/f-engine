@@ -9,8 +9,8 @@
 --- Games and battle kits change the rules with hooks instead of editing
 --- this file:
 --- ```lua
---- effects.hook("modify", function(ctx)        -- a "break" mechanic
----   if ctx.target.broken then ctx.multiplier = ctx.multiplier * 2 end
+--- effects.hook("modify", function(ctx)        -- a "stagger" mechanic
+---   if ctx.target.data.staggered then ctx.multiplier = ctx.multiplier * 2 end
 --- end)
 --- effects.formula("physical", function(ctx) ... end)   -- replace a formula
 --- effects.handler("steal", function(ctx) ... end)        -- a new effect type
@@ -108,10 +108,9 @@ function effects.schema(type_name, fields) effects.schemas[type_name] = fields e
 
 --- The module that registers the handler for `type_name` when it is not a
 --- built-in one: effects.validate requires it on demand, so data tables
---- can be checked before the kit providing the type has been loaded
---- (the tactical kit's `push`). Games register their own the same way.
+--- can be checked before the kit providing the type has been loaded:
+--- `effects.provider("steal", "mygame.thief")`.
 function effects.provider(type_name, module_name) effects.providers[type_name] = module_name end
-effects.provider("push", "fe.battle.tactical.rules")
 
 --- Check an effect record: its type must have a handler (loading its
 --- provider module if one is registered), and its fields must fit the

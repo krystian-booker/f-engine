@@ -1,0 +1,97 @@
+[
+ {
+  "frame": 60,
+  "mouse": [
+   704,
+   282
+  ]
+ },
+ {
+  "frame": 66,
+  "click": "left"
+ },
+ {
+  "frame": 74,
+  "expect_selection": "villager"
+ },
+ {
+  "frame": 76,
+  "mouse": [
+   704,
+   266
+  ]
+ },
+ {
+  "frame": 82,
+  "down": "left"
+ },
+ {
+  "frame": 90,
+  "mouse": [
+   790,
+   290
+  ]
+ },
+ {
+  "frame": 98,
+  "mouse": [
+   840,
+   300
+  ]
+ },
+ {
+  "frame": 104,
+  "up": "left"
+ },
+ {
+  "frame": 112,
+  "expect": "require('fe.field').world:placement('villager').position.x > 12"
+ },
+ {
+  "frame": 116,
+  "key": "F5"
+ },
+ {
+  "frame": 130,
+  "expect": "(function() require('fe.task').detached('w', function() require('fe.field').warp('grotto', 'entry') end); return true end)()"
+ },
+ {
+  "frame": 170,
+  "expect": "fe.world.get('field').map_id == 'town'"
+ },
+ {
+  "frame": 174,
+  "mouse": [
+   694,
+   378
+  ]
+ },
+ {
+  "frame": 178,
+  "click": "left"
+ },
+ {
+  "frame": 190,
+  "expect": "fe.world.get('field').map_id == 'town'"
+ },
+ {
+  "frame": 190,
+  "expect_status": "Stayed on the map with its edits"
+ },
+ {
+  "frame": 270,
+  "expect": "fe.world.get('field').map_id == 'town'"
+ },
+ {
+  "frame": 270,
+  "expect": "require('fe.field').world:placement('villager').position.x > 12"
+ },
+ {
+  "frame": 270,
+  "expect": "(function() for _, p in ipairs(fe.json.decode(fe.fs.read('maps/town/map.json')).placements) do if p.id == 'villager' then return p.position[1] < 12 end end end)()"
+ },
+ {
+  "frame": 272,
+  "quit": true
+ }
+]

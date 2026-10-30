@@ -118,7 +118,7 @@ void Editor::drawEditMode(const EditorFrame& frame) {
 }
 
 void Editor::confirmDiscard(World* w, const char* what, std::function<void()> action) {
-    if (w && history_.undoCount(*w) > 0) {
+    if (w && history_.unsaved(*w)) {
         mapDialog_ = {};
         mapDialog_.kind = MapDialog::Kind::Unsaved;
         mapDialog_.what = what;
@@ -176,7 +176,11 @@ void Editor::drawMapDialogs(World* w) {
     ImGui::SetNextWindowSize(ImVec2(460, 0), ImGuiCond_Appearing);
     if (!ImGui::BeginPopupModal(title, &open, ImGuiWindowFlags_AlwaysAutoResize)) {
         if (!open) {
+            auto cancelled = std::move(d.cancelled);
             d = {};
+            if (cancelled) {
+                cancelled();
+            }
         }
         return;
     }
@@ -290,7 +294,7 @@ void Editor::drawMapDialogs(World* w) {
         if (!d.problem.empty()) {
             ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "%s", d.problem.c_str());
         }
-        ImGui::BeginDisabled(!valid || history_.undoCount(*w) > 0);
+        ImGui::BeginDisabled(!valid || history_.unsaved(*w));
         const bool rename = ImGui::Button(ICON_FA_CHECK " Rename");
         ImGui::EndDisabled();
         if (rename) {
@@ -312,7 +316,7 @@ void Editor::drawMapDialogs(World* w) {
                 d.problem = error.what();
             }
         }
-        if (history_.undoCount(*w) > 0) {
+        if (history_.unsaved(*w)) {
             ImGui::SameLine();
             ImGui::TextDisabled("Save the map first");
         }
@@ -342,7 +346,7 @@ void Editor::drawMapDialogs(World* w) {
         break;
     }
     case MapDialog::Kind::Unsaved: {
-        ImGui::Text("The map has %zu unsaved edit(s). %s anyway?", w ? history_.undoCount(*w) : 0, d.what.c_str());
+        ImGui::Text("The map has unsaved edits. %s anyway?", d.what.c_str());
         if (ImGui::Button(ICON_FA_FLOPPY_DISK " Save, then continue")) {
             if (w) {
                 saveMap(*w);
@@ -369,7 +373,11 @@ void Editor::drawMapDialogs(World* w) {
     }
     ImGui::SameLine();
     if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        auto cancelled = std::move(d.cancelled);
         close();
+        if (cancelled) {
+            cancelled();
+        }
     }
     ImGui::EndPopup();
 }
@@ -522,6 +530,9 @@ void Editor::drawMenuBar(const EditorFrame& /*frame*/) {
             addCollider(*w);
         }
         ImGui::Separator();
+        if (ImGui::MenuItem(ICON_FA_WAND_MAGIC_SPARKLES " Bake walkability now")) {
+            rebake(*w, std::nullopt, false);
+        }
         if (ImGui::MenuItem("Import Blender markers")) {
             importMarkers(*w);
         }
@@ -534,6 +545,7 @@ void Editor::drawMenuBar(const EditorFrame& /*frame*/) {
         ImGui::MenuItem("Lights", "", &handles_.lights);
         ImGui::MenuItem("Emitters", "", &handles_.emitters);
         ImGui::MenuItem("Colliders", "", &handles_.colliders);
+        ImGui::MenuItem("Baked boxes (walkability)", "", &handles_.bakedBoxes);
         ImGui::MenuItem("Triggers (non-solid colliders)", "", &handles_.triggers);
         ImGui::MenuItem("Unspawned placements", "", &handles_.placements);
         ImGui::MenuItem("Labels", "", &handles_.labels);
@@ -636,8 +648,8 @@ void Editor::drawStatusBar() {
         const auto& map = w->authored();
         ImGui::Text("  %s (%s)  %dx%d", map.name.c_str(), map.id.c_str(), map.grid.width(), map.grid.depth());
         ImGui::SameLine();
-        if (history_.undoCount(*w) > 0) {
-            ImGui::TextDisabled("  %zu unsaved edit(s)", history_.undoCount(*w));
+        if (history_.unsaved(*w)) {
+            ImGui::TextDisabled("  unsaved edits");
             ImGui::SameLine();
         }
         if (!selection_.empty()) {

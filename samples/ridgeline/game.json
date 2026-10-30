@@ -1,7 +1,0 @@
-{
-  "title": "Ridgeline",
-  "id": "ridgeline",
-  "window": {"width": 1280, "height": 720},
-  "virtual_resolution": {"width": 480, "height": 270},
-  "pixels_per_unit": 32
-}

@@ -17,8 +17,7 @@
 --- fe.battle.sideview_commands (the command menu, target picking); the
 --- shared popup, banner and fade helpers are fe.battle.presenter_common.
 ---
---- The HUD's turn bar shows the scheduler's preview: initiative's next
---- turns, or round_order's remaining turns this round plus the predicted
+--- The HUD's turn bar shows the scheduler's preview: round_order's remaining turns this round plus the predicted
 --- next round (the acting battler highlighted); it is recomputed after
 --- each battle event, not every frame. Battlers added mid-battle
 --- (`battle:add`, `battle:summon`) get a sprite at their formation slot;

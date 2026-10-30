@@ -62,6 +62,14 @@ fe.dev.errors = nil
 ---@type fun()
 fe.dev.clear_errors = nil
 
+--- Ask the development editor whether the game may leave a world's map: 'ok' (also without an editor), or 'pending' while it asks about unsaved edits; then poll leave_map_result. The field's warp does this, so a door or a zone never discards map edits.
+---@type fun(world: string): 'ok'|'pending'
+fe.dev.leave_map = nil
+
+--- The editor's answer to a pending leave_map: 'continue' (edits saved or discarded), 'cancel' (stay on the map), or nil while it is still asking.
+---@type fun(): ('continue'|'cancel')?
+fe.dev.leave_map_result = nil
+
 --- Evaluate Lua; returns printable results (or the error) and whether it succeeded. Only in development builds, --test/--check runs and --replay/--record sessions.
 ---@type fun(code: string): string, boolean
 fe.dev.console = nil
@@ -680,7 +688,7 @@ Entity.face = nil
 ---@type fun(self: Entity, spec: table)
 Entity.configure = nil
 
---- Walk to a position (pathfinding by default; `speed` 0 to 1000 sets the mover's); options come second, so a planned route is `move_to(nil, {path = cells})`. The target layer defaults to the current one if walkable there, else the walkable layer whose surface is nearest the target's y. `path` may instead be a list of cells ({x, z, layer}: walked through their centres) or points ({x, y, z}) to follow as given, then `target` if any; cells marked `jump` or `climb` (from world:path or world:reachable) are jumped to or climbed. `rules` are the planning rules of world:path (diagonal, blocked_tags, required_tags, tag_costs, blocked, no_stop, zoc, jump, ladders, cost) for the built-in planner; without them it plans 8-directional with the mover's limits and its own blocked_tags/required_tags. Emits 'arrived' once at the end, or 'blocked' (at once when no path exists or the search stops at its 200000-cell cap, without moving); jumps emit 'jump_start'/'landed' and ladder climbs 'climb_start'/'climb_end'.
+--- Walk to a position (pathfinding by default; `speed` 0 to 1000 sets the mover's); options come second, so a planned route is `move_to(nil, {path = cells})`. The target layer defaults to the current one if walkable there, else the walkable layer whose surface is nearest the target's y. `path` may instead be a list of cells ({x, z, layer}: walked through their centres) or points ({x, y, z}) to follow as given, then `target` if any; cells marked `jump` or `climb` (from world:path) are jumped to or climbed. `rules` are the planning rules of world:path (diagonal, blocked_tags, required_tags, blocked, jump, ladders, cost) for the built-in planner; without them it plans 8-directional with the mover's limits and its own blocked_tags/required_tags. Emits 'arrived' once at the end, or 'blocked' (at once when no path exists or the search stops at its 200000-cell cap, without moving); jumps emit 'jump_start'/'landed' and ladder climbs 'climb_start'/'climb_end'.
 ---@type fun(self: Entity, target: Vec3|nil, options?: {path?: boolean|(Cell|Vec3)[], speed?: number, layer?: integer, rules?: table})
 Entity.move_to = nil
 
@@ -882,7 +890,7 @@ World.spawn = nil
 ---@type fun(self: World, id: string): Entity?
 World.find = nil
 
---- Entities with a tag and/or within a radius (XZ distance from `near`). With `fields` the result is a struct of arrays instead of a list of handles: `n` entities and one array per requested field (`entity` handles, `x`, `y`, `z` positions, `layer`, `id`, `cell_x`, `cell_z`), so a HUD or a tactics kit reads two hundred positions a tick with a handful of tables rather than a handle and a table per entity.
+--- Entities with a tag and/or within a radius (XZ distance from `near`). With `fields` the result is a struct of arrays instead of a list of handles: `n` entities and one array per requested field (`entity` handles, `x`, `y`, `z` positions, `layer`, `id`, `cell_x`, `cell_z`), so a HUD or a kit reads two hundred positions a tick with a handful of tables rather than a handle and a table per entity.
 ---@type fun(self: World, filter?: {tag?: string, near?: Vec3, radius?: number, fields?: string[]}): Entity[]|{n: integer, entity?: Entity[], x?: number[], y?: number[], z?: number[], layer?: integer[], id?: string[], cell_x?: integer[], cell_z?: integer[]}
 World.query = nil
 
@@ -922,33 +930,17 @@ World.cell = nil
 ---@type fun(self: World, cell: Cell, changes: {height?: number, walkable?: boolean, ramp?: string, rise?: number, tags?: string[], add_tags?: string[], remove_tags?: string[], props?: table})
 World.set_cell = nil
 
---- All cells carrying a tag.
----@type fun(self: World, tag: string): Cell[]
-World.cells_with_tag = nil
-
 --- Ground height at a position on a layer (default 0); y is ignored.
 ---@type fun(self: World, position: Vec3, layer?: integer): number
 World.height_at = nil
 
---- A* path of cells (excluding the start; empty when none exists, found without a search when the goal cannot be entered or, without fly or jump, lies in another connected part of the grid). Rules: diagonal, max_step, max_up, max_down, footprint (1 to 8 cells per side, anchored at the cell towards +x and +z), fly (unwalkable cells and height steps are ignored), blocked_tags, required_tags (cells with none of them cannot be entered; every name must be in the map's tag list), tag_costs (non-negative extra cost per tag), blocked, no_stop, zoc (cells that end movement), jump = {distance, max_up?, max_down?, diagonal?} (gap jumps along the axes, and with diagonal = true the diagonals, over up to `distance` unwalkable, blocked-tag or sunken cells), ladders (default true; false never climbs ladder links), cost = fun(from, to, base): number|false (per step; false = impassable; the two cell tables are reused between calls; it runs under a C call, inside the search, so it must not yield: a task.wait in it raises 'attempt to yield across a C-call boundary'). Layer changes follow links and ladders the way movers do; steps that jump or climb a ladder are marked `jump`/`climb`. The search expands at most 200000 cells; when it stops there before reaching the goal the list has `truncated = true` and is empty or a route that may not be the cheapest.
+--- A* path of cells (excluding the start; empty when none exists, found without a search when the goal cannot be entered or, without fly or jump, lies in another connected part of the grid). Rules: diagonal, max_step, max_up, max_down, footprint (1 to 8 cells per side, anchored at the cell towards +x and +z), fly (unwalkable cells and height steps are ignored), blocked_tags, required_tags (cells with none of them cannot be entered; every name must be in the map's tag list), blocked (cells that cannot be entered), jump = {distance, max_up?, max_down?, diagonal?} (gap jumps along the axes, and with diagonal = true the diagonals, over up to `distance` unwalkable, blocked-tag or sunken cells), ladders (default true; false never climbs ladder links), cost = fun(from, to, base): number|false (per step; false = impassable; the two cell tables are reused between calls; it runs under a C call, inside the search, so it must not yield: a task.wait in it raises 'attempt to yield across a C-call boundary'). Layer changes follow links and ladders the way movers do; steps that jump or climb a ladder are marked `jump`/`climb`. The search expands at most 200000 cells; when it stops there before reaching the goal the list has `truncated = true` and is empty or a route that may not be the cheapest.
 ---@type fun(self: World, from: Cell, to: Cell, rules?: table): {truncated?: true, [integer]: {x: integer, z: integer, layer: integer, jump?: true, climb?: true}}
 World.path = nil
-
---- Every cell reachable within a movement budget (tactical move ranges), with the rules of world:path. The first entry is the start cell, which has no `parent`; every other entry's `parent` is the index in this list of the cell it is reached from, so `while c.parent do c = list[c.parent] end` walks back to the start. `jump`/`climb` mark how the step from the parent enters the cell. Zone-of-control cells are reachable but nothing is reached through them. Like world:path the search expands at most 200000 cells; when it stops there the list has `truncated = true` and may be incomplete.
----@type fun(self: World, start: Cell, budget: number, rules?: table): {truncated?: true, [integer]: {x: integer, z: integer, layer: integer, cost: number, parent?: integer, stop: boolean, jump?: true, climb?: true}}
-World.reachable = nil
-
---- Whether terrain blocks the straight line between two points: ground cells, walkable upper-layer surfaces it passes through and cells with a blocking tag. `layer` is the shooter's layer; its own cell is ignored.
----@type fun(self: World, from: Vec3, to: Vec3, layer?: integer, blocking_tags?: string[]): boolean
-World.line_of_sight = nil
 
 --- Cells covered by a shape around a cell (attack ranges, areas of effect), within the grid. 0 <= min <= max <= 64. `direction` (default south, {x = 0, z = 1}) snaps to the nearest of 8 directions; diagonal lines and cones follow the diagonal.
 ---@type fun(self: World, centre: Cell, shape: 'diamond'|'square'|'cross'|'line'|'cone'|'ring', min: integer, max: integer, direction?: {x: number, z: number}): Cell[]
 World.area = nil
-
---- Grid cell and point under a canvas position (mouse picking). Cliff faces stop the ray. Pass draw's `alpha` to pick against the camera as rendered.
----@type fun(self: World, x: number, y: number, alpha?: number): Cell?, Vec3?
-World.pick = nil
 
 --- The visible sprite under a canvas position, using its frame's bounds; the one drawn on top when sprites overlap.
 ---@type fun(self: World, x: number, y: number, alpha?: number): Entity?
@@ -957,22 +949,6 @@ World.pick_entity = nil
 --- First thing along a ray within `max` (default 200): grid surfaces and cliff faces (only `layers` when given), map colliders, and entities (their collider cylinder, or their sprite's quad as drawn when they have no collider; only entities with one of `tags` when given; none with entities = false). Entities whose collider is not solid (triggers) are passed through unless solid_only = false. `collider` is the 1-based index of the map collider hit.
 ---@type fun(self: World, origin: Vec3, direction: Vec3, options?: {max?: number, layers?: integer[], tags?: string[], entities?: boolean, solid_only?: boolean}): {kind: 'grid'|'collider'|'entity', point: Vec3, distance: number, cell?: Cell, collider?: integer, entity?: Entity}?
 World.raycast = nil
-
---- Highlight grid cells (move and attack ranges): at most 65536 cells, in at most 256 overlays per world.
----@type fun(self: World, name: string, cells: Cell[], options?: {color?: Color, pulse?: number, order?: integer, border?: boolean, visible?: boolean})
-World.overlay = nil
-
---- Remove one overlay or all of them.
----@type fun(self: World, name?: string)
-World.clear_overlay = nil
-
---- Draw a path arrow through cells (at most 65536, in at most 256 paths per world); the colour is kept until an options table changes it.
----@type fun(self: World, name: string, cells: Cell[], options?: {color?: Color})
-World.overlay_path = nil
-
---- Show the grid cursor on a cell; nil hides it. The colour is kept until an options table changes it.
----@type fun(self: World, cell: Cell|nil, options?: {color?: Color})
-World.cursor = nil
 
 --- One-shot particle burst (up to 4096).
 ---@type fun(self: World, position: Vec3, settings: table, count?: integer)

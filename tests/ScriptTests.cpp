@@ -615,7 +615,7 @@ TEST_CASE("the engine binds services and runs the entry module headless") {
     CHECK(engine.lua().console(
               "local e = fe.world.get('main'):spawn{id='hero', position={x=2.5,z=5.5}}; return e.id") ==
           "hero");
-    CHECK(engine.lua().console("#fe.world.get('main'):reachable({x=2,z=5}, 2)") != "0");
+    CHECK(engine.lua().console("#fe.world.get('main'):path({x=2,z=5}, {x=4,z=5})") != "0");
     CHECK(engine.lua().console("fe.random.new(5):int(1, 100) == fe.random.new(5):int(1, 100)") == "true");
     CHECK(engine.lua().console("tostring(fe.world.get('main'))") == "World(main)");
     engine.tick(1.0 / 60);
@@ -827,24 +827,20 @@ TEST_CASE("world bindings never run metamethods of the tables they read") {
                              "w:set_cell({x = 1, z = 1}, hostile)",
                              "w:path({x = 1, z = 1}, {x = 2, z = 1}, hostile)",
                              "w:path(hostile, hostile)",
-                             "w:reachable({x = 1, z = 1}, 2, {jump = hostile, tag_costs = hostile})",
-                             "w:reachable({x = 1, z = 1}, 2, {blocked = hostile})",
+                             "w:path({x = 1, z = 1}, {x = 2, z = 1}, {jump = hostile})",
+                             "w:path({x = 1, z = 1}, {x = 2, z = 1}, {blocked = hostile})",
                              "w:draw(hostile)",
                              "w:draw{camera = hostile, post = hostile, rect = hostile}",
                              "w:query(hostile)",
                              "w:query{near = hostile}",
                              "w:raycast({x = 1, y = 5, z = 1}, {x = 0, y = -1, z = 0}, hostile)",
                              "w:raycast(hostile, hostile)",
-                             "w:overlay('move', hostile, hostile)",
-                             "w:overlay_path('p', hostile, hostile)",
-                             "w:cursor(hostile, hostile)",
                              "w:burst({x = 1, z = 1}, hostile)",
                              "w:set_environment(hostile)",
                              "w:set_environment{sky = hostile, ambient = hostile}",
                              "w:height_at(hostile)",
                              "w:zones_at(hostile)",
-                             "w:area(hostile, 'diamond', 0, 1, hostile)",
-                             "w:line_of_sight(hostile, hostile, 0, hostile)"}) {
+                             "w:area(hostile, 'diamond', 0, 1, hostile)"}) {
         f.untouched(code);
     }
     CHECK(f.lua.console("1 + 1") == "2");
@@ -911,12 +907,6 @@ TEST_CASE("grid cells are tables with integer coordinates") {
     raises(lua, "w:cell({x = 2.5, z = 5})", "must be an integer");
     raises(lua, "w:cell({x = 2})", "needs 'z'");
     raises(lua, "w:set_cell({x = 999, z = 0}, {walkable = false})", "outside the grid");
-    // The start cell has no parent; every other cell's parent is a list index.
-    CHECK(lua.console("local r = w:reachable({x = 2, z = 5}, 2) return r[1].parent, r[2].parent") ==
-          "nil\t1");
-    CHECK(lua.console("local r = w:reachable({x = 2, z = 5}, 3) local c = r[#r] local n = 0 "
-                      "while c.parent do c = r[c.parent] n = n + 1 end return c.x, c.z, n > 0") ==
-          "2\t5\ttrue");
 }
 
 TEST_CASE("getters and setters come in pairs") {
@@ -1044,25 +1034,6 @@ TEST_CASE("every entity component is set by a table, read by no argument and rem
     CHECK(registry.get<Emitter>(box).settings.rate == doctest::Approx(3));
     CHECK_FALSE(lua.evaluate("e:emitter(false)").ok);
     CHECK_FALSE(lua.evaluate("e:emitter{paused = 1}").ok);
-}
-
-TEST_CASE("path arrows and the cursor take an options table") {
-    Engine engine(engineOptions());
-    auto& lua = engine.lua();
-    REQUIRE(lua.evaluate("w = fe.world.load('main', 'arena')").ok);
-    auto& world = *engine.world("main");
-    CHECK(lua.evaluate("w:overlay_path('p', {{x = 1, z = 1}, {x = 2, z = 1}}, {color = 0xff0000ff})").ok);
-    CHECK(world.overlayPaths().at("p").color == glm::vec4(1, 0, 0, 1));
-    CHECK(lua.evaluate("w:overlay_path('p', {{x = 1, z = 1}})").ok);
-    CHECK(world.overlayPaths().at("p").color == glm::vec4(1, 0, 0, 1));
-    CHECK(lua.evaluate("w:cursor({x = 1, z = 2}, {color = 'red'})").ok);
-    CHECK(world.cursor().visible);
-    CHECK(world.cursor().color.r == doctest::Approx(1));
-    CHECK(lua.evaluate("w:cursor(nil)").ok);
-    CHECK_FALSE(world.cursor().visible);
-    raises(lua, "w:overlay_path('p', {}, 0xff0000ff)", "overlay_path options must be a table");
-    raises(lua, "w:cursor({x = 1, z = 2}, 'red')", "cursor options must be a table");
-    raises(lua, "w:cursor({x = 1, z = 2}, {color = {0/0, 1, 1}})", "finite");
 }
 
 TEST_CASE("image and sprite queries raise errors for missing files") {
@@ -1660,8 +1631,8 @@ TEST_CASE("move_to takes planning rules and reports cell_enter events") {
     CHECK(lua.console("local kinds = {} for _, ev in ipairs(w:events()) do kinds[ev.type] = true end "
                       "return kinds.blocked == true") == "true");
     CHECK(lua.evaluate("e:move_to({x = 6.5, z = 5.5}, {rules = {diagonal = true, footprint = 1}})").ok);
-    CHECK(lua.console("#w:reachable({x = 2, z = 5}, 2, {fly = true}) > 1, w:reachable({x = 2, z = 5}, 2).truncated") ==
-          "true\tnil");
+    CHECK(lua.console("#w:path({x = 2, z = 5}, {x = 4, z = 5}, {fly = true}) > 0, "
+                      "w:path({x = 2, z = 5}, {x = 4, z = 5}).truncated") == "true\tnil");
     raises(lua, "e:move_to(nil, {path = {{x = 3, z = 5}}, rules = {}})", "either a path");
     raises(lua, "e:move_to({x = 6.5, z = 5.5}, {rules = {footprint = 0}})", "rules.footprint");
     // Crossing into a new cell reports it with the cell as payload.
@@ -1892,7 +1863,6 @@ TEST_CASE("mover tag classes, launches and gravity are scriptable") {
     raises(lua, "w:path({x = 1, z = 1}, {x = 2, z = 2}, {required_tags = {'acid'}})",
            "rules.required_tags: the map grid has no tag 'acid'");
     CHECK(lua.console("#w:path({x = 1, z = 1}, {x = 2, z = 2}, {required_tags = {'water'}})") == "0");
-    CHECK(lua.console("#w:reachable({x = 1, z = 1}, 3, {required_tags = {'water'}})") == "1");
     // Gravity is movement tuning.
     CHECK(lua.console("w:movement_tuning().gravity") == "20.0");
     CHECK(lua.console("w:set_movement_tuning{gravity = 9.8} "

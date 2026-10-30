@@ -3,6 +3,7 @@
 #include "engine/world/Components.h"
 #include "engine/world/World.h"
 #include <doctest/doctest.h>
+#include <array>
 
 using namespace fe;
 
@@ -62,6 +63,39 @@ TEST_CASE("undo keeps run-time changes to map sections it doesn't restore") {
     history.undo(w.field);
     CHECK(w.field.environment().fogDensity == doctest::Approx(0.5f));
     CHECK(w.field.map().placements.size() == w.field.authored().placements.size());
+}
+
+TEST_CASE("a saved map is not unsaved, even with undo history, until it is edited again") {
+    Worlds w;
+    MapEditHistory history;
+    CHECK_FALSE(history.unsaved(w.field));
+    addPlacement(w.field, history, "chest");
+    CHECK(history.unsaved(w.field));
+    history.markSaved(w.field);
+    CHECK_FALSE(history.unsaved(w.field));
+    CHECK(history.undoCount(w.field) == 1); // undo stays available after a save
+    REQUIRE(history.undo(w.field));
+    CHECK(history.unsaved(w.field)); // differs from the saved map again
+    REQUIRE(history.redo(w.field));
+    CHECK_FALSE(history.unsaved(w.field));
+    // A gesture in progress counts as unsaved; settling at the saved state does not.
+    history.apply(w.field, [](MapData& m) { m.name = "x"; }, false);
+    CHECK(history.unsaved(w.field));
+    history.settle(w.field);
+    CHECK(history.unsaved(w.field));
+    addPlacement(w.field, history, "barrel");
+    history.markSaved(w.field);
+    // Reloaded from the saved file: the history continues and nothing is unsaved.
+    World reloaded{"field", MapData::fromJson(w.field.authored().toJson()), w.assets, 3};
+    history.sync(reloaded);
+    CHECK(history.undoCount(reloaded) > 0);
+    CHECK_FALSE(history.unsaved(reloaded));
+    // A world that was never edited or saved in this session is not unsaved.
+    World other{"other", arena(), w.assets, 4};
+    CHECK_FALSE(history.unsaved(other));
+    history.markSaved(other);
+    CHECK_FALSE(history.unsaved(other));
+    CHECK(history.undoCount(other) == 0);
 }
 
 TEST_CASE("a reloaded world keeps its history only when its map is the one the history left") {
@@ -152,14 +186,9 @@ TEST_CASE("zone ids are checked like the loader checks them: unique and not empt
     CHECK(editProblem(zones, added, zones.size()).empty());
 }
 
-TEST_CASE("marker import skips markers that don't fit instead of throwing") {
+TEST_CASE("marker import skips markers that don't fit and leaves collision to the bake") {
     auto map = arena();
     Model model;
-    ModelMarker bad;
-    bad.name = "deck";
-    bad.hasBounds = true;
-    bad.max = {2, 1, 2};
-    bad.properties = {{"collision", {{"layer", 9}}}};
     ModelMarker outside;
     outside.name = "far";
     outside.position = {500, 0, 500};
@@ -169,12 +198,19 @@ TEST_CASE("marker import skips markers that don't fit instead of throwing") {
     wall.hasBounds = true;
     wall.max = {1, 2, 1};
     wall.properties = {{"collision", true}};
-    model.markers = {bad, outside, wall};
+    ModelMarker camp;
+    camp.name = "camp";
+    camp.position = {2.5f, 0, 2.5f};
+    camp.properties = {{"spawn", "camp"}};
+    model.markers = {outside, wall, camp};
     std::vector<std::string> problems;
+    const bool wasWalkable = map.grid.at(0, 0).walkable;
     CHECK(importMarkers(map, model, problems) == 1);
-    CHECK(problems.size() == 2);
-    CHECK_FALSE(map.grid.at(0, 0).walkable);
+    CHECK(problems.size() == 1);
+    CHECK(map.grid.at(0, 0).walkable == wasWalkable); // collision markers no longer paint cells
+    CHECK(map.colliders.empty());
     CHECK_FALSE(map.points.contains("far"));
+    CHECK(map.points.contains("camp"));
 }
 
 TEST_CASE("link edits are validated before they reach the map, ladders included") {
@@ -722,6 +758,25 @@ TEST_CASE("scene edits snap to cells, make placements for dropped assets and mov
     CHECK(model->type == "prop");
     CHECK(model->id == "crate_01");
     CHECK(model->props.at("model") == "fx/Crate-01.glb");
+    CHECK(model->position == cellCentre(grid, {1, 1, 0}));
+    // With its model, a dropped prop snaps by footprint: even sizes to corners, odd to centres.
+    Model house;
+    house.min = {-2, 0, -1.5f};
+    house.max = {2, 2, 1.5f};
+    Placement at;
+    CHECK(footprintCells(house, at) == glm::ivec2(4, 3));
+    at.yaw = 90;
+    CHECK(footprintCells(house, at) == glm::ivec2(3, 4));
+    at.yaw = 0;
+    at.scale = glm::vec3(0.5f);
+    CHECK(footprintCells(house, at) == glm::ivec2(2, 2)); // 2 x 1.5 rounds to 2 x 2
+    CHECK(snapForFootprint(grid, {3.7f, 0, 2.2f}, {4, 3}, 0) == glm::vec3(4, grid.heightAt({4, 2.5f}, 0), 2.5f));
+    CHECK(snapForFootprint(grid, {3.7f, 0, 2.2f}, {1, 1}, 0) == glm::vec3(3.5f, grid.heightAt({3.5f, 2.5f}, 0), 2.5f));
+    const auto dropped = placementForAsset(AssetKind::Model, "fx/house.glb", {3, 2, 0}, grid, "npc", existing, &house,
+                                           glm::vec3(3.7f, 0, 2.2f));
+    REQUIRE(dropped);
+    CHECK(dropped->position.x == doctest::Approx(4));
+    CHECK(dropped->position.z == doctest::Approx(2.5f));
     CHECK_FALSE(placementForAsset(AssetKind::Audio, "audio/x.wav", {1, 1, 0}, grid, "npc", existing));
     const auto copy = duplicatePlacement(*sprite, existing);
     CHECK(copy.id == "chest2"); // "chest2" is free in `existing` (only "chest" is taken)
@@ -819,7 +874,7 @@ TEST_CASE("handles mark zones, points, lights, colliders, triggers and unspawned
     CHECK(none.icons.empty());
 }
 
-// --- Walkability: box blocking, block brush, fills ---------------------------
+// --- Walkability: box blocking, derived boxes, fills -------------------------
 
 TEST_CASE("planned routes go around static collider boxes instead of into them") {
     Worlds w;
@@ -834,11 +889,12 @@ TEST_CASE("planned routes go around static collider boxes instead of into them")
     CHECK(blocked.contains(cellKey({4, 7, 0})));
     CHECK_FALSE(blocked.contains(cellKey({4, 8, 0}))); // the gap
     CHECK_FALSE(blocked.contains(cellKey({3, 6, 0})));
-    // A box too low to matter (a kerb) and one above head height block nothing.
+    // A low kerb stops a walking body, so routes avoid it too; a box above
+    // head height blocks nothing.
     map.colliders.push_back({{7, 0, 6}, {8, 0.3f, 9}});
     map.colliders.push_back({{9, 2, 6}, {10, 3, 9}});
     world.rebuildStatic();
-    CHECK_FALSE(world.boxBlockedCells().contains(cellKey({7, 7, 0})));
+    CHECK(world.boxBlockedCells().contains(cellKey({7, 7, 0})));
     CHECK_FALSE(world.boxBlockedCells().contains(cellKey({9, 7, 0})));
     // A box covering only a corner leaves the centre free.
     map.colliders.push_back({{1, 0, 6}, {1.2f, 1, 6.2f}});
@@ -874,43 +930,25 @@ TEST_CASE("planned routes go around static collider boxes instead of into them")
     CHECK(refused);
 }
 
-TEST_CASE("the block brush paints quarter cells into merged boxes and erases holes") {
-    auto map = arena();
-    CHECK(map.colliders.empty());
-    CHECK(paintBlock(map, {2.1f, 3.1f}, 0, 1, true));
-    REQUIRE(map.colliders.size() == 1);
-    CHECK(map.colliders[0].min.x == doctest::Approx(2));
-    CHECK(map.colliders[0].max.x == doctest::Approx(2.25f));
-    CHECK(map.colliders[0].max.y == doctest::Approx(1));
-    CHECK_FALSE(paintBlock(map, {2.1f, 3.1f}, 0, 1, true)); // already covered
-    // A row of four squares becomes one box a cell long.
-    for (float x = 2.25f; x < 3; x += 0.25f) {
-        CHECK(paintBlock(map, {x + 0.1f, 3.1f}, 0, 1, true));
-    }
-    REQUIRE(map.colliders.size() == 1);
-    CHECK(map.colliders[0].min.x == doctest::Approx(2));
-    CHECK(map.colliders[0].max.x == doctest::Approx(3));
-    // A second row merges into a 1 x 0.5 slab.
-    for (float x = 2; x < 3; x += 0.25f) {
-        paintBlock(map, {x + 0.1f, 3.35f}, 0, 1, true);
-    }
-    REQUIRE(map.colliders.size() == 1);
-    CHECK(map.colliders[0].max.z == doctest::Approx(3.5f));
-    // Erasing the middle square of the first row cuts the slab into pieces
-    // that still cover everything else.
-    CHECK(paintBlock(map, {2.6f, 3.1f}, 0, 1, false));
+TEST_CASE("boxes merge into slabs and are cut around a rectangle") {
+    CHECK(mergeBoxes({{{0, 0, 0}, {1, 1, 1}}, {{1, 0, 0}, {2, 1, 1}}, {{0, 0, 1}, {2, 1, 2}}}).size() == 1);
+    CHECK(mergeBoxes({{{0, 0, 0}, {1, 1, 1}}, {{1, 0, 0}, {2, 2, 1}}}).size() == 2); // different heights
+    const Box slab{{2, 0, 3}, {3, 1, 3.5f}};
+    // A square in the middle of the slab leaves four pieces that still cover everything else.
+    const auto pieces = cutBox(slab, {2.5f, 3}, {2.75f, 3.25f});
     float area = 0;
-    for (const auto& b : map.colliders) {
+    for (const auto& b : pieces) {
         area += (b.max.x - b.min.x) * (b.max.z - b.min.z);
         const bool coversHole = b.min.x < 2.74f && b.max.x > 2.51f && b.min.z < 3.24f && b.max.z > 3.01f;
         CHECK_FALSE(coversHole);
     }
     CHECK(area == doctest::Approx(0.5f - 0.0625f));
-    CHECK(mergeBoxes({{{0, 0, 0}, {1, 1, 1}}, {{1, 0, 0}, {2, 1, 1}}, {{0, 0, 1}, {2, 1, 2}}}).size() == 1);
-    CHECK(mergeBoxes({{{0, 0, 0}, {1, 1, 1}}, {{1, 0, 0}, {2, 2, 1}}}).size() == 2); // different heights
-    // The map still loads with the painted boxes.
-    CHECK_NOTHROW(MapData::fromJson(map.toJson()));
+    // Beside the slab: unchanged; covering it: nothing left.
+    REQUIRE(cutBox(slab, {5, 5}, {6, 6}).size() == 1);
+    CHECK(cutBox(slab, {5, 5}, {6, 6})[0].max.x == doctest::Approx(3));
+    CHECK(cutBox(slab, {0, 0}, {10, 10}).empty());
 }
+
 
 TEST_CASE("a model's box follows the placement's position, yaw and scale") {
     Model model;
@@ -975,23 +1013,6 @@ TEST_CASE("rectangle and flood fills paint many cells in one step") {
     CHECK(floodFill(grid, brush, {3, 6, 0}) == 0);
 }
 
-TEST_CASE("Blender collision markers can import as exact boxes") {
-    auto map = arena();
-    Model model;
-    ModelMarker marker;
-    marker.name = "crate";
-    marker.min = {2.25f, 0, 2.25f};
-    marker.max = {2.75f, 1, 2.75f};
-    marker.hasBounds = true;
-    marker.properties = {{"collision", {{"box", true}}}};
-    model.markers.push_back(marker);
-    std::vector<std::string> problems;
-    CHECK(importMarkers(map, model, problems) == 1);
-    CHECK(problems.empty());
-    REQUIRE(map.colliders.size() == 1);
-    CHECK(map.colliders[0].min == marker.min);
-    CHECK(map.grid.at(2, 2, 0).walkable); // the cell stays walkable; the box blocks
-}
 
 // --- Walkability bake ---------------------------------------------------------
 
@@ -1117,54 +1138,426 @@ TEST_CASE("the walkability bake reads floors, houses, ramps, cliffs and water fr
     CHECK(map.grid.at(6, 0, 0).height == doctest::Approx(1));
     CHECK(map.grid.at(0, 4, 0).ramp == Ramp::East);
     CHECK((map.grid.at(0, 5, 0).tags & map.grid.tagMask({"water"})) != 0);
-    CHECK_FALSE(map.colliders.empty());
+    CHECK(map.colliders.empty()); // derived boxes stay apart from authored ones
+    CHECK_FALSE(map.bake.colliders.empty());
     CHECK_NOTHROW(MapData::fromJson(map.toJson()));
-    // Options: a region limits the write, keepBlocked never unblocks, no colliders.
+    // A region limits the write; the post lies outside this one, so no boxes.
     MapData limited;
     limited.id = "limited";
     limited.grid = grid;
     BakeOptions some;
     some.blockEdges = false;
     some.region = glm::ivec4(0, 0, 2, 2);
-    some.writeColliders = false;
     const auto partialResult = bakeWalkability(b.model, grid, some);
     applyBake(limited, partialResult, some);
     CHECK(limited.grid.at(1, 1, 0).walkable);
     CHECK_FALSE(limited.grid.at(4, 4, 0).walkable); // outside the region: untouched (the grid starts blocked)
-    CHECK(limited.colliders.empty());
-    BakeOptions keep;
-    keep.keepBlocked = true;
-    MapData kept;
-    kept.id = "kept";
-    kept.grid = grid;
-    applyBake(kept, result, keep);
-    CHECK_FALSE(kept.grid.at(1, 1, 0).walkable);
+    CHECK(limited.bake.colliders.empty());
 }
 
-TEST_CASE("the bake of the vale town agrees with its hand-painted walkability") {
+TEST_CASE("the brush records overrides on a derived map, and clearing one hands the cell back") {
+    MapData map;
+    map.id = "brush";
+    map.grid = flatGrid(8, 6);
+    map.bake.options = BakeOptions{}.toJson();
+    GridBrush open;
+    open.mode = GridBrush::Mode::Walkable;
+    open.walkable = true;
+    CHECK(setOverride(map, {2, 2, 0}, open));
+    CHECK(map.grid.at(2, 2, 0).walkable); // applied at once
+    REQUIRE(map.bake.overrides.size() == 1);
+    // Another stroke on the same cell merges into its override.
+    GridBrush raise;
+    raise.mode = GridBrush::Mode::Height;
+    raise.height = 0.5f;
+    CHECK(setOverride(map, {2, 2, 0}, raise));
+    CHECK(map.bake.overrides.size() == 1);
+    CHECK(map.bake.overrides[0].walkable == true);
+    CHECK(map.bake.overrides[0].height == doctest::Approx(0.5f));
+    GridBrush tag;
+    tag.mode = GridBrush::Mode::AddTag;
+    tag.tag = "water";
+    CHECK(setOverride(map, {2, 2, 0}, tag));
+    CHECK((map.grid.at(2, 2, 0).tags & map.grid.tagMask({"water"})) != 0);
+    tag.mode = GridBrush::Mode::RemoveTag;
+    CHECK(setOverride(map, {2, 2, 0}, tag));
+    CHECK((map.grid.at(2, 2, 0).tags & map.grid.tagMask({"water"})) == 0);
+    CHECK(map.bake.overrides[0].tags.empty());
+    CHECK(map.bake.overrides[0].untags == std::vector<std::string>{"water"});
+    tag.tag.clear();
+    CHECK_FALSE(setOverride(map, {2, 2, 0}, tag)); // no tag named
+    CHECK_FALSE(setOverride(map, {80, 2, 0}, open)); // outside the grid
+    // A rectangle is one override; a later cell stroke inside it is a new entry.
+    CHECK(setOverrideRect(map, {4, 1, 0}, {6, 3, 0}, open));
+    CHECK(map.bake.overrides.size() == 2);
+    CHECK(map.grid.at(5, 2, 0).walkable);
+    CHECK(setOverride(map, {5, 2, 0}, raise));
+    CHECK(map.bake.overrides.size() == 3);
+    CHECK(overriddenCells(map, 0).size() == 10);
+    CHECK(overriddenCells(map, 1).empty());
+    // Clearing the middle of the rectangle splits it around the cell and drops the cell's own entry.
+    CHECK(clearOverride(map, {5, 2, 0}));
+    CHECK(overriddenCells(map, 0).size() == 9);
+    for (const auto& over : map.bake.overrides) {
+        const bool coversCell = over.x <= 5 && 5 < over.x + over.w && over.z <= 2 && 2 < over.z + over.d;
+        CHECK_FALSE(coversCell);
+    }
+    CHECK_FALSE(clearOverride(map, {7, 5, 0})); // nothing there
+    // Everything round-trips and the overrides reapply after a bake.
+    const auto loaded = MapData::fromJson(map.toJson());
+    CHECK(loaded.bake.overrides.size() == map.bake.overrides.size());
+    ModelBuilder b;
+    b.rampX(0, 0, 8, 6, 0, 8); // too steep to walk anywhere
+    MapData baked = loaded;
+    BakeOptions options;
+    options.blockEdges = false;
+    options.pruneIslands = false;
+    applyBake(baked, bakeWalkability(b.model, baked.grid, options), options);
+    CHECK(baked.grid.at(2, 2, 0).walkable);
+    CHECK(baked.grid.at(4, 1, 0).walkable);
+    CHECK_FALSE(baked.grid.at(5, 2, 0).walkable); // handed back to the bake
+    CHECK_FALSE(baked.grid.at(1, 1, 0).walkable);
+}
+
+TEST_CASE("the kit's stairs bake to ramps and its cliff block to a raised floor") {
+    const auto gameRoot = std::filesystem::path(FENGINE_SAMPLES) / "vale";
+    AssetCache assets(gameRoot, FENGINE_LUALIB);
+    const auto stairs = assets.tryModel("fx/kit/stairs_1x2.glb");
+    const auto cliff = assets.tryModel("fx/kit/cliff_2x2.glb");
+    const auto floor = assets.tryModel("fx/kit/floor_1x1.glb");
+    REQUIRE((stairs && cliff && floor));
+    CHECK(hasCollisionNodes(*stairs)); // the slope under the steps
+    ModelBuilder ground;
+    ground.floor(0, 0, 8, 6, 0);
+    Placement up, block;
+    up.position = {3, 0, 2.5f}; // stairs over cells (2, 2) and (3, 2), rising east
+    block.position = {5, 0, 3};  // a 2 x 2 cliff block over cells (4..5, 2..3), one unit up
+    const BakePiece pieces[] = {{&ground.model, glm::mat4(1)}, {stairs.get(), placementMatrix(up)}, {cliff.get(), placementMatrix(block)}};
+    BakeOptions options;
+    options.blockEdges = false;
+    const auto result = bakeWalkability(pieces, flatGrid(8, 6), options);
+    CHECK(result.at(2, 2).walkable);
+    CHECK(result.at(2, 2).ramp == Ramp::East);
+    CHECK(result.at(2, 2).rise == doctest::Approx(0.5f));
+    CHECK(result.at(3, 2).ramp == Ramp::East);
+    CHECK(result.at(3, 2).height == doctest::Approx(0.5f));
+    CHECK(result.at(4, 2).walkable); // the block's top, reached by the stairs: not an island
+    CHECK(result.at(4, 2).height == doctest::Approx(1));
+    CHECK(result.at(5, 3).height == doctest::Approx(1));
+    CHECK(result.at(1, 2).walkable);
+    CHECK(result.at(1, 2).height == doctest::Approx(0));
+}
+
+TEST_CASE("vale's committed walkability is exactly the bake of its terrain and placed models") {
     const auto gameRoot = std::filesystem::path(FENGINE_SAMPLES) / "vale";
     const auto map = MapData::load(gameRoot / "maps/town/map.json");
+    REQUIRE_FALSE(map.bake.empty());
     AssetCache assets(gameRoot, FENGINE_LUALIB);
-    const auto model = assets.tryModel("maps/town/geometry.glb");
-    REQUIRE(model);
-    BakeOptions options;
-    const auto result = bakeWalkability(*model, map.grid, options);
-    int agree = 0, total = 0, sampled = 0;
-    for (int z = 0; z < map.grid.depth(); ++z) {
-        for (int x = 0; x < map.grid.width(); ++x) {
-            const auto& baked = result.at(x, z);
-            ++total;
-            if (!baked.hit) {
-                continue;
-            }
-            ++sampled;
-            agree += baked.walkable == map.grid.at(x, z, 0).walkable ? 1 : 0;
+    const auto scene = sceneForMap(map, assets, geometryPathOf(map));
+    CHECK(scene.problems.empty());
+    CHECK(scene.pieces.size() >= 2); // the terrain and the inn
+    const auto options = BakeOptions::fromJson(map.bake.options);
+    const auto result = bakeWalkability(scene.pieces, map.grid, options);
+    MapData baked = map;
+    applyBake(baked, result, options);
+    CHECK(baked.grid.toJson() == map.grid.toJson());
+    CHECK(baked.bake.colliders.size() == map.bake.colliders.size());
+    CHECK(bakeFingerprint(map, geometryPathOf(map), gameFileReader(gameRoot)) == map.bake.fingerprint);
+    // The inn (a 4x3 house at cells 2..5 x 2..4) blocks its cells.
+    for (int z = 2; z < 5; ++z) {
+        for (int x = 2; x < 6; ++x) {
+            CHECK_FALSE(map.grid.at(x, z, 0).walkable);
         }
     }
-    MESSAGE("vale town: " << agree << " of " << sampled << " sampled cells agree (" << total << " cells, "
-                          << result.partial << " partial, " << result.colliders.size() << " boxes)");
-    CHECK(sampled > total / 2);
-    CHECK(agree * 10 >= sampled * 9); // most of the way there; the brush does the rest
+    CHECK(map.grid.at(6, 3, 0).walkable);
+}
+
+TEST_CASE("a placed model bakes through its position, yaw and scale") {
+    ModelBuilder ground;
+    ground.floor(0, 0, 8, 6, 0);
+    ModelBuilder crate; // a 2 x 1 block, origin at the centre of its base
+    crate.box({-1, 0, -0.5f}, {1, 1.5f, 0.5f});
+    Placement p;
+    p.id = "crate";
+    p.type = "prop";
+    p.props = {{"model", "fx/crate.glb"}};
+    CHECK(bakedModelOf(p) != nullptr);
+    const auto grid = flatGrid(8, 6);
+    BakeOptions options;
+    options.blockEdges = false;
+    const auto bake = [&](glm::vec3 position, float yaw, glm::vec3 scale) {
+        p.position = position;
+        p.yaw = yaw;
+        p.scale = scale;
+        const BakePiece pieces[] = {{&ground.model, glm::mat4(1)}, {&crate.model, placementMatrix(p)}};
+        return bakeWalkability(pieces, grid, options);
+    };
+    auto result = bake({4, 0, 3.5f}, 0, glm::vec3(1));
+    CHECK_FALSE(result.at(3, 3).walkable); // x 3..5, z 3..4
+    CHECK_FALSE(result.at(4, 3).walkable);
+    CHECK(result.at(5, 3).walkable);
+    CHECK(result.at(3, 4).walkable);
+    CHECK(result.at(3, 2).walkable);
+    result = bake({3.5f, 0, 4}, 90, glm::vec3(1)); // turned: along z now
+    CHECK_FALSE(result.at(3, 3).walkable);
+    CHECK_FALSE(result.at(3, 4).walkable);
+    CHECK(result.at(4, 3).walkable);
+    CHECK(result.at(3, 5).walkable);
+    result = bake({4, 0, 4}, 0, glm::vec3(2)); // doubled: x 2..6, z 3..5
+    CHECK_FALSE(result.at(2, 3).walkable);
+    CHECK_FALSE(result.at(5, 4).walkable);
+    CHECK(result.at(6, 4).walkable);
+    CHECK(result.at(4, 2).walkable);
+    // Decoration and scripted props stay out of the bake.
+    p.props["solid"] = false;
+    CHECK(bakedModelOf(p) == nullptr);
+    p.props.erase("solid");
+    p.props["pages"] = Json::array();
+    CHECK(bakedModelOf(p) == nullptr);
+    p.props.erase("pages");
+    p.props["model"] = 3;
+    CHECK(bakedModelOf(p) == nullptr);
+}
+
+TEST_CASE("collision nodes replace the visible mesh in the bake") {
+    ModelBuilder house;
+    // The visible part: a wide roof block over cells 2..5 x 1..4, on node 0.
+    house.box({2, 0, 1}, {6, 2, 5});
+    // A hidden collision node with a small box: only cell (3, 2) blocks.
+    house.model.nodes.push_back({});
+    house.model.nodes.back().properties = {{"collision", true}};
+    house.model.restPose.push_back(glm::mat4(1));
+    house.model.order = {0, 1};
+    ModelPart collider;
+    collider.node = 1;
+    collider.hidden = true;
+    house.model.parts.push_back(collider);
+    auto& part = house.model.parts.back();
+    const auto tri = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c) { house.tri(part, a, b, c); };
+    const glm::vec3 lo(3, 0, 2), hi(4, 2, 3);
+    tri({lo.x, hi.y, lo.z}, {hi.x, hi.y, lo.z}, {hi.x, hi.y, hi.z});
+    tri({lo.x, hi.y, lo.z}, {hi.x, hi.y, hi.z}, {lo.x, hi.y, hi.z});
+    for (const auto& [a, b, c, d] : std::vector<std::array<glm::vec3, 4>>{
+             {{{lo.x, lo.y, lo.z}, {hi.x, lo.y, lo.z}, {hi.x, hi.y, lo.z}, {lo.x, hi.y, lo.z}}},
+             {{{lo.x, lo.y, hi.z}, {hi.x, lo.y, hi.z}, {hi.x, hi.y, hi.z}, {lo.x, hi.y, hi.z}}},
+             {{{lo.x, lo.y, lo.z}, {lo.x, lo.y, hi.z}, {lo.x, hi.y, hi.z}, {lo.x, hi.y, lo.z}}},
+             {{{hi.x, lo.y, lo.z}, {hi.x, lo.y, hi.z}, {hi.x, hi.y, hi.z}, {hi.x, hi.y, lo.z}}}}) {
+        tri(a, b, c);
+        tri(a, c, d);
+    }
+    CHECK(collisionParts(house.model).size() == 1);
+    CHECK(collisionParts(house.model)[0] == &house.model.parts.back());
+    ModelBuilder ground;
+    ground.floor(0, 0, 8, 6, 0);
+    const BakePiece pieces[] = {{&ground.model, glm::mat4(1)}, {&house.model, glm::mat4(1)}};
+    BakeOptions options;
+    options.blockEdges = false;
+    const auto result = bakeWalkability(pieces, flatGrid(8, 6), options);
+    CHECK_FALSE(result.at(3, 2).walkable);
+    CHECK(result.at(2, 1).walkable); // under the visible roof, but the collider does not cover it
+    CHECK(result.at(5, 4).walkable);
+    // Without collision nodes the shown parts are read, hidden ones skipped.
+    ModelBuilder plain;
+    plain.box({2, 0, 1}, {6, 2, 5});
+    plain.model.parts.push_back(ModelPart{});
+    plain.model.parts.back().hidden = true;
+    CHECK(collisionParts(plain.model).size() == 1);
+    CHECK(collisionParts(plain.model)[0] == &plain.model.parts[0]);
+}
+
+TEST_CASE("a thin wall between sample points still makes boxes, and both cells beside it stay walkable") {
+    ModelBuilder b;
+    b.floor(0, 0, 8, 6, 0);
+    b.box({3.925f, 0, 1}, {4.075f, 1, 4}); // a 0.15 fence on the boundary between cells 3 and 4
+    BakeOptions options;
+    options.blockEdges = false;
+    const auto result = bakeWalkability(b.model, flatGrid(8, 6), options);
+    CHECK(result.at(3, 2).walkable);
+    CHECK(result.at(4, 2).walkable);
+    CHECK(result.at(3, 2).partial);
+    CHECK(result.at(4, 2).partial);
+    // The quarter strips on both sides of the boundary merge into one box
+    // 3.75..4.25 wide along the fence.
+    bool strip = false;
+    for (const auto& box : result.colliders) {
+        strip |= box.min.x <= 3.76f && box.min.x >= 3.74f && box.max.x >= 4.24f && box.max.x <= 4.26f &&
+                 box.min.z <= 1.01f && box.max.z >= 3.99f;
+    }
+    CHECK(strip);
+    // A wall exactly on a cell boundary belongs to the cell it stands in, not to its neighbour.
+    ModelBuilder h;
+    h.floor(0, 0, 8, 6, 0);
+    h.box({2, 0, 1}, {4, 2, 3}); // a house on whole cells 2..3 x 1..2
+    const auto house = bakeWalkability(h.model, flatGrid(8, 6), options);
+    CHECK_FALSE(house.at(2, 1).walkable);
+    CHECK(house.at(4, 1).walkable);
+    CHECK_FALSE(house.at(4, 1).partial); // no box strip along the wall: bodies touch it
+    CHECK_FALSE(house.at(1, 2).partial);
+}
+
+TEST_CASE("a region re-bake replaces only the derived boxes inside the region and keeps authored ones") {
+    ModelBuilder ground;
+    ground.floor(0, 0, 8, 6, 0);
+    ModelBuilder post; // a half-cell post, origin at the centre of its base
+    post.box({-0.25f, 0, -0.5f}, {0.25f, 1.5f, 0.5f});
+    Placement left, right;
+    left.id = "left";
+    left.position = {1.75f, 0, 1.5f}; // covers x 1.5..2 of cell (1, 1)
+    right.id = "right";
+    right.position = {5.75f, 0, 4.5f}; // covers x 5.5..6 of cell (5, 4)
+    const auto grid = flatGrid(8, 6);
+    BakeOptions options;
+    options.blockEdges = false;
+    MapData map;
+    map.id = "regions";
+    map.grid = grid;
+    map.colliders.push_back({{6, 0, 1}, {7, 1, 2}}); // an authored wall
+    {
+        const BakePiece pieces[] = {{&ground.model, glm::mat4(1)}, {&post.model, placementMatrix(left)},
+                                  {&post.model, placementMatrix(right)}};
+        applyBake(map, bakeWalkability(pieces, grid, options), options);
+    }
+    const auto boxesNear = [&](float x, float z) {
+        return std::count_if(map.bake.colliders.begin(), map.bake.colliders.end(), [&](const Box& b) {
+            return b.min.x >= x - 1e-3f && b.max.x <= x + 1 + 1e-3f && b.min.z >= z - 1e-3f && b.max.z <= z + 1 + 1e-3f;
+        });
+    };
+    CHECK(boxesNear(1, 1) > 0);
+    CHECK(boxesNear(5, 4) > 0);
+    CHECK(map.grid.at(1, 1, 0).walkable);
+    CHECK(map.grid.at(5, 4, 0).walkable);
+    CHECK(map.colliders.size() == 1);
+    // The right post goes away: re-bake only its cells.
+    options.region = bakeRegionFor(post.model, right, grid);
+    CHECK(options.region->x <= 5);
+    CHECK(options.region->x + options.region->z > 5);
+    {
+        const BakePiece pieces[] = {{&ground.model, glm::mat4(1)}, {&post.model, placementMatrix(left)}};
+        applyBake(map, bakeWalkability(pieces, grid, options), options);
+    }
+    CHECK(boxesNear(5, 4) == 0);
+    CHECK(boxesNear(1, 1) > 0);
+    CHECK(map.grid.at(1, 1, 0).walkable);
+    CHECK(map.grid.at(7, 5, 0).walkable); // outside the region: untouched
+    CHECK(map.colliders.size() == 1);     // the authored wall stays
+    // A region's edge ring is not blocked and nothing outside it is pruned as an island.
+    int blocked = 0;
+    for (int z = 0; z < 6; ++z) {
+        for (int x = 0; x < 8; ++x) {
+            blocked += map.grid.at(x, z, 0).walkable ? 0 : 1;
+        }
+    }
+    CHECK(blocked == 0);
+}
+
+TEST_CASE("overrides round-trip through JSON and apply after a bake") {
+    MapData map;
+    map.id = "overrides";
+    map.grid = flatGrid(8, 6);
+    map.bake.options = BakeOptions{}.toJson();
+    map.bake.overrides.push_back({1, 1, 0, 2, 1, true, std::nullopt, std::nullopt, 1, {}, {}});
+    map.bake.overrides.push_back({3, 3, 0, 1, 1, std::nullopt, 0.5f, Ramp::East, 0.5f, {"encounter:slimes"}, {"water"}});
+    const auto json = map.toJson();
+    REQUIRE(json.contains("bake"));
+    CHECK(json["bake"]["overrides"][0]["w"] == 2);
+    CHECK(json["bake"]["overrides"][1]["ramp"] == "e");
+    const auto loaded = MapData::fromJson(json);
+    REQUIRE(loaded.bake.overrides.size() == 2);
+    CHECK(loaded.bake.overrides[0].walkable == true);
+    CHECK(loaded.bake.overrides[1].ramp == Ramp::East);
+    CHECK(loaded.bake.overrides[1].tags == std::vector<std::string>{"encounter:slimes"});
+    CHECK(loaded.toJson() == json);
+    // A bake over ground too steep to walk: the override opens two cells and shapes one.
+    ModelBuilder b;
+    b.rampX(0, 0, 8, 6, 0, 8); // 45 degrees everywhere: nothing is ground
+    MapData baked = loaded;
+    BakeOptions options;
+    options.blockEdges = false;
+    options.pruneIslands = false;
+    applyBake(baked, bakeWalkability(b.model, baked.grid, options), options);
+    CHECK(baked.grid.at(1, 1, 0).walkable);
+    CHECK(baked.grid.at(2, 1, 0).walkable);
+    CHECK_FALSE(baked.grid.at(3, 1, 0).walkable);
+    CHECK(baked.grid.at(3, 3, 0).height == doctest::Approx(0.5f));
+    CHECK(baked.grid.at(3, 3, 0).ramp == Ramp::East);
+    CHECK((baked.grid.at(3, 3, 0).tags & baked.grid.tagMask({"encounter:slimes"})) != 0);
+    // Outside the grid is refused like cell_props.
+    auto bad = json;
+    bad["bake"]["overrides"][0]["x"] = 7;
+    CHECK_THROWS(MapData::fromJson(bad));
+    // A map without a bake section writes none, and an unbaked blank map's section is empty.
+    MapData plain;
+    plain.id = "plain";
+    plain.grid = flatGrid(2, 2);
+    CHECK_FALSE(plain.toJson().contains("bake"));
+    CHECK(plain.bake.empty());
+}
+
+TEST_CASE("the bake fingerprint changes with placements, geometry, models and options") {
+    MapData map;
+    map.id = "fp";
+    map.geometry = "geometry.glb";
+    map.grid = flatGrid(4, 4);
+    Placement house;
+    house.id = "house";
+    house.position = {2, 0, 2};
+    house.props = {{"model", "fx/house.glb"}};
+    map.placements.push_back(house);
+    std::map<std::string, std::string> files = {{"maps/fp/geometry.glb", "terrain"}, {"fx/house.glb", "house"}};
+    const auto reader = [&](const std::string& path) -> std::optional<std::string> {
+        const auto found = files.find(path);
+        return found == files.end() ? std::nullopt : std::optional(found->second);
+    };
+    const auto base = bakeFingerprint(map, geometryPathOf(map), reader);
+    CHECK(base.size() == 16);
+    CHECK(bakeFingerprint(map, geometryPathOf(map), reader) == base);
+    map.placements[0].position.x = 3;
+    const auto moved = bakeFingerprint(map, geometryPathOf(map), reader);
+    CHECK(moved != base);
+    map.placements[0].position.x = 2;
+    files["fx/house.glb"] = "house v2";
+    CHECK(bakeFingerprint(map, geometryPathOf(map), reader) != base);
+    files["fx/house.glb"] = "house";
+    files["maps/fp/geometry.glb"] = "terrain v2";
+    CHECK(bakeFingerprint(map, geometryPathOf(map), reader) != base);
+    files["maps/fp/geometry.glb"] = "terrain";
+    map.bake.options = BakeOptions{}.toJson();
+    CHECK(bakeFingerprint(map, geometryPathOf(map), reader) != base);
+    map.bake.options = Json::object();
+    // Placements the bake does not read leave it alone.
+    Placement npc;
+    npc.id = "npc";
+    npc.props = {{"sprite", "sprites/elder.anim.json"}};
+    map.placements.push_back(npc);
+    CHECK(bakeFingerprint(map, geometryPathOf(map), reader) == base);
+    // The stored options round-trip.
+    BakeOptions o;
+    o.samples = 8;
+    o.minCoverage = 0.5f;
+    o.boxDrops = false;
+    const auto back = BakeOptions::fromJson(o.toJson());
+    CHECK(back.samples == 8);
+    CHECK(back.minCoverage == doctest::Approx(0.5f));
+    CHECK_FALSE(back.boxDrops);
+    CHECK(back.clearance == doctest::Approx(1.6f));
+}
+
+TEST_CASE("undo restores the derived boxes together with the placement edit") {
+    Worlds w;
+    MapEditHistory history;
+    history.apply(w.field, [](MapData& m) {
+        m.placements.push_back(Placement{"crate", "prop", {4.5f, 0, 6.5f}});
+        m.bake.colliders.push_back({{4, 0, 6}, {5, 1, 7}});
+        m.bake.fingerprint = "abc";
+    });
+    CHECK(w.field.map().bake.colliders.size() == 1);
+    CHECK(w.field.boxBlockedCells().contains(cellKey({4, 6, 0})));
+    REQUIRE(history.undo(w.field));
+    CHECK(w.field.authored().bake.colliders.empty());
+    CHECK(w.field.map().bake.colliders.empty());
+    CHECK_FALSE(w.field.boxBlockedCells().contains(cellKey({4, 6, 0})));
+    REQUIRE(history.redo(w.field));
+    CHECK(w.field.map().bake.colliders.size() == 1);
 }
 
 // --- Sprite sheet builder -----------------------------------------------------
@@ -1211,6 +1604,30 @@ TEST_CASE("the sprite sheet builder describes a uniform sheet the way fengine_as
 
 #include "engine/editor/MapFiles.h"
 
+TEST_CASE("a new map stands on a ground quad that bakes walkable") {
+    const auto blank = makeBlankMap("quad_test", "Quad", 6, 4);
+    CHECK_FALSE(blank.bake.empty());
+    CHECK(blank.bake.autoBake);
+    CHECK(blank.bake.fingerprint.empty());
+    const auto scratch = std::filesystem::temp_directory_path() / "fengine-ground-quad";
+    std::filesystem::remove_all(scratch);
+    std::filesystem::create_directories(scratch / "maps");
+    writeMap(scratch, blank);
+    const auto written = MapData::load(scratch / "maps/quad_test/map.json");
+    CHECK(written.geometry == "geometry.gltf");
+    const auto model = Model::load(scratch / "maps/quad_test/geometry.gltf");
+    REQUIRE(model.parts.size() == 1);
+    CHECK(model.parts[0].indices.size() == 6);
+    CHECK(model.max.x == doctest::Approx(6));
+    CHECK(model.max.z == doctest::Approx(4));
+    BakeOptions options = BakeOptions::fromJson(written.bake.options);
+    const auto result = bakeWalkability(model, written.grid, options);
+    CHECK(result.unsampled == 0);
+    CHECK(result.at(2, 1).walkable);
+    CHECK_FALSE(result.at(0, 0).walkable); // the edge ring
+    std::filesystem::remove_all(scratch);
+}
+
 TEST_CASE("map files: blank maps, copies, renames and deletions in a scratch game folder") {
     const auto root = std::filesystem::temp_directory_path() / "fengine-mapfiles-test";
     std::filesystem::remove_all(root);
@@ -1233,10 +1650,10 @@ TEST_CASE("map files: blank maps, copies, renames and deletions in a scratch gam
     CHECK(mapExists(root, "cellar"));
     const auto loaded = MapData::load(root / "maps/cellar/map.json");
     CHECK(loaded.name == "The Cellar");
-    // Without geometry the map gets an empty scene the engine can load.
+    // Without geometry the map gets a flat ground quad the engine can load.
     CHECK(loaded.geometry == "geometry.gltf");
     const auto placeholder = Model::load(root / "maps/cellar/geometry.gltf");
-    CHECK(placeholder.parts.empty());
+    CHECK(placeholder.parts.size() == 1);
     {
         AssetCache assets(root, FENGINE_LUALIB);
         World world("blank", loaded, assets, 1);

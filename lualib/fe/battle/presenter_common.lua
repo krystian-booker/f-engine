@@ -1,12 +1,11 @@
---- Helpers shared by the side-view and tactical presenters (and useful to
---- a game's own): damage popups, banners with a timeout, hit flashes, KO
+--- Helpers for the side-view presenter (and useful to a game's own): damage popups, banners with a timeout, hit flashes, KO
 --- fades, the once-only close guard, result popups that handle missed and
 --- nullified (cancelled) results, reward and level-up texts, and waits
 --- scaled by the battle speed (Battle.speed).
 ---
 --- A presenter using these keeps `popups` (a list) and a banner field;
 --- `common.result_popups` reads `fe.battle.*` texts unless given another
---- prefix (the tactical presenter uses `fe.tactics.*`).
+--- prefix.
 local Battle = require("fe.battle.core")
 local data = require("fe.data")
 local i18n = require("fe.i18n")
@@ -25,15 +24,11 @@ local common = {
   },
 }
 
--- Texts both presenters show, defined once: the side-view reads them as
--- fe.battle.*, the tactical presenter as fe.tactics.* (its prefix).
-local shared = { miss = "Miss", nullified = "Nullified", counters = "{name} counters!" }
 i18n.defaults({ fe = {
-  battle = tablex.merge({ exp_gain = "+{exp} EXP", ambush = "Ambush!",
-    preemptive = "Pre-emptive strike!", level_up = "{name} reached level {level}!", learned = "  Learned {skill}",
-    victory = "Victory!", rewards = "{exp} EXP   {money} {currency}", jp = "{jp} JP", found = "Found {item}" },
-    shared),
-  tactics = shared,
+  battle = { exp_gain = "+{exp} EXP", ambush = "Ambush!", miss = "Miss", nullified = "Nullified",
+    counters = "{name} counters!", preemptive = "Pre-emptive strike!", level_up = "{name} reached level {level}!",
+    learned = "  Learned {skill}", victory = "Victory!", rewards = "{exp} EXP   {money} {currency}", jp = "{jp} JP",
+    found = "Found {item}" },
 } })
 
 --- Wait `seconds` of battle time: divided by the battle speed.

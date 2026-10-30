@@ -245,6 +245,8 @@ public:
 #if FENGINE_DEV
         editor_.attach(frame_);
         editor_.setWindow(window_.native());
+        engine_.editorHooks().leaveMap = [this](const std::string& world) { return editor_.requestLeaveMap(world); };
+        engine_.editorHooks().leaveResult = [this] { return editor_.leaveMapResult(); };
         if (!options.userData.empty()) {
             editor_.setLayoutFile(options.userData / "editor.ini");
         }

@@ -139,7 +139,7 @@ An opaque battle scene or `blocks_update` alone does not stop engine world ticks
 
 The source initializes six moving pursuer units plus the commander. Import their path instructions, waits and collision callbacks rather than spawning arbitrary waves. If a group loses, resolve the source retreat/remaining-group behavior and return control to an eligible group. If a pursuer reaches Terra, run the failure sequence and offer retry from the defense checkpoint. Commander victory cancels every pursuit task before the rescue aftermath begins. Simultaneous contact, switching and commander defeat must resolve once, in a defined tick order.
 
-This is a field defense with side-view battles. The engine's grid-tactics kit is useful reference code, but substituting a turn-based tactical battle would change the requested gameplay.
+This is a field defense with side-view battles; substituting a turn-based tactical battle would change the requested gameplay.
 
 ## 8 Engine support and gaps
 

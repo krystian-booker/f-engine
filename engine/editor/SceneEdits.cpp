@@ -1,4 +1,5 @@
 #include "engine/editor/SceneEdits.h"
+#include "engine/assets/Model.h"
 #include "engine/editor/MapEdits.h"
 #include "engine/world/World.h"
 #include <algorithm>
@@ -23,6 +24,24 @@ glm::vec3 snapToStep(glm::vec3 position, float step) {
         return position;
     }
     return glm::round(position / step) * step;
+}
+
+glm::ivec2 footprintCells(const Model& model, const Placement& placement) {
+    const auto box = boxForModel(model, placement);
+    return {std::max(1, static_cast<int>(std::round(box.max.x - box.min.x))),
+            std::max(1, static_cast<int>(std::round(box.max.z - box.min.z)))};
+}
+
+glm::vec3 snapForFootprint(const Grid& grid, glm::vec3 point, glm::ivec2 footprint, int layer) {
+    const auto axis = [](float value, int cells) {
+        return cells % 2 == 0 ? std::round(value) : std::floor(value) + 0.5f;
+    };
+    const glm::vec2 snapped(axis(point.x, footprint.x), axis(point.z, footprint.y));
+    const int l = std::clamp(layer, 0, std::max(0, grid.layerCount() - 1));
+    const glm::vec2 inside(std::clamp(snapped.x, 0.0f, static_cast<float>(grid.width()) - 0.01f),
+                           std::clamp(snapped.y, 0.0f, static_cast<float>(grid.depth()) - 0.01f));
+    const float y = grid.contains(floorCell(inside.x), floorCell(inside.y), l) ? grid.heightAt(inside, l) : 0.0f;
+    return {snapped.x, y, snapped.y};
 }
 
 std::string uniquePlacementId(const std::string& prefix, const std::vector<Placement>& placements) {
@@ -58,7 +77,8 @@ std::string stemOf(const std::string& path) {
 } // namespace
 
 std::optional<Placement> placementForAsset(AssetKind kind, const std::string& path, GridPos cell, const Grid& grid,
-                                           const std::string& defaultType, const std::vector<Placement>& existing) {
+                                           const std::string& defaultType, const std::vector<Placement>& existing,
+                                           const Model* model, std::optional<glm::vec3> point) {
     Placement p;
     switch (kind) {
     case AssetKind::Sprite:
@@ -72,8 +92,10 @@ std::optional<Placement> placementForAsset(AssetKind kind, const std::string& pa
     default: return std::nullopt;
     }
     p.id = uniquePlacementId(stemOf(path), existing);
-    p.position = cellCentre(grid, cell);
     p.layer = std::clamp(cell.layer, 0, std::max(0, grid.layerCount() - 1));
+    p.position = kind == AssetKind::Model && model && point
+                     ? snapForFootprint(grid, *point, footprintCells(*model, p), p.layer)
+                     : cellCentre(grid, cell);
     return p;
 }
 

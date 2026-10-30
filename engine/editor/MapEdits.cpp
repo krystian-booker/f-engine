@@ -81,7 +81,7 @@ void MapEditHistory::restore(World& world, const Json& snapshot) {
     auto restored = MapData::fromJson(snapshot);
     const auto current = world.authored().toJson();
     auto changed = [&](const char* section) {
-        return snapshot.at(section) != current.at(section);
+        return snapshot.value(section, Json()) != current.value(section, Json());
     };
     auto& live = world.map();
     if (changed("name")) {
@@ -110,6 +110,9 @@ void MapEditHistory::restore(World& world, const Json& snapshot) {
     }
     if (changed("colliders")) {
         live.colliders = restored.colliders;
+    }
+    if (changed("bake")) {
+        live.bake = restored.bake;
     }
     if (changed("environment")) {
         live.environment = restored.environment;
@@ -155,6 +158,27 @@ bool MapEditHistory::redo(World& world) {
     stacks.redo.pop_back();
     stacks.undo.push_back(std::move(current));
     return true;
+}
+
+void MapEditHistory::markSaved(World& world) {
+    auto& stacks = stacksFor(world, false);
+    stacks.saved = world.authored().toJson();
+    if (stacks.undo.empty() && stacks.redo.empty()) {
+        stacks.head = *stacks.saved; // a fresh stack: sync() compares against it
+        stacks.headStale = false;
+    }
+}
+
+bool MapEditHistory::unsaved(const World& world) const {
+    const auto found = stacks_.find(key(world));
+    if (found == stacks_.end()) {
+        return false;
+    }
+    const auto& stacks = found->second;
+    if (!stacks.saved) {
+        return !stacks.undo.empty();
+    }
+    return stacks.headStale || stacks.head != *stacks.saved;
 }
 
 std::size_t MapEditHistory::undoCount(const World& world) const {
@@ -294,9 +318,6 @@ bool tryMerge(const Box& a, const Box& b, Box& out) {
     }
     return false;
 }
-float snapStep(float value) {
-    return std::round(value / BlockStep) * BlockStep;
-}
 } // namespace
 
 std::vector<Box> mergeBoxes(std::vector<Box> boxes) {
@@ -323,60 +344,28 @@ std::vector<Box> mergeBoxes(std::vector<Box> boxes) {
     return boxes;
 }
 
-bool paintBlock(MapData& map, glm::vec2 position, int layer, float height, bool add) {
-    auto& grid = map.grid;
-    if (layer < 0 || layer >= grid.layerCount() || height <= 0) {
-        return false;
+std::vector<Box> cutBox(const Box& box, glm::vec2 lo, glm::vec2 hi) {
+    std::vector<Box> pieces;
+    if (!(box.min.x < hi.x - 1e-4f && box.max.x > lo.x + 1e-4f && box.min.z < hi.y - 1e-4f &&
+          box.max.z > lo.y + 1e-4f)) {
+        pieces.push_back(box); // beside the rectangle: whole
+        return pieces;
     }
-    const glm::vec2 lo(std::floor(position.x / BlockStep) * BlockStep, std::floor(position.y / BlockStep) * BlockStep);
-    const glm::vec2 hi = lo + glm::vec2(BlockStep);
-    const glm::vec2 centre = (lo + hi) * 0.5f;
-    if (!grid.inRange(floorCell(centre.x), floorCell(centre.y), layer)) {
-        return false;
+    // Left and right of the rectangle (full depth), then front and back (within its x span).
+    if (box.min.x < lo.x - 1e-4f) {
+        pieces.push_back({box.min, {lo.x, box.max.y, box.max.z}});
     }
-    const float surface = grid.heightAt(centre, layer);
-    if (add) {
-        const Box square{{lo.x, snapStep(surface) - 0.05f, lo.y}, {hi.x, snapStep(surface) + height, hi.y}};
-        for (const auto& box : map.colliders) {
-            if (box.min.x <= lo.x + 1e-4f && box.max.x >= hi.x - 1e-4f && box.min.z <= lo.y + 1e-4f &&
-                box.max.z >= hi.y - 1e-4f && box.min.y <= square.min.y + 1e-4f && box.max.y >= square.max.y - 1e-4f) {
-                return false; // already covered
-            }
-        }
-        map.colliders.push_back(square);
-        map.colliders = mergeBoxes(std::move(map.colliders));
-        return true;
+    if (box.max.x > hi.x + 1e-4f) {
+        pieces.push_back({{hi.x, box.min.y, box.min.z}, box.max});
     }
-    // Erase: cut every box covering the square into the parts around it.
-    std::vector<Box> result;
-    bool changed = false;
-    for (const auto& box : map.colliders) {
-        const bool covers = box.min.x < hi.x - 1e-4f && box.max.x > lo.x + 1e-4f && box.min.z < hi.y - 1e-4f &&
-                            box.max.z > lo.y + 1e-4f && box.max.y > surface + 0.01f;
-        if (!covers) {
-            result.push_back(box);
-            continue;
-        }
-        changed = true;
-        // Left and right of the square (full depth), then front and back (within its x span).
-        if (box.min.x < lo.x - 1e-4f) {
-            result.push_back({box.min, {lo.x, box.max.y, box.max.z}});
-        }
-        if (box.max.x > hi.x + 1e-4f) {
-            result.push_back({{hi.x, box.min.y, box.min.z}, box.max});
-        }
-        const float x0 = std::max(box.min.x, lo.x), x1 = std::min(box.max.x, hi.x);
-        if (box.min.z < lo.y - 1e-4f) {
-            result.push_back({{x0, box.min.y, box.min.z}, {x1, box.max.y, lo.y}});
-        }
-        if (box.max.z > hi.y + 1e-4f) {
-            result.push_back({{x0, box.min.y, hi.y}, {x1, box.max.y, box.max.z}});
-        }
+    const float x0 = std::max(box.min.x, lo.x), x1 = std::min(box.max.x, hi.x);
+    if (box.min.z < lo.y - 1e-4f) {
+        pieces.push_back({{x0, box.min.y, box.min.z}, {x1, box.max.y, lo.y}});
     }
-    if (changed) {
-        map.colliders = mergeBoxes(std::move(result));
+    if (box.max.z > hi.y + 1e-4f) {
+        pieces.push_back({{x0, box.min.y, hi.y}, {x1, box.max.y, box.max.z}});
     }
-    return changed;
+    return pieces;
 }
 
 Box boxForModel(const Model& model, const Placement& placement, float margin) {
@@ -488,35 +477,7 @@ int importMarkers(MapData& map, const Model& model, std::vector<std::string>& pr
     int imported = 0;
     for (const auto& marker : model.markers) {
         const auto& props = marker.properties;
-        if (props.contains("collision") && marker.hasBounds) {
-            const auto config = props.at("collision").is_object() ? props.at("collision") : Json::object();
-            const auto layer = config.value("layer", 0);
-            if (config.value("box", false)) {
-                // The exact box, for objects smaller than a cell: bodies are
-                // blocked by it and routes avoid the cells its centre covers.
-                map.colliders.push_back({marker.min, marker.max});
-                map.colliders = mergeBoxes(std::move(map.colliders));
-                ++imported;
-            } else if (layer < 0 || layer >= grid.layerCount()) {
-                problems.push_back(marker.name + ": collision layer " + std::to_string(layer) +
-                                   " does not exist");
-            } else {
-                const bool walkable = config.value("walkable", false);
-                const float height = config.value("height", marker.max.y);
-                for (int z = std::max(0, floorCell(marker.min.z));
-                     z < std::min(grid.depth(), ceilCell(marker.max.z)); ++z) {
-                    for (int x = std::max(0, floorCell(marker.min.x));
-                         x < std::min(grid.width(), ceilCell(marker.max.x)); ++x) {
-                        auto& cell = grid.at(x, z, layer);
-                        cell.walkable = walkable;
-                        if (walkable) {
-                            cell.height = height;
-                        }
-                    }
-                }
-                ++imported;
-            }
-        }
+        // `collision` nodes are the walkability bake's business (WalkBake.h), not a marker.
         if (props.contains("spawn")) {
             const auto name =
                 props.at("spawn").is_string() ? props.at("spawn").get<std::string>() : marker.name;

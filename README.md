@@ -2,19 +2,11 @@
 
 A C++20 engine for HD-2D role-playing games: pixel-art sprites standing in lit 3D dioramas, with every game rule written in Lua.
 
-The C++ engine provides **services only**: windowing, input action maps, a 3D world of entities (sprites, meshes, lights, particles) with HD-2D post-processing (mip-chain bloom, depth-aware depth of field, ambient occlusion, distortion, FXAA, game post shaders), several views per frame (screen rects and render targets), freeze-frame transitions, grid navigation and tactical queries, 2D canvas drawing, text layout, audio, saves, hot reload, replays and an in-game editor. It contains no JRPG concepts. HP, parties, items, battles, menus, shops, quests and encounters are Lua. `tools/ci/check_boundary.py` enforces this in CI.
+The C++ engine provides **services only**: windowing, input action maps, a 3D world of entities (sprites, meshes, lights, particles) with HD-2D post-processing (mip-chain bloom, depth-aware depth of field, ambient occlusion, distortion, FXAA, game post shaders), several views per frame (screen rects and render targets), freeze-frame transitions, grid navigation, 2D canvas drawing, text layout, audio, saves, hot reload, replays and an in-game editor. It contains no JRPG concepts. HP, parties, items, battles, menus, shops, quests and encounters are Lua. `tools/ci/check_boundary.py` enforces this in CI.
 
-The engine ships a Lua library of replaceable kits in `lualib/fe/`. It covers the field, events, cutscenes (fast-forward and skip), dialogue (voice-over, lip-flap, auto-advance), UI widgets and default screens with toasts, per-controller button glyphs and accessibility settings, NPC followers, multi-protagonist chapters, an RPG data model, an effect pipeline, and battle cores with ATB, round-order and initiative schedulers, side-view and grid-tactics presentations. A game can use the kits, extend them through hooks, override any module by adding a file with the same path, or ignore them.
+The engine ships a Lua library of replaceable kits in `lualib/fe/`. It covers the field, events, cutscenes (fast-forward and skip), dialogue (voice-over, lip-flap, auto-advance), UI widgets and default screens with toasts, per-controller button glyphs and accessibility settings, NPC followers, multi-protagonist chapters, an RPG data model, an effect pipeline, and a battle core with ATB and round-order schedulers and a side-view presentation. A game can use the kits, extend them through hooks, override any module by adding a file with the same path, or ignore them.
 
-Three original samples show the range:
-
-| Sample | Shows |
-| --- | --- |
-| `samples/vale` | Classic town and dungeon, quests (with update toasts), shops, inn, side-view **ATB** battles with scripted enemy AI |
-| `samples/wayfarers` | Octopath-style round-order battles (commands chosen on each turn, this-round and next-round turn preview), **weakness shields / break** and a **boost** resource (the kit's `fe.battle.break`), **divine skills** paid from a limit gauge (`fe.battle.limit`), custom stats, NPC verbs (including guiding a townsperson as a follower), two protagonists with chapters and a chapter select, a world map, an Octopath II-style day/night switch |
-| `samples/ridgeline` | A **council vote** with persuasion and branching flags, then a **grid tactics** battle: deployment, height, facing, terrain reactions (spreading grass fires, freezing or electrified water), knockback, **destructible barricades**, **reinforcements**, **ripostes** and objectives |
-
-None of the sample mechanics touch `engine/`.
+One original sample, `samples/vale`, shows the range: a classic town and dungeon, quests (with update toasts), shops, an inn, side-view **ATB** battles with scripted enemy AI, and a rendering showcase (`fx/showcase.lua`, run by `replays/render.json`) with normal-mapped crates and sprites, game shaders, shadow-casting lights and reflective water. None of its mechanics touch `engine/`.
 
 ## Build and run
 
@@ -66,14 +58,14 @@ return require("fe.starter").main({
 ```
 
 - [Architecture](docs/architecture.md): the engine/library/game layers and how a frame runs.
-- [Scripting](docs/scripting.md): tasks, scenes, the field, events, battles, effects and tactics in Lua.
+- [Scripting](docs/scripting.md): tasks, scenes, the field, events, battles and effects in Lua.
 - [Authoring](docs/authoring.md): the game folder, maps, Blender, sprites, data tables and the editor.
 - [Editor guide](docs/editor.md): building a scene with the F1 editor, for artists and designers.
 - [Lua API reference](docs/api.md): every engine binding (generated; `lualib/types/fengine.d.lua` is the LuaLS stub).
 - [Build, test and ship](docs/verification.md): tests, replays, CI and packaging.
 - [Debugging](docs/debugging.md): the error overlay, console and tests, and the VS Code debugger evaluation.
 
-Sample art and audio are generated placeholders. `python3 tools/generate_samples.py <vale|wayfarers|ridgeline|fixture>` regenerates them.
+Sample art and audio are generated placeholders. `python3 tools/generate_samples.py <vale|fixture> --headless build/fengine_headless` regenerates them and bakes the maps' walkability.
 
 ## Ship
 

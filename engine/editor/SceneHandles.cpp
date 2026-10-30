@@ -219,6 +219,11 @@ void buildHandles(World& world, const HandleOptions& options, const Selection& p
             addBoxLines(out, b.min, b.max, em(self, ColliderColor), th(self));
         }
     }
+    if (options.bakedBoxes) {
+        for (const auto& b : map.bake.colliders) {
+            addBoxLines(out, b.min, b.max, BakedBoxColor, 1);
+        }
+    }
     auto& registry = world.registry();
     if (options.triggers) {
         for (const auto [entity, transform, collider] : registry.view<Transform, Collider>().each()) {

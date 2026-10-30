@@ -115,10 +115,12 @@ void updateZones(entt::registry& registry, const std::vector<Zone>& zones, Event
 // The cells a body planning a route cannot pass through because a static box
 // stands on them: a box blocks a cell (on a layer) when it covers the disc of
 // `radius` around the cell's centre and its vertical span meets a body of
-// `bodyHeight` standing on the cell's surface, above the step it can climb.
+// `bodyHeight` standing on the cell's surface, with its top above the surface
+// plus `stepUp` (0: any box that rises out of the floor, as blockedByBox stops
+// a body at any such box; a box flush with the floor is not an obstacle).
 // Routes avoid these cells (StepRules::blocked); a box that covers only a
 // corner of a cell leaves the centre free, and bodies slide along it.
 [[nodiscard]] std::unordered_set<std::int64_t> boxBlockedCells(const Grid& grid, const std::vector<Box>& boxes,
-                                                               float radius = 0.3f, float stepUp = 0.5f,
+                                                               float radius = 0.3f, float stepUp = 0.0f,
                                                                float bodyHeight = 1.5f);
 } // namespace fe

@@ -33,6 +33,17 @@ void Editor::attach(FrameRenderer& frame) {
     gpu_ = &frame.gpu();
 }
 
+Editor::~Editor() {
+    if (ImGui::GetCurrentContext() == nullptr) {
+        return;
+    }
+    auto& io = ImGui::GetIO();
+    if (!layoutFile_.empty() && io.IniFilename == layoutFile_.c_str()) {
+        ImGui::SaveIniSettingsToDisk(layoutFile_.c_str());
+    }
+    io.IniFilename = nullptr;
+}
+
 void Editor::toggle() {
     open_ = !open_;
     if (open_) {
@@ -40,6 +51,12 @@ void Editor::toggle() {
         setMode(mode_);
     } else {
         close();
+        if (leavePending_ && mapDialog_.cancelled) {
+            // F1 over the leave-map prompt: the same as Cancel, so the waiting warp is answered.
+            auto cancelled = std::move(mapDialog_.cancelled);
+            mapDialog_ = {};
+            cancelled();
+        }
     }
 }
 
@@ -89,6 +106,52 @@ void Editor::setMode(Mode mode) {
         gridOverlayKey_.clear();
         zoneOverlayKey_.clear();
     }
+}
+
+std::string Editor::requestLeaveMap(const std::string& worldName) {
+    if (leavePending_) {
+        return "pending";
+    }
+    const auto w = engine_.world(worldName);
+    if (!w || !history_.unsaved(*w)) {
+        return "ok";
+    }
+    // Edits would be lost with the world: ask, in Edit mode (the game pauses
+    // meanwhile; a modal only shows there), and go back to playing afterwards
+    // unless the author stays to keep editing.
+    const bool wasOpen = open_;
+    const auto previous = mode_;
+    if (!wasOpen) {
+        toggle();
+    }
+    setMode(Mode::Edit);
+    leavePending_ = true;
+    leaveResult_.reset();
+    // Afterwards the author is back where the prompt found them: in the game
+    // with the editor closed, playing with it open, or editing.
+    const auto restore = [this, wasOpen, previous] {
+        leavePending_ = false;
+        if (!wasOpen) {
+            if (open_) {
+                toggle();
+            }
+        } else if (previous == Mode::Play) {
+            setMode(Mode::Play);
+        }
+    };
+    mapDialog_ = {};
+    mapDialog_.kind = MapDialog::Kind::Unsaved;
+    mapDialog_.what = "The game is leaving this map (a door or a zone). Leave it";
+    mapDialog_.then = [this, restore] {
+        leaveResult_ = "continue";
+        restore();
+    };
+    mapDialog_.cancelled = [this, restore] {
+        leaveResult_ = "cancel";
+        status_ = "Stayed on the map with its edits; that warp was dropped";
+        restore();
+    };
+    return "pending";
 }
 
 bool Editor::capturesInput() const {
@@ -179,6 +242,9 @@ const Json* Editor::fieldsFor(const std::string& type, std::initializer_list<con
 }
 
 void Editor::edit(World& w, const std::function<void(MapData&)>& change) {
+    if (!gesture_ && !gestureBakeSnapshot_) {
+        gestureBakeSnapshot_ = bakedPlacementsJson(w.authored());
+    }
     history_.apply(w, change, !gesture_);
     gesture_ = true;
     ++revision_;
@@ -203,6 +269,7 @@ void Editor::saveMap(World& w) {
         const auto json = w.authored().toJson();
         MapData::fromJson(json); // validate before writing
         writeJson(resolveInside(engine_.lua().gameRoot(), "maps/" + w.authored().id + "/map.json"), json);
+        history_.markSaved(w);
         status_ = "Saved maps/" + w.authored().id + "/map.json";
     } catch (const std::exception& error) {
         status_ = std::string("Not saved: ") + error.what();
@@ -807,6 +874,7 @@ void Editor::dropFile(const std::filesystem::path& file, glm::vec2 windowPoint) 
 void Editor::draw(const EditorFrame& frame) {
     if (!open_) {
         droppedFiles_.clear();
+        runScript(); // a walkthrough keeps going while the editor is closed (F1, a leave-map prompt's answer)
         return;
     }
     alpha_ = frame.alpha;
@@ -822,6 +890,15 @@ void Editor::draw(const EditorFrame& frame) {
             for (const auto& id : pending) {
                 placementChanged(*w, id);
             }
+        }
+    }
+    if (!gesture_ && !gizmoUsing_ && !groundDragging_ && gestureBakeSnapshot_) {
+        // The edit (or the gesture of edits) is complete: derive walkability
+        // again where a placed model changed.
+        if (const auto w = world()) {
+            autoRebake(*w);
+        } else {
+            gestureBakeSnapshot_.reset();
         }
     }
     // Games register tables and types while starting; look again until they have.

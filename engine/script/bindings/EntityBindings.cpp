@@ -424,7 +424,7 @@ template<class T, class Set, class Read> auto component(const char* name, Set se
 }
 
 // A waypoint from a cell ({x, z, layer?}: its centre, on the grid) or a point
-// ({x, y, z}). Cells from world:path/reachable keep their jump/climb marks.
+// ({x, y, z}). Cells from world:path keep their jump/climb marks.
 Waypoint waypointFrom(const Grid& grid, const sol::object& value, std::optional<int> layer) {
     const auto t = lua::vectorTable(value, "a cell {x, z, layer} or a point {x, y, z}");
     Waypoint waypoint;
@@ -671,9 +671,9 @@ void bindEntity(Engine& engine) {
             "`move_to(nil, {path = cells})`. The target layer defaults to the current one if "
             "walkable there, else the walkable layer whose surface is nearest the target's y. `path` may "
             "instead be a list of cells ({x, z, layer}: walked through their centres) or points ({x, y, z}) "
-            "to follow as given, then `target` if any; cells marked `jump` or `climb` (from world:path or "
-            "world:reachable) are jumped to or climbed. `rules` are the planning rules of world:path "
-            "(diagonal, blocked_tags, required_tags, tag_costs, blocked, no_stop, zoc, jump, ladders, cost) "
+            "to follow as given, then `target` if any; cells marked `jump` or `climb` (from world:path) "
+            "are jumped to or climbed. `rules` are the planning rules of world:path "
+            "(diagonal, blocked_tags, required_tags, blocked, jump, ladders, cost) "
             "for the built-in planner; without them it plans 8-directional with the mover's limits and "
             "its own blocked_tags/required_tags. Emits "
             "'arrived' once at the end, or 'blocked' (at once when no path exists or the search stops at "

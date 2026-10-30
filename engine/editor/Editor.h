@@ -75,15 +75,27 @@ struct EditorFrame {
 // Map edits change a world's authored map and its live map together; Save
 // writes the authored map, so run-time changes scripts make never reach the
 // file. Undo and redo are kept per world and map.
+// The placements a map's walkability bake reads (Editor::autoRebake compares them).
+[[nodiscard]] Json bakedPlacementsJson(const MapData& map);
+
 class Editor {
 public:
     enum class Mode { Edit, Play };
     enum class Tool { Select, Translate, Rotate, Scale, Paint };
 
     explicit Editor(Engine& engine);
+    // Writes the dock layout and detaches it from ImGui: the context outlives
+    // the editor and would otherwise save through a pointer into this object.
+    ~Editor();
     void toggle();
     [[nodiscard]] bool open() const { return open_; }
     [[nodiscard]] bool paused() const { return open_ && paused_; }
+    // The game is about to leave `worldName`'s map (a door, a zone). With
+    // unsaved edits the editor switches to Edit mode and asks (save, discard
+    // or stay) and answers "pending"; otherwise "ok". leaveMapResult() then
+    // holds "continue" or "cancel" until the next request.
+    std::string requestLeaveMap(const std::string& worldName);
+    [[nodiscard]] std::optional<std::string> leaveMapResult() const { return leaveResult_; }
     // True when the editor is using the keyboard or mouse (the game should
     // not): in Edit mode always, in Play mode when an ImGui widget has them.
     [[nodiscard]] bool capturesInput() const;
@@ -243,7 +255,15 @@ private:
     void drawMapTab();
     void drawPaint(World& world);
     void drawWalkability(World& world);
-    void drawBakeDialog(World& world);
+    void drawBakeOptions(World& world);
+    // Re-derives walkability (region: only those cells) with the map's stored
+    // options, or with `options` as given; `joinGesture` makes the bake part of
+    // the undo step the edit that caused it made.
+    void rebake(World& world, std::optional<glm::ivec4> region, bool joinGesture);
+    void rebake(World& world, const BakeOptions& options, bool joinGesture, bool storeOptions);
+    // After a gesture: re-bakes around the baked placements it changed (Auto bake).
+    void autoRebake(World& world);
+    void refreshBakeStatus(World& world);
     void drawLinks(World& world);
     void drawEnvironment(World& world);
     void importMarkers(World& world);
@@ -274,13 +294,17 @@ private:
     int brushRadius_ = 0, layer_ = 0;
     enum class BrushShape { Single, Rectangle, Flood };
     BrushShape brushShape_ = BrushShape::Single;
-    bool blockBrush_ = false, blockErase_ = false, showBoxBlocked_ = true;
-    float blockHeight_ = 1;
+    bool clearOverrides_ = false; // the brush hands cells back to the bake
+    bool showBoxBlocked_ = true, showOverrides_ = true;
     std::optional<GridPos> fillStart_;
-    BakeOptions bakeOptions_;
-    std::optional<BakeResult> bakePreview_;
-    bool bakeDialog_ = false;
-    std::string bakeSummary_;
+    BakeOptions bakeOptions_; // the Bake options popup's working copy
+    bool bakeStale_ = false;  // the bake's inputs changed since it ran
+    std::string bakeStatus_;
+    std::uint64_t bakeStatusRevision_ = ~std::uint64_t{0};
+    std::string bakeStatusWorld_;
+    // The placements the bake reads, as they were when the current gesture's
+    // first edit happened; a change re-bakes the cells they cover.
+    std::optional<Json> gestureBakeSnapshot_;
     std::uint64_t revision_ = 0;
     std::string gridOverlayKey_, zoneOverlayKey_;
     // Scene viewport
@@ -300,8 +324,11 @@ private:
         Kind kind = Kind::None;
         std::string id, name, geometry, problem, what;
         int width = 20, depth = 16;
-        std::function<void()> then; // the action an Unsaved prompt guards
+        std::function<void()> then;      // the action an Unsaved prompt guards
+        std::function<void()> cancelled; // Cancel or Escape on an Unsaved prompt
     } mapDialog_;
+    bool leavePending_ = false; // a scripted map change waits on the Unsaved prompt
+    std::optional<std::string> leaveResult_;
     std::vector<std::string> pendingRespawns_; // placement ids to respawn when the gesture ends
     // Data editor
     std::string dataTable_;

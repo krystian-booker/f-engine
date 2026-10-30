@@ -603,6 +603,56 @@ MapData MapData::fromJson(const Json& j) {
         }
         m.colliders.push_back(box);
     }
+    if (const auto bake = j.find("bake"); bake != j.end() && bake->is_object()) {
+        m.bake.autoBake = bake->value("auto", true);
+        m.bake.fingerprint = bake->value("fingerprint", std::string());
+        m.bake.options = bake->value("options", Json::object());
+        for (const auto& c : bake->value("colliders", Json::array())) {
+            Box box{jsonVec3(c.at("min")), jsonVec3(c.at("max"))};
+            if (glm::any(glm::greaterThan(box.min, box.max))) {
+                throw std::runtime_error("Baked collider min must not exceed max");
+            }
+            m.bake.colliders.push_back(box);
+        }
+        for (const auto& o : bake->value("overrides", Json::array())) {
+            CellOverride over;
+            over.x = o.at("x");
+            over.z = o.at("z");
+            over.layer = o.value("layer", 0);
+            over.w = o.value("w", 1);
+            over.d = o.value("d", 1);
+            const auto where = "Bake override at (" + std::to_string(over.x) + ", " + std::to_string(over.z) + ")";
+            if (over.w < 1 || over.d < 1 || !m.grid.inRange(over.x, over.z, over.layer) ||
+                !m.grid.inRange(over.x + over.w - 1, over.z + over.d - 1, over.layer)) {
+                throw std::runtime_error(where + " lies outside the grid");
+            }
+            if (o.contains("walkable")) {
+                over.walkable = o.at("walkable").get<bool>();
+            }
+            if (o.contains("height")) {
+                over.height = o.at("height").get<float>();
+            }
+            if (o.contains("ramp")) {
+                const auto name = o.at("ramp").get<std::string>();
+                const auto ramp = name.size() == 1 ? rampFromCode(name[0]) : rampFromName(name);
+                if (!ramp) {
+                    throw std::runtime_error(where + ": unknown ramp '" + name + "'");
+                }
+                over.ramp = *ramp;
+            }
+            over.rise = o.value("rise", 1.0f);
+            if ((over.height && !std::isfinite(*over.height)) || !std::isfinite(over.rise)) {
+                throw std::runtime_error(where + " has a non-finite height or rise");
+            }
+            for (const auto& tag : o.value("tags", Json::array())) {
+                over.tags.push_back(tag.get<std::string>());
+            }
+            for (const auto& tag : o.value("untags", Json::array())) {
+                over.untags.push_back(tag.get<std::string>());
+            }
+            m.bake.overrides.push_back(std::move(over));
+        }
+    }
     m.environment = Environment::fromJson(j.value("environment", Json::object()));
     m.props = j.value("props", Json::object());
     return m;
@@ -650,18 +700,55 @@ Json MapData::toJson() const {
     for (const auto& c : colliders) {
         collidersJson.push_back({{"min", fe::toJson(c.min)}, {"max", fe::toJson(c.max)}});
     }
-    return {{"format", 2},
-            {"id", id},
-            {"name", name},
-            {"geometry", geometry},
-            {"grid", grid.toJson()},
-            {"points", points},
-            {"placements", placementsJson},
-            {"zones", zonesJson},
-            {"lights", lightsJson},
-            {"emitters", emittersJson},
-            {"colliders", collidersJson},
-            {"environment", environment.toJson()},
-            {"props", props}};
+    Json out = {{"format", 2},
+                {"id", id},
+                {"name", name},
+                {"geometry", geometry},
+                {"grid", grid.toJson()},
+                {"points", points},
+                {"placements", placementsJson},
+                {"zones", zonesJson},
+                {"lights", lightsJson},
+                {"emitters", emittersJson},
+                {"colliders", collidersJson},
+                {"environment", environment.toJson()},
+                {"props", props}};
+    // Absent until a map is baked, so hand-made maps re-serialise unchanged.
+    if (!bake.empty()) {
+        Json bakedColliders = Json::array(), overrides = Json::array();
+        for (const auto& c : bake.colliders) {
+            bakedColliders.push_back({{"min", fe::toJson(c.min)}, {"max", fe::toJson(c.max)}});
+        }
+        for (const auto& o : bake.overrides) {
+            Json over = {{"x", o.x}, {"z", o.z}, {"layer", o.layer}};
+            if (o.w != 1 || o.d != 1) {
+                over["w"] = o.w;
+                over["d"] = o.d;
+            }
+            if (o.walkable) {
+                over["walkable"] = *o.walkable;
+            }
+            if (o.height) {
+                over["height"] = *o.height;
+            }
+            if (o.ramp) {
+                over["ramp"] = std::string(1, rampCode(*o.ramp));
+                over["rise"] = o.rise;
+            }
+            if (!o.tags.empty()) {
+                over["tags"] = o.tags;
+            }
+            if (!o.untags.empty()) {
+                over["untags"] = o.untags;
+            }
+            overrides.push_back(std::move(over));
+        }
+        out["bake"] = {{"auto", bake.autoBake},
+                       {"fingerprint", bake.fingerprint},
+                       {"options", bake.options},
+                       {"colliders", bakedColliders},
+                       {"overrides", overrides}};
+    }
+    return out;
 }
 } // namespace fe

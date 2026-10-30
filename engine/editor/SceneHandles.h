@@ -44,6 +44,7 @@ struct HandleBatch {
 struct HandleOptions {
     bool zones = true, points = true, lights = true, emitters = true, colliders = true, triggers = true,
          placements = true, labels = true;
+    bool bakedBoxes = true; // the boxes the walkability bake derived (not selectable)
     // Script badges over placements that have pages: a label per trigger
     // kind ("action", "touch", "auto", "parallel"); empty = no badges.
     std::map<std::string, std::string> triggerBadges;
@@ -57,6 +58,7 @@ inline constexpr glm::vec4 PointColor{0.3f, 1, 0.5f, 0.95f};
 inline constexpr glm::vec4 LightColor{1, 0.95f, 0.5f, 0.8f};
 inline constexpr glm::vec4 EmitterColor{1, 0.5f, 0.9f, 0.9f};
 inline constexpr glm::vec4 ColliderColor{1, 0.35f, 0.3f, 0.8f};
+inline constexpr glm::vec4 BakedBoxColor{1, 0.6f, 0.1f, 0.45f};
 inline constexpr glm::vec4 TriggerColor{0.3f, 0.8f, 1, 0.9f};
 inline constexpr glm::vec4 PlacementColor{0.75f, 0.75f, 0.75f, 0.9f};
 inline constexpr glm::vec4 Selected{1, 0.6f, 0.1f, 1};

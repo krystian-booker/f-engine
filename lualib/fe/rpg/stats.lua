@@ -16,7 +16,7 @@
 --- })
 --- ```
 --- Modifiers are {stat = "attack", add = 10}, {stat = "speed", mul = 1.5} or
---- {stat = "move", set = 0} (optionally `source` and `priority`);
+--- {stat = "speed", set = 1} (optionally `source` and `priority`);
 --- `stats.compute` folds them in.
 local tablex = require("fe.tablex")
 
@@ -120,8 +120,6 @@ stats.define({
   { id = "accuracy", name = "Accuracy", short = "Acc", max = 999 },
   { id = "evasion", name = "Evasion", short = "Eva", max = 999 },
   { id = "critical", name = "Critical", short = "Crt", max = 100 },
-  { id = "move", name = "Move", short = "Mov", max = 20 },
-  { id = "jump", name = "Jump", short = "Jmp", max = 20 },
 })
 stats.resources({
   hp = { max = "max_hp", name = "HP" },

@@ -54,11 +54,11 @@ add_test(NAME lua_sandbox COMMAND fengine_headless --test "${sandbox_game}")
 # arguments must arrive as UTF-8 (the executable's manifest).
 set(unicode_game "${CMAKE_CURRENT_BINARY_DIR}/unicode-path/Józef-łódź-ゲーム")
 add_test(NAME unicode_path_copy COMMAND "${CMAKE_COMMAND}" -E copy_directory
-  "${PROJECT_SOURCE_DIR}/samples/ridgeline" "${unicode_game}")
+  "${PROJECT_SOURCE_DIR}/samples/vale" "${unicode_game}")
 add_test(NAME check_unicode_path COMMAND fengine_headless --check "${unicode_game}")
 set_tests_properties(unicode_path_copy PROPERTIES FIXTURES_SETUP unicode_game)
 set_tests_properties(check_unicode_path PROPERTIES FIXTURES_REQUIRED unicode_game)
-foreach(sample IN ITEMS vale wayfarers ridgeline)
+foreach(sample IN ITEMS vale)
   if(EXISTS "${PROJECT_SOURCE_DIR}/samples/${sample}/game.json")
     add_test(NAME check_${sample} COMMAND fengine_headless --check "${PROJECT_SOURCE_DIR}/samples/${sample}")
     if(EXISTS "${PROJECT_SOURCE_DIR}/samples/${sample}/tests")
@@ -66,6 +66,11 @@ foreach(sample IN ITEMS vale wayfarers ridgeline)
     endif()
   endif()
 endforeach()
+
+# The committed walkability of vale's maps is the bake of their terrain and placed models.
+if(EXISTS "${PROJECT_SOURCE_DIR}/samples/vale/game.json")
+  add_test(NAME bake_check_vale COMMAND fengine_headless --bake "${PROJECT_SOURCE_DIR}/samples/vale" --check-only)
+endif()
 
 # The vale sample packed into a .pak archive passes the same check and tests.
 if(FENGINE_BUILD_TOOLS AND EXISTS "${PROJECT_SOURCE_DIR}/samples/vale/game.json")

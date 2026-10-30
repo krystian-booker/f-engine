@@ -16,12 +16,16 @@ namespace fe {
 [[nodiscard]] bool mapExists(const std::filesystem::path& gameRoot, std::string_view id);
 
 // A flat, fully walkable map of width x depth cells with a `start` point at
-// its centre and the engine's default environment.
+// its centre, the engine's default environment and a bake section (auto
+// bake on, never baked yet), so the editor derives its walkability.
 [[nodiscard]] MapData makeBlankMap(const std::string& id, const std::string& name, int width, int depth);
+// A glTF scene holding one flat ground quad from (0, 0) to (width, depth):
+// what a new map stands on until a Blender export replaces it.
+[[nodiscard]] Json groundQuadGltf(float width, float depth);
 // Writes maps/<id>/map.json (validated first; the folder is created). With
 // `geometry`, that .glb/.gltf file is copied in as the map's geometry;
-// without one, a map whose geometry file is missing gets an empty glTF
-// scene (`geometry.gltf`) so the engine has something to load.
+// without one, a map whose geometry file is missing gets a flat ground quad
+// the size of the grid (`geometry.gltf`), which the bake reads as walkable.
 void writeMap(const std::filesystem::path& gameRoot, const MapData& map, const std::filesystem::path& geometry = {});
 // Copies a map folder to a new id (map.json gets the new id; geometry and
 // everything else in the folder come along).

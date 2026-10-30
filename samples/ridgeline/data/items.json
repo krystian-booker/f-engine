@@ -1,1 +1,0 @@
-[{"id": "salve", "name": "Salve", "price": 30, "use": {"target": "ally", "effects": [{"type": "heal", "formula": "fixed", "power": 90, "variance": 0}]}}]

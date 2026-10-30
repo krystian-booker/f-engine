@@ -97,11 +97,6 @@ private:
     static constexpr float EdgeOffset = 0.499f;
 
     void add(GridPos from, GridPos to, float cost, StepKind kind, std::vector<Step>& out) const {
-        for (const auto& [mask, extra] : rules_.tagCosts) {
-            if (grid_.at(to).tags & mask) {
-                cost += extra;
-            }
-        }
         if (rules_.cost) {
             const auto custom = rules_.cost(from, to, cost);
             if (!custom) {
@@ -249,30 +244,6 @@ template<class Visit> bool traceCells(glm::vec2 a, glm::vec2 b, Visit&& visit) {
     return true;
 }
 
-// Narrows the segment a..b (parameters s0..s1 of 0..1) to the part over the
-// grid's footprint; false when it misses the grid. In double precision, so
-// the clipped part of a segment a million units long is still exact to a
-// small fraction of a cell.
-bool clipToGrid(const Grid& grid, glm::dvec2 a, glm::dvec2 b, double& s0, double& s1) {
-    const glm::dvec2 d = b - a;
-    const double highs[2] = {static_cast<double>(grid.width()), static_cast<double>(grid.depth())};
-    for (int axis = 0; axis < 2; ++axis) {
-        if (std::abs(d[axis]) < 1e-12) {
-            if (a[axis] < 0 || a[axis] > highs[axis]) {
-                return false;
-            }
-            continue;
-        }
-        double t0 = (0 - a[axis]) / d[axis], t1 = (highs[axis] - a[axis]) / d[axis];
-        if (t0 > t1) {
-            std::swap(t0, t1);
-        }
-        s0 = std::max(s0, t0);
-        s1 = std::min(s1, t1);
-    }
-    return s0 <= s1;
-}
-
 glm::ivec2 snapDirection(glm::vec2 direction) {
     if (glm::length(direction) < 1e-6f || !std::isfinite(direction.x) || !std::isfinite(direction.y)) {
         return {0, 1};
@@ -287,11 +258,6 @@ void validateRules(const StepRules& rules) {
     if (!std::isfinite(rules.maxUp) || !std::isfinite(rules.maxDown) || rules.maxUp < 0 ||
         rules.maxDown < 0) {
         throw std::invalid_argument("Step limits must be finite and not negative");
-    }
-    for (const auto& [mask, cost] : rules.tagCosts) {
-        if (!std::isfinite(cost) || cost < 0) {
-            throw std::invalid_argument("Tag costs must be finite and not negative");
-        }
     }
     const auto& jump = rules.jump;
     if (jump.distance < 0 || jump.distance > 16 || !std::isfinite(jump.maxUp) ||
@@ -381,9 +347,6 @@ Route findRoute(const Grid& grid, GridPos from, GridPos to, const StepRules& rul
         if (current.key == goal) {
             break;
         }
-        if (current.key != start && rules.zoc.contains(current.key)) {
-            continue; // movement ends in a zone of control
-        }
         neighbours.collect(here.position, steps);
         for (const auto& step : steps) {
             const auto key = cellKey(step.to);
@@ -415,128 +378,6 @@ std::vector<GridPos> findPath(const Grid& grid, GridPos from, GridPos to, const 
         cells.push_back(step.cell);
     }
     return cells;
-}
-
-Reach findReachable(const Grid& grid, GridPos start, float budget, const StepRules& rules, int maxVisited) {
-    validateRules(rules);
-    Reach reach;
-    auto& cells = reach.cells;
-    start = grid.wrapCell(start);
-    if (!grid.contains(start) || !std::isfinite(budget) || budget < 0) {
-        return reach;
-    }
-    std::unordered_map<std::int64_t, int> indexOf;
-    using Entry = std::pair<float, int>;
-    std::priority_queue<Entry, std::vector<Entry>, std::greater<>> open;
-    const Neighbours neighbours(grid, rules);
-    std::vector<Step> steps;
-    cells.push_back({start, 0, -1, true});
-    indexOf[cellKey(start)] = 0;
-    open.push({0, 0});
-    int visited = 0;
-    while (!open.empty()) {
-        const auto [cost, index] = open.top();
-        open.pop();
-        if (cost > cells[static_cast<std::size_t>(index)].cost + 1e-5f) {
-            continue; // stale queue entry
-        }
-        if (visited++ >= maxVisited) {
-            reach.truncated = true;
-            break;
-        }
-        if (index > 0 && rules.zoc.contains(cellKey(cells[static_cast<std::size_t>(index)].pos))) {
-            continue; // movement ends in a zone of control
-        }
-        neighbours.collect(cells[static_cast<std::size_t>(index)].pos, steps);
-        for (const auto& step : steps) {
-            const float next = cost + step.cost;
-            if (next > budget + 1e-5f) {
-                continue;
-            }
-            const auto key = cellKey(step.to);
-            const auto found = indexOf.find(key);
-            if (found != indexOf.end()) {
-                auto& existing = cells[static_cast<std::size_t>(found->second)];
-                if (existing.cost <= next) {
-                    continue;
-                }
-                existing.cost = next;
-                existing.parent = index;
-                existing.kind = step.kind;
-                open.push({next, found->second});
-                continue;
-            }
-            const int added = static_cast<int>(cells.size());
-            cells.push_back({step.to, next, index, !rules.noStop.contains(key), step.kind});
-            indexOf[key] = added;
-            open.push({next, added});
-        }
-    }
-    return reach;
-}
-
-std::vector<ReachCell> reachable(const Grid& grid, GridPos start, float budget, const StepRules& rules,
-                                 int maxVisited) {
-    return findReachable(grid, start, budget, rules, maxVisited).cells;
-}
-
-std::vector<GridPos> reachPath(const std::vector<ReachCell>& cells, GridPos target) {
-    const auto found =
-        std::find_if(cells.begin(), cells.end(), [&](const ReachCell& c) { return c.pos == target; });
-    if (found == cells.end()) {
-        return {};
-    }
-    std::vector<GridPos> path;
-    for (int index = static_cast<int>(found - cells.begin()); index > 0;
-         index = cells[static_cast<std::size_t>(index)].parent) {
-        path.push_back(cells[static_cast<std::size_t>(index)].pos);
-    }
-    std::reverse(path.begin(), path.end());
-    return path;
-}
-
-bool lineOfSight(const Grid& grid, glm::vec3 from, glm::vec3 to, int layer, std::uint32_t blockingTags) {
-    constexpr float Epsilon = 1e-3f;
-    if (!std::isfinite(from.x) || !std::isfinite(from.y) || !std::isfinite(from.z) || !std::isfinite(to.x) ||
-        !std::isfinite(to.y) || !std::isfinite(to.z)) {
-        return false;
-    }
-    const int startX = floorCell(from.x);
-    const int startZ = floorCell(from.z);
-    // Only the part of the segment over the grid can be blocked, so the trace
-    // visits at most the grid's width plus depth cells however long it is.
-    const glm::dvec3 origin(from), delta = glm::dvec3(to) - origin;
-    double s0 = 0, s1 = 1;
-    if (!clipToGrid(grid, {origin.x, origin.z}, {origin.x + delta.x, origin.z + delta.z}, s0, s1)) {
-        return true;
-    }
-    const glm::vec3 start(origin + delta * s0);
-    const glm::vec3 end(origin + delta * s1);
-    return traceCells({start.x, start.z}, {end.x, end.z}, [&](int x, int z, float enter, float exit) {
-        if (!grid.contains(x, z)) {
-            return true;
-        }
-        const auto a = glm::mix(start, end, enter);
-        const auto b = glm::mix(start, end, exit);
-        for (int l = 0; l < grid.layerCount(); ++l) {
-            const auto& cell = grid.at(x, z, l);
-            if ((x == startX && z == startZ && l == layer) || (l > 0 && !cell.walkable)) {
-                continue;
-            }
-            if (cell.tags & blockingTags) {
-                return false;
-            }
-            const float above0 = a.y - grid.heightIn({x, z, l}, {a.x, a.z});
-            const float above1 = b.y - grid.heightIn({x, z, l}, {b.x, b.z});
-            const bool blocked =
-                l == 0 ? (above0 < -Epsilon || above1 < -Epsilon)
-                       : ((above0 > Epsilon && above1 < -Epsilon) || (above0 < -Epsilon && above1 > Epsilon));
-            if (blocked) {
-                return false;
-            }
-        }
-        return true;
-    });
 }
 
 std::optional<AreaShape> parseAreaShape(const std::string& name) {

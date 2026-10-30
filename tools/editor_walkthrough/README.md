@@ -11,9 +11,9 @@ The coordinates assume the default dock layout in a 1280x720-point window
 python3 tools/editor_walkthrough/run.py build/fengine
 ```
 
-runs every script in order against `samples/vale` (selection and drags, gizmo, undo and redo, pickers, Run page, dropping an asset into the scene, New map, brush painting, the walkability bake preview, apply, save and undo, Ctrl+click multi-select with group move and delete, Hierarchy context menus, Map props and Environment list edits, the Scripts panel, the sprite sheet wizard from an imported image, the Missing report, task cancel, Import geometry into a new map, and the OS file dialog), prints the PASS/FAIL
+runs every script in order against `samples/vale` (selection and drags, gizmo, undo and redo, pickers, Run page, dropping an asset into the scene, New map, the override brush, dropping a house model that the walkability bake blocks at once, save and undo, Ctrl+click multi-select with group move and delete, Hierarchy context menus, Map props and Environment list edits, the Scripts panel, the sprite sheet wizard from an imported image, the Missing report, task cancel, Import geometry into a new map, the OS file dialog, moving a prop and a light with the gizmo's arrow, and the Save / Cancel prompt when the playing game warps away from a map with unsaved edits, with the editor open or closed), prints the PASS/FAIL
 lines the editor logs, writes screenshots to `tools/editor_walkthrough/out/`,
-and restores the sample map afterwards (`04_bake_apply_save_undo.json` saves
+and restores the sample map afterwards (`04_drop_house_bake_save_undo.json` saves
 it). Exit code 1 when any check failed. Windowed: it needs a display and the
 Metal/Vulkan/D3D runtime, not `fengine_headless`.
 

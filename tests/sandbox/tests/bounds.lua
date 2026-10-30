@@ -36,7 +36,6 @@ return {
     t.error(function() w:spawn { position = { x = 1e300, z = 1 } } end, "finite number")
     t.error(function() e:place({ x = 1e30, z = 1e30 }) end, bound)
     t.error(function() w:height_at({ x = 1e30, z = -1e30 }) end, bound)
-    t.error(function() w:line_of_sight({ x = -1e9, z = 0.5 }, { x = 1e9, z = 0.5 }) end, bound)
     t.error(function() w:camera().target = { x = 1e7, y = 0, z = 0 } end, bound)
     t.error(function() e:attach(w:spawn { position = { x = 2, z = 2 } }, { y = 1e7 }) end, bound)
     t.error(function() e:drive({ x = 1e30, z = 0 }) end, bound)
@@ -74,15 +73,6 @@ return {
     t.error(function() fe.harness.tick(1 << 30) end, "0 to 36000 ticks")
     t.error(function() w:area({ x = 1, z = 1 }, "square", 0, 2147483647) end, "area max")
     t.error(function() w:burst({ x = 1, z = 1 }, {}, math.maxinteger) end, "count must be an integer")
-    local cells = {}
-    for i = 1, 65537 do cells[i] = { x = i % 12, z = i % 10 } end
-    t.error(function() w:overlay("many", cells) end, "at most 65536 cells")
-    cells[65537] = nil
-    w:overlay("many", cells)
-    for i = 2, 256 do w:overlay("o" .. i, { { x = 1, z = 1 } }) end
-    t.error(function() w:overlay("one too many", { { x = 1, z = 1 } }) end, "at most 256 overlays")
-    w:overlay("many", { { x = 2, z = 2 } }) -- replacing one is fine
-    w:clear_overlay()
     -- Values inside the ranges still work.
     e:mover { speed = 1000, climb_speed = 1000 }
     e:jump({ x = 3, z = 1 }, { height = 2, duration = 60 })

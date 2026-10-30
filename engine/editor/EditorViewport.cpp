@@ -338,8 +338,18 @@ void Editor::groundDrag(World& w, bool hovered, bool active, double alpha) {
     }
     const auto& grid = w.authored().grid;
     const bool snapped = snap_ && !ImGui::GetIO().KeyCtrl;
-    const glm::vec3 position = snapped ? cellCentre(grid, hit->cell) : hit->point;
+    glm::vec3 position = snapped ? cellCentre(grid, hit->cell) : hit->point;
     const int layer = hit->cell.layer;
+    if (snapped && selection_.kind == Selection::Kind::Placement) {
+        // A model snaps by its footprint: even sizes to cell corners, odd ones to centres.
+        if (const auto* p = findPlacement(w.authored(), selection_.id)) {
+            if (const auto path = p->props.find("model"); path != p->props.end() && path->is_string()) {
+                if (const auto model = engine_.assets().tryModel(path->get<std::string>())) {
+                    position = snapForFootprint(grid, hit->point, footprintCells(*model, *p), layer);
+                }
+            }
+        }
+    }
     if (selection_.kind == Selection::Kind::Entity) {
         const auto before = w.registry().get<Transform>(selection_.entity).position;
         editTransform(w, selection_.entity, position, layer);
@@ -397,8 +407,9 @@ void Editor::acceptViewportDrop(World& w, double alpha) {
             status_ = "Drop the asset onto the ground";
             return;
         }
-        const auto placement =
-            placementForAsset(kind, path, hit->cell, w.authored().grid, defaultType("entities"), w.authored().placements);
+        const auto model = kind == AssetKind::Model ? engine_.assets().tryModel(path) : nullptr;
+        const auto placement = placementForAsset(kind, path, hit->cell, w.authored().grid, defaultType("entities"),
+                                                 w.authored().placements, model.get(), hit->point);
         if (!placement) {
             status_ = "Only sprites (.anim.json) and models (.glb) can be placed in the scene";
             return;
@@ -465,14 +476,23 @@ void Editor::drawViewport(const EditorFrame& /*frame*/) {
                                 static_cast<int>(std::lround(avail.x * scale)),
                                 static_cast<int>(std::lround(avail.y * scale))};
             // The gizmo goes before the viewport's own button: ImGuizmo only
-            // starts a drag while no ImGui item is hovered or active.
+            // starts a drag while no ImGui item is hovered or active, and
+            // IsAnyItemHovered() also counts last frame's item, so while the
+            // pointer is over a gizmo handle (or a gizmo drag runs) the button
+            // is left out, or the gizmo could never take the click.
             auto* draw = ImGui::GetWindowDrawList();
             const bool gizmo = w ? drawGizmo(*w, draw, min, avail, alpha_) : false;
-            ImGui::InvisibleButton("##fe_viewport", avail,
-                                   ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight |
-                                       ImGuiButtonFlags_MouseButtonMiddle);
-            const bool hovered = ImGui::IsItemHovered() || gizmoUsing_;
-            const bool active = ImGui::IsItemActive();
+            bool hovered = false, active = false;
+            if (gizmo) {
+                ImGui::Dummy(avail);
+                hovered = true;
+            } else {
+                ImGui::InvisibleButton("##fe_viewport", avail,
+                                       ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight |
+                                           ImGuiButtonFlags_MouseButtonMiddle);
+                hovered = ImGui::IsItemHovered();
+                active = ImGui::IsItemActive();
+            }
             viewportHovered_ = hovered;
             viewportActive_ = active;
             if (w) {

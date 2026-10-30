@@ -299,11 +299,11 @@ return {
     setup()
     local hero = party.join("hero")
     hero:add_state("heavy")
-    t.eq(hero:stat("move"), 1)
+    t.eq(hero:stat("speed"), 1)
     hero:add_state("anchored")
-    t.eq(hero:stat("move"), 2, "higher priority wins")
+    t.eq(hero:stat("speed"), 2, "higher priority wins")
     hero:remove_state("anchored")
-    t.eq(stats.compute({ move = 4 }, { { stat = "move", set = 1 }, { stat = "move", set = 3 } }).move, 3,
+    t.eq(stats.compute({ speed = 4 }, { { stat = "speed", set = 1 }, { stat = "speed", set = 3 } }).speed, 3,
       "equal priority: the later modifier wins")
   end,
 

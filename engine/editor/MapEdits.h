@@ -6,6 +6,7 @@
 #include <deque>
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -56,11 +57,19 @@ public:
     void sync(const World& world);
     [[nodiscard]] std::size_t undoCount(const World& world) const;
     [[nodiscard]] std::size_t redoCount(const World& world) const;
+    // Records the authored map as saved (the editor calls it after writing
+    // map.json). `unsaved` then says whether the map differs from what was
+    // last saved; before any save in this session, whether it was edited at
+    // all. Undo stays available after a save, and undoing back to the saved
+    // state counts as saved again.
+    void markSaved(World& world);
+    [[nodiscard]] bool unsaved(const World& world) const;
 
 private:
     struct Stacks {
         std::deque<Json> undo, redo;
         Json head;                   // the authored map after the last step, undo, redo or settle
+        std::optional<Json> saved;   // the authored map as last written to map.json
         const World* world = nullptr; // the world object the last edit touched
         bool headStale = false;      // edits joined a gesture since `head` was taken
     };
@@ -110,19 +119,17 @@ int fillRect(Grid& grid, const GridBrush& brush, GridPos a, GridPos b);
 // Only the Walkable, Height and tag modes make sense here; Ramp is refused.
 int floodFill(Grid& grid, const GridBrush& brush, GridPos start);
 
-// Sub-cell blocking through collider boxes. The block brush paints quarter
-// cells (BlockStep units): each painted square becomes a box of the brush's
-// height standing on the grid, merged with its neighbours of the same
-// vertical span into as few boxes as possible, so one wall is one box.
+// Sub-cell blocking through collider boxes: the walkability bake makes a box
+// of each quarter cell (BlockStep units) that is not ground, merged with its
+// neighbours of the same vertical span into as few boxes as possible, so one
+// wall is one box.
 inline constexpr float BlockStep = 0.25f;
 // Joins boxes that share a vertical span and touch along one axis with the
 // same extent on the other, repeatedly, until no two can be joined.
 [[nodiscard]] std::vector<Box> mergeBoxes(std::vector<Box> boxes);
-// Paints or erases one quarter-cell square at a world xz position (snapped to
-// BlockStep) on `layer`: `add` stands a box of `height` on the grid surface
-// there; otherwise the boxes covering the square are cut around it. Returns
-// whether anything changed.
-bool paintBlock(MapData& map, glm::vec2 position, int layer, float height, bool add);
+// The parts of a box outside the xz rectangle lo..hi (up to four; the whole
+// box when they do not meet; nothing when the rectangle covers it).
+[[nodiscard]] std::vector<Box> cutBox(const Box& box, glm::vec2 lo, glm::vec2 hi);
 // The box a model placed at a placement's position, yaw and scale covers,
 // shrunk by `margin` on each horizontal side (never below BlockStep wide).
 [[nodiscard]] Box boxForModel(const Model& model, const Placement& placement, float margin = 0);
@@ -156,8 +163,9 @@ namespace editorui {
 [[nodiscard]] Json jsonArray(const Json& object, const char* key);  // [] unless an array
 } // namespace editorui
 
-// Bakes Blender markers (collision boxes, spawn points, lights) into a map.
-// Markers that don't fit (unknown layer, outside the grid) are skipped and
-// described in `problems`. Returns the number of markers imported.
+// Imports Blender markers (spawn points and lights) into a map. Markers that
+// don't fit (a spawn outside the grid) are skipped and described in
+// `problems`. Returns the number of markers imported. Collision nodes are
+// read by the walkability bake instead (WalkBake.h: collisionParts).
 int importMarkers(MapData& map, const Model& model, std::vector<std::string>& problems);
 } // namespace fe

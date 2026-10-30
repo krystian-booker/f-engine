@@ -176,6 +176,9 @@ void Editor::drawHierarchy() {
         if (ImGui::SmallButton(ICON_FA_PLUS " Add collider")) {
             addCollider(*w);
         }
+        if (!map.bake.colliders.empty()) {
+            ImGui::TextDisabled("%zu baked box(es) from the geometry and props (Map tab)", map.bake.colliders.size());
+        }
     });
     // Live entities that no placement made: the player, followers, spawned things.
     auto& registry = w->registry();

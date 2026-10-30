@@ -30,15 +30,8 @@ local modifier = { record = {
   priority = { type = "number", optional = true, doc = "Which `set` wins when several apply (highest)" },
 } }
 local effect = { type = "table", doc = "An effect record: {type, ...}; see fe.effects for each type's fields" }
-local area = { record = {
-  shape = { type = { enum = { "diamond", "square", "cross", "line", "cone", "ring" } }, default = "diamond" },
-  min = { type = "integer", default = 0 },
-  max = { type = "integer", default = 0 },
-  height = { type = "number", optional = true, doc = "Max height difference reached" },
-} }
 local resist = { type = { map = "number" }, optional = true,
   doc = "Damage multipliers by element, damage type or state:<id> (state chance)" }
-local direction = { record = { x = "integer", z = "integer" } }
 
 schema.define("class", {
   id = "string",
@@ -91,9 +84,6 @@ schema.define("skill", {
   accuracy = { type = "number", optional = true, doc = "Base hit chance in percent (100 by default)" },
   power = { type = "number", optional = true, doc = "Default power for effects without their own" },
   timeline = { type = "string", optional = true },
-  range = { type = area, optional = true, doc = "Tactical reach" },
-  area = { type = area, optional = true, doc = "Tactical area of effect" },
-  los = { type = "boolean", default = false, doc = "Tactics: needs a clear line of sight to the target" },
   scope = { type = { enum = { "battle", "field", "both" } }, default = "battle" },
   passive = { type = "boolean", default = false },
   support = { type = "boolean", default = false,
@@ -162,28 +152,17 @@ schema.define("enemy", {
   } }, default = {} },
   resist = { type = { map = "number" }, default = {}, doc = "Damage multipliers by element, damage type or state:<id>" },
   scale = { type = "number", default = 1 },
-  shield = { type = "integer", min = 0, optional = true, doc = "Shield points (fe.battle.break)" },
-  weak = { type = { list = "string" }, default = {}, doc = "Weaknesses: elements or damage types (fe.battle.break)" },
-  obstacle = { type = "boolean", default = false,
-    doc = "A destructible that never acts (tactics: blocks movement and line of sight)" },
-  destroyed = { type = "table", optional = true,
-    doc = "Terrain reaction on its cell when an obstacle is destroyed: {add, remove, walkable}" },
-}, { doc = "An enemy, obstacle or battle companion." })
+}, { doc = "An enemy or battle companion." })
 
 schema.define("troop", {
   id = "string",
   name = { type = "string", optional = true },
   members = { type = { list = { record = {
     enemy = { type = { ref = "enemies" } },
-    id = { type = "string", optional = true, doc = "Unit id for objectives and scripts (tactics)" },
     name = { type = "string", optional = true, doc = "Display name overriding the enemy's" },
     position = { type = { record = {
       slot = { type = "integer", min = 1, optional = true, doc = "Formation slot (side view)" },
-      x = { type = "integer", optional = true, doc = "Cell (tactics)" },
-      z = { type = "integer", optional = true },
-      layer = { type = "integer", optional = true, doc = "Grid layer of the cell (0 by default)" },
-    } }, optional = true, doc = "Formation slot or {x, z, layer?} cell" },
-    facing = { type = direction, optional = true, doc = "Starting facing (tactics)" },
+    } }, optional = true, doc = "Formation slot" },
   } } } },
   stage = { type = { map_id = true }, optional = true, doc = "Battle stage map" },
   music = { type = { asset = "audio" }, optional = true },

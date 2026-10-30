@@ -1,5 +1,7 @@
 #include "engine/runtime/Headless.h"
 #include "engine/editor/AssetCatalog.h"
+#include "engine/editor/WalkBake.h"
+#include "engine/core/AssetCache.h"
 #include "engine/core/Log.h"
 #include "engine/core/Paths.h"
 #include "engine/runtime/Engine.h"
@@ -224,6 +226,14 @@ int checkGame(const std::filesystem::path& game, const std::filesystem::path& lu
                     throw std::runtime_error("Point '" + name + "' is not on walkable ground");
                 }
             }
+            // A baked map whose inputs changed since: a warning, not a problem
+            // (a packed game has no loose files to compare, so it is skipped).
+            const auto& bake = world->map().bake;
+            if (!bake.fingerprint.empty() && std::filesystem::is_directory(game) &&
+                bakeFingerprint(world->map(), world->geometryPath(), gameFileReader(game)) != bake.fingerprint) {
+                std::cout << "map " << id << ": warning: the walkability bake is out of date (run --bake or press "
+                             "Bake now in the editor)\n";
+            }
             engine->unloadWorld("check_" + id);
             std::cout << "map " << id << ": ok\n";
         } catch (const std::exception& error) {
@@ -274,6 +284,61 @@ int checkGame(const std::filesystem::path& game, const std::filesystem::path& lu
     return problems ? 1 : 0;
 }
 
+int bakeGame(const std::filesystem::path& game, const std::filesystem::path& lualib, bool checkOnly) {
+    if (!std::filesystem::is_directory(game)) {
+        std::cerr << "--bake needs a game folder, not an archive\n";
+        return 1;
+    }
+    AssetCache assets(game, lualib);
+    const auto readFile = gameFileReader(game);
+    int stale = 0, problems = 0;
+    for (const auto& name : listFolder(game / "maps")) {
+        if (!name.ends_with('/') || !isFile(game / "maps" / name / "map.json")) {
+            continue;
+        }
+        const auto id = name.substr(0, name.size() - 1);
+        const auto file = game / "maps" / id / "map.json";
+        try {
+            auto map = MapData::load(file);
+            const auto geometry = geometryPathOf(map);
+            if (!checkOnly && map.bake.options.empty()) {
+                map.bake.options = BakeOptions{}.toJson(); // part of the fingerprint: settle it first
+            }
+            const auto fingerprint = bakeFingerprint(map, geometry, readFile);
+            if (checkOnly) {
+                if (map.bake.empty()) {
+                    std::cout << "map " << id << ": not baked (hand-painted)\n";
+                } else if (map.bake.fingerprint == fingerprint) {
+                    std::cout << "map " << id << ": bake up to date\n";
+                } else {
+                    std::cout << "map " << id << ": bake OUT OF DATE\n";
+                    ++stale;
+                }
+                continue;
+            }
+            const auto scene = sceneForMap(map, assets, geometry);
+            for (const auto& problem : scene.problems) {
+                std::cerr << "map " << id << ": " << problem << "\n";
+                ++problems;
+            }
+            const auto options = BakeOptions::fromJson(map.bake.options);
+            const auto result = bakeWalkability(scene.pieces, map.grid, options);
+            const int changed = applyBake(map, result, options);
+            map.bake.fingerprint = fingerprint;
+            writeJson(file, MapData::fromJson(map.toJson()).toJson());
+            std::cout << "map " << id << ": baked, " << changed << " cell(s) changed, " << result.walkable + result.partial
+                      << " walkable, " << result.blocked << " blocked, " << map.bake.colliders.size() << " box(es)\n";
+        } catch (const std::exception& error) {
+            std::cerr << "map " << id << ": " << error.what() << "\n";
+            ++problems;
+        }
+    }
+    if (checkOnly) {
+        std::cout << (stale ? "FAILED: " : "OK: ") << stale << " map(s) with a stale bake\n";
+    }
+    return stale || problems ? 1 : 0;
+}
+
 int writeApi(const std::filesystem::path& lualib, const std::filesystem::path& folder) {
     const auto game = lualib / "tests" / "game";
     const ScratchFolder userData(game);
@@ -286,6 +351,7 @@ int writeApi(const std::filesystem::path& lualib, const std::filesystem::path& f
 
 int runHeadlessCommand(int argc, char** argv) {
     std::string command, target, filter, output;
+    bool checkOnly = false;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         auto next = [&]() -> std::string {
@@ -294,9 +360,11 @@ int runHeadlessCommand(int argc, char** argv) {
             }
             return argv[++i];
         };
-        if (arg == "--test" || arg == "--check") {
+        if (arg == "--test" || arg == "--check" || arg == "--bake") {
             command = arg;
             target = next();
+        } else if (arg == "--check-only") {
+            checkOnly = true;
         } else if (arg == "--write-api") {
             command = arg;
             output = next();
@@ -316,6 +384,9 @@ int runHeadlessCommand(int argc, char** argv) {
     }
     if (command == "--check") {
         return checkGame(target, lualib);
+    }
+    if (command == "--bake") {
+        return bakeGame(target, lualib, checkOnly);
     }
     return writeApi(lualib, output);
 }

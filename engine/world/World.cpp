@@ -9,15 +9,11 @@
 
 namespace fe {
 namespace {
-std::vector<Box> staticBoxes(const MapData& map, AssetCache& assets, const std::string& geometry) {
+// The map's solid boxes: the authored colliders and the ones the editor's
+// walkability bake derived from the geometry and the placed models.
+std::vector<Box> staticBoxes(const MapData& map) {
     auto boxes = map.colliders;
-    if (const auto model = assets.tryModel(geometry)) {
-        for (const auto& marker : model->markers) {
-            if (marker.hasBounds && marker.properties.value("collider", false)) {
-                boxes.push_back({marker.min, marker.max});
-            }
-        }
-    }
+    boxes.insert(boxes.end(), map.bake.colliders.begin(), map.bake.colliders.end());
     return boxes;
 }
 
@@ -45,7 +41,7 @@ std::vector<WorldEvent> EventQueue::take() {
 
 World::World(std::string name, MapData map, AssetCache& assets, std::uint64_t seed)
     : name_(std::move(name)), map_(std::move(map)), authored_(map_), assets_(assets), random_(seed),
-      collision_(registry_, staticBoxes(map_, assets_, geometryPath())),
+      collision_(registry_, staticBoxes(map_)),
       movement_(registry_, map_.grid, collision_, events_), particles_(registry_, assets_, random_) {
     rebuildStatic();
     movement_.setBlockedCells(&boxBlockedCells());
@@ -67,7 +63,7 @@ const std::unordered_set<std::int64_t>& World::boxBlockedCells() const {
 }
 
 void World::rebuildStatic() {
-    collision_.setBoxes(staticBoxes(map_, assets_, geometryPath()));
+    collision_.setBoxes(staticBoxes(map_));
     ++boxesRevision_;
     collision_.setWrap(map_.grid.wraps() ? glm::vec2(static_cast<float>(map_.grid.width()),
                                                      static_cast<float>(map_.grid.depth()))

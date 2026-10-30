@@ -2,7 +2,7 @@
 ---
 --- A rig follows an entity (or a point), applies the map's camera settings
 --- and "camera" zones, clamps to bounds, adds shake, supports player
---- rotation/zoom (tactics) and runs scripted pans and paths:
+--- rotation/zoom and runs scripted pans and paths:
 ---
 --- ```lua
 --- local rig = camera.rig(world, {follow = hero})
@@ -193,7 +193,7 @@ function Rig:shake(amplitude, duration, frequency)
     frequency = frequency or 18, time = 0 }
 end
 
---- Rotate the player-controlled offset (tactics). `step` in degrees; with
+--- Rotate the player-controlled offset. `step` in degrees; with
 --- `snap` the yaw moves to the next multiple of step.
 function Rig:rotate(step, snap)
   if snap then

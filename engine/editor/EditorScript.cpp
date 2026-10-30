@@ -34,7 +34,8 @@ using namespace editorui;
 //   {"expect": "lua"}        a Lua expression that must be true (fe.dev console)
 //   {"expect_selection": "elder"}  the selection's label must contain the text
 //   {"expect_status": "Saved"}     the status line must contain the text
-//   {"expect_mode": "play"}        "play" or "edit"
+//   {"expect_mode": "play"}        "play", "edit" or "closed" (the editor is not open)
+//   {"toggle_editor": true}  open or close the editor, as F1 does
 //   {"quit": true}           end the run (after logging the tally)
 // Results go to the log as "editor script: ...".
 namespace {
@@ -248,8 +249,11 @@ void Editor::runScript() {
             check(status_.find(text) != std::string::npos, "status '" + status_ + "' contains '" + text + "'");
         }
         if (const auto text = jsonString(step, "expect_mode", {}); !text.empty()) {
-            const auto mode = mode_ == Mode::Play ? "play" : "edit";
+            const auto mode = !open_ ? "closed" : mode_ == Mode::Play ? "play" : "edit";
             check(mode == text, std::string("mode is ") + mode + ", expected " + text);
+        }
+        if (jsonBool(step, "toggle_editor", false)) {
+            toggle();
         }
         if (jsonBool(step, "quit", false) || scriptStep_ == script_.size()) {
             log(scriptFailed_ ? LogLevel::Error : LogLevel::Info,

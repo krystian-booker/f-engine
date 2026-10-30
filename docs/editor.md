@@ -16,26 +16,30 @@ The window is a workspace: the **Scene** in the middle shows the game, **Hierarc
 
 ## Make a map
 
-File > **New map...**: give it an id (lower-case letters, digits, `_`, `-`; doors name maps by it), a name and a size in cells (one cell is one world unit, about one character). If you have a Blender export, **Browse...** picks the `.glb` as the map's geometry; you can add it later with File > **Import geometry**. The map opens with the player at its `start` point.
+File > **New map...**: give it an id (lower-case letters, digits, `_`, `-`; doors name maps by it), a name and a size in cells (one cell is one world unit, about one character). The map opens as flat ground with the player at its `start` point. Build it from models: drag floor tiles, cliff blocks and stairs from **Assets > fx/kit** and houses, trees, fences and lamps from **fx** onto the ground. Everything you place blocks or carries the player by its own shape; nothing has to be painted.
 
-In Blender, model at one unit per cell with the origin where cell (0, 0) begins, apply transforms, export glTF 2.0 with normals. Custom properties on objects mark spawn points (`{"spawn": "entry"}`), collision (`{"collision": true}` for whole cells, `{"collision": {"box": true}}` for an exact box) and lights; Map > **Import Blender markers** reads them.
+If you model the terrain in Blender, keep it to the ground: paths, slopes, cliffs, water. Model at one unit per cell with the origin where cell (0, 0) begins, apply transforms, export glTF 2.0 with normals, and pick the `.glb` with **Browse...** in New map or later with File > **Import geometry**. Buildings and other objects are better placed as props, so they can be moved. Custom properties on objects mark spawn points (`{"spawn": "entry"}`) and lights; Map > **Import Blender markers** reads them.
 
-## Mark where characters can walk
+## Where characters can walk
 
-Open the **Map** tab (beside the Inspector). The red overlay shows blocked cells on the current layer.
+The editor works it out. The **Walkability** section of the **Map** tab (beside the Inspector) shows **Auto bake**: whenever you place, move, turn, scale or remove a model, the cells around it are baked again from the terrain and the models standing there. Level ground with head room is walkable; walls, posts and fences become thin boxes bodies stop at, so the player walks right up to a wall; water and steep ground are blocked; slopes become ramps; the outer ring of cells is blocked. **Bake now** does the whole map at once; **Options...** has the limits (slope, head room, step) and a height band for a bridge deck on another layer. "Bake out of date" means a model or the terrain changed while Auto bake was off.
 
-1. **Bake walkability...** reads the geometry and makes a first pass: level ground becomes walkable, houses and water blocked, slopes become ramps, and things smaller than a cell get collider boxes. Press **Preview**: green is walkable, red blocked, yellow is where the bake was unsure (look at those), orange is ground nothing leads to, blue is water. **Apply** keeps it; Undo (Ctrl+Z) takes it back.
-2. Fix the rest with the brush: pick **Walkable**, tick **Paint with the left mouse button**, and paint in the Scene. **Rectangle** fills an area, **Flood fill** everything connected.
-3. For a fence post or a sign that only takes up part of a cell, use the **Block (quarter cells)** brush: it paints small collider boxes (Shift erases). Characters are stopped by the box and walk around it; routes avoid the cells it covers (shown in orange). A model placed in the scene can get a box from **Add collider box from the model** in its Inspector.
+In the Scene the red overlay shows blocked cells, orange cells are walkable but have a box standing on them (routes avoid them), orange outlines are the boxes themselves, and violet marks cells you fixed by hand.
+
+To fix an exception, open **Fix walkability by hand**: pick **Walkable**, **Height**, **Ramp** or a tag, tick **Paint with the left mouse button**, and paint in the Scene (**Rectangle** fills an area, **Flood fill** everything connected). What you paint is an override: it keeps its value when the walkability is baked again. **Clear override** hands a cell back to the bake. A door on the map's edge needs one: paint its cell walkable. For an invisible wall, add a collider from the **Hierarchy** and move it with the gizmo.
+
+A map made before the bake existed (a hand-painted grid) stays as it is until you press **Bake now** or tick **Auto bake**.
 
 ## Put things in the scene
 
 Drag a sprite (a little character picture) or a model from **Assets** onto the ground. It becomes a placement: an NPC for sprites, a prop for models. With it selected:
 
-- drag it along the ground to move it (it snaps to cell centres; hold Ctrl to place it freely),
+- drag it along the ground to move it (sprites snap to cell centres; a model snaps so its footprint lines up with the cells; hold Ctrl to place it freely),
 - **W**, **E** and **R** show the move, rotate and scale gizmo; **Snap** at the top right turns the steps on and off,
-- the **Inspector** has its type, position, yaw and scale, and its props: the sprite or model, its name, its script, and so on. Every field that names a file or an id is a drop-down you can search; you can also drop a file from Assets onto it.
+- the **Inspector** has its type, position, yaw and scale, and its props: the sprite or model, its name, its script, and so on. Every field that names a file or an id is a drop-down you can search; you can also drop a file from Assets onto it. A prop's Inspector says how it blocks and how many cells it covers.
 - **Ctrl+D** duplicates, **Del** deletes, Ctrl+click selects several at once.
+
+A prop model should have its origin at the centre of its base and a footprint of whole cells (a 4 x 3 house, a 1 x 1 tree, a 2-cell fence); the bake reads its visible mesh, or, when the model has a node with the custom property `{"collision": true}` (usually hidden with `"visible": false`), that node alone: a box over a house's walls, a trunk under a tree's crown, a slope under stairs. Make collision pieces at least a quarter of a cell thick. A prop with `solid` off is decoration bodies walk through.
 
 Points (where the player can appear), zones (areas that change the camera or start random battles), lights, particle emitters and collider boxes are added from the **Hierarchy** or the Map menu and edited the same way. They are drawn as handles in the Scene; View toggles each kind.
 
@@ -53,6 +57,6 @@ Sounds get an id in `data/audio.json` (the Data tab edits it); pickers offer bot
 
 ## Save and play
 
-**Save map** (Ctrl+S) writes `maps/<id>/map.json`. Everything else you changed in the running game that is not part of the map (an entity you nudged in the Live entity section) is gone on the next load; that is on purpose. **Play (F5)** to try it, and **Play from here** on a point in the Hierarchy starts the game at that point.
+**Save map** (Ctrl+S) writes `maps/<id>/map.json`. Everything else you changed in the running game that is not part of the map (an entity you nudged in the Live entity section) is gone on the next load; that is on purpose. **Play (F5)** to try it, and **Play from here** on a point in the Hierarchy starts the game at that point. If the game is about to change maps while you have unsaved edits (you walked through a door or into a warp zone while playing), the editor pauses and asks: **Save, then continue**, **Discard edits and continue**, or **Cancel**, which keeps you on the map with your edits (press Play again to carry on; that warp is dropped).
 
 Keep the game folder in version control: the editor overwrites files, it does not keep history.

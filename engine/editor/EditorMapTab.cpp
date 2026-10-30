@@ -7,6 +7,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <imgui.h>
 #include <imgui_stdlib.h>
+#include <set>
 
 namespace fe {
 using namespace editorui;
@@ -27,16 +28,13 @@ void Editor::updateOverlays(World& w) {
     auto& overlays = w.overlays();
     const auto& boxed = w.boxBlockedCells();
     const auto key = w.name() + "/" + std::to_string(revision_) + "/" + std::to_string(layer_) + "/" + brush_.tag +
-                     (showGrid_ ? "/on" : "/off") + (showBoxBlocked_ ? "/boxes" : "") + "/" +
-                     std::to_string(boxed.size()) + "/" + std::to_string(w.map().grid.revision()) +
-                     (bakePreview_ ? "/bake" : "");
+                     (showGrid_ ? "/on" : "/off") + (showBoxBlocked_ ? "/boxes" : "") + (showOverrides_ ? "/over" : "") +
+                     "/" + std::to_string(boxed.size()) + "/" + std::to_string(w.map().grid.revision());
     if (key == gridOverlayKey_ && overlays.contains("editor:blocked") == showGrid_) {
         return;
     }
     gridOverlayKey_ = key;
-    for (const char* name : {"editor:blocked", "editor:tag", "editor:boxblocked", "editor:bake_walk",
-                             "editor:bake_block", "editor:bake_partial", "editor:bake_island", "editor:bake_water",
-                             "editor:bake_unsure"}) {
+    for (const char* name : {"editor:blocked", "editor:tag", "editor:boxblocked", "editor:override"}) {
         overlays.erase(name);
     }
     if (!showGrid_) {
@@ -70,48 +68,20 @@ void Editor::updateOverlays(World& w) {
         }
         overlays["editor:boxblocked"] = OverlayLayer{cells, {1, 0.6f, 0.1f, 0.3f}, 0, 93, true, true};
     }
-    if (bakePreview_ && bakeOptions_.layer == layer_) {
-        std::vector<GridPos> walk, block, partial, island, water, unsure;
-        for (int z = 0; z < bakePreview_->depth; ++z) {
-            for (int x = 0; x < bakePreview_->width; ++x) {
-                const auto& c = bakePreview_->at(x, z);
-                if (!c.hit || !bakeOptions_.inRegion(x, z)) {
-                    continue;
-                }
-                const GridPos p{x, z, layer_};
-                if (c.water) {
-                    water.push_back(p);
-                } else if (c.island) {
-                    island.push_back(p);
-                } else if (c.partial) {
-                    partial.push_back(p);
-                } else if (c.confidence < 0.34f) {
-                    unsure.push_back(p);
-                } else if (c.walkable) {
-                    walk.push_back(p);
-                } else {
-                    block.push_back(p);
-                }
-            }
-        }
-        overlays["editor:bake_walk"] = OverlayLayer{walk, {0.2f, 0.9f, 0.3f, 0.3f}, 0, 95, true, false};
-        overlays["editor:bake_block"] = OverlayLayer{block, {0.9f, 0.15f, 0.15f, 0.45f}, 0, 96, true, true};
-        overlays["editor:bake_partial"] = OverlayLayer{partial, {1, 0.9f, 0.2f, 0.5f}, 0.5f, 97, true, true};
-        overlays["editor:bake_unsure"] = OverlayLayer{unsure, {1, 0.75f, 0.2f, 0.4f}, 0.5f, 97, true, true};
-        overlays["editor:bake_island"] = OverlayLayer{island, {1, 0.45f, 0.1f, 0.45f}, 0, 98, true, true};
-        overlays["editor:bake_water"] = OverlayLayer{water, {0.2f, 0.5f, 1, 0.45f}, 0, 96, true, true};
+    if (showOverrides_ && !w.authored().bake.overrides.empty()) {
+        // Cells an author corrected by hand: they keep their value through re-bakes.
+        overlays["editor:override"] = OverlayLayer{overriddenCells(w.authored(), layer_), {0.75f, 0.4f, 1, 0.3f}, 0, 94, true, true};
     }
 }
 
 void Editor::drawPaint(World& w) {
     ImGui::PushID("paint");
-    const auto& grid = w.authored().grid;
-    ImGui::Checkbox("Show grid overlay", &showGrid_);
-    ImGui::SameLine();
-    ImGui::Checkbox("Cells routes avoid", &showBoxBlocked_);
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Orange: walkable cells a collider box stands on. Bodies slide along the box;\n"
-                          "planned routes go around these cells.");
+    const auto& map = w.authored();
+    const auto& grid = map.grid;
+    const bool derived = !map.bake.empty();
+    if (derived) {
+        ImGui::TextWrapped("The brush records overrides: cells that keep what you paint when the walkability is "
+                           "baked again. Clear override hands a cell back to the bake.");
     }
     ImGui::SliderInt("Layer", &layer_, 0, grid.layerCount() - 1);
     ImGui::SameLine();
@@ -128,34 +98,31 @@ void Editor::drawPaint(World& w) {
             layer_ = grid.layerCount() - 1;
         }
     }
-    const char* modes[] = {"Walkable", "Height", "Ramp", "Add tag", "Remove tag", "Block (quarter cells)"};
-    int mode = blockBrush_ ? 5 : static_cast<int>(brush_.mode);
-    if (ImGui::Combo("Brush", &mode, modes, 6)) {
-        blockBrush_ = mode == 5;
-        if (!blockBrush_) {
+    const char* modes[] = {"Walkable", "Height", "Ramp", "Add tag", "Remove tag", "Clear override"};
+    int mode = clearOverrides_ ? 5 : static_cast<int>(brush_.mode);
+    if (ImGui::Combo("Brush", &mode, modes, derived ? 6 : 5)) {
+        clearOverrides_ = mode == 5;
+        if (!clearOverrides_) {
             brush_.mode = static_cast<GridBrush::Mode>(mode);
         }
     }
-    if (blockBrush_) {
-        ImGui::TextDisabled("Paints collider boxes a quarter of a cell at a time (sub-cell blocking)");
-        ImGui::DragFloat("Box height", &blockHeight_, 0.05f, 0.1f, 20);
-        ImGui::Checkbox("Erase", &blockErase_);
-        ImGui::SameLine();
-        ImGui::TextDisabled("(or hold Shift)");
+    const char* shapes[] = {"Brush", "Rectangle", "Flood fill"};
+    int shape = static_cast<int>(brushShape_);
+    if (ImGui::Combo("Shape", &shape, shapes, clearOverrides_ ? 1 : 3)) {
+        brushShape_ = static_cast<BrushShape>(shape);
+        fillStart_.reset();
+    }
+    if (clearOverrides_) {
+        brushShape_ = BrushShape::Single;
+    }
+    if (brushShape_ == BrushShape::Single) {
+        ImGui::SliderInt("Radius", &brushRadius_, 0, 4);
+    } else if (brushShape_ == BrushShape::Rectangle) {
+        ImGui::TextDisabled("Drag from one corner to the other");
     } else {
-        const char* shapes[] = {"Brush", "Rectangle", "Flood fill"};
-        int shape = static_cast<int>(brushShape_);
-        if (ImGui::Combo("Shape", &shape, shapes, 3)) {
-            brushShape_ = static_cast<BrushShape>(shape);
-            fillStart_.reset();
-        }
-        if (brushShape_ == BrushShape::Single) {
-            ImGui::SliderInt("Radius", &brushRadius_, 0, 4);
-        } else if (brushShape_ == BrushShape::Rectangle) {
-            ImGui::TextDisabled("Drag from one corner to the other");
-        } else {
-            ImGui::TextDisabled("Click a cell: every connected cell with its walkability is painted");
-        }
+        ImGui::TextDisabled("Click a cell: every connected cell with its walkability is painted");
+    }
+    if (!clearOverrides_) {
         if (brush_.mode == GridBrush::Mode::Walkable) {
             ImGui::Checkbox("Walkable", &brush_.walkable);
         } else if (brush_.mode == GridBrush::Mode::Height) {
@@ -169,8 +136,9 @@ void Editor::drawPaint(World& w) {
             if (ImGui::Combo("Ramp", &ramp, ramps, RampCount)) {
                 brush_.ramp = static_cast<Ramp>(ramp);
             }
+        } else {
+            ImGui::InputText("Tag", &brush_.tag);
         }
-        ImGui::InputText("Tag", &brush_.tag);
     }
     bool painting = tool_ == Tool::Paint;
     if (ImGui::Checkbox(ICON_FA_PAINTBRUSH " Paint with the left mouse button", &painting)) {
@@ -198,10 +166,35 @@ void Editor::drawPaint(World& w) {
         return;
     }
     const bool down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
-    if (blockBrush_) {
+    // The cells of the brush square around a cell, inside the grid.
+    const auto square = [&](GridPos centre) {
+        std::vector<GridPos> cells;
+        for (int z = centre.z - brushRadius_; z <= centre.z + brushRadius_; ++z) {
+            for (int x = centre.x - brushRadius_; x <= centre.x + brushRadius_; ++x) {
+                if (grid.inRange(x, z, layer_)) {
+                    cells.push_back({x, z, layer_});
+                }
+            }
+        }
+        return cells;
+    };
+    if (clearOverrides_) {
         if (down) {
-            const bool erase = blockErase_ || ImGui::GetIO().KeyShift;
-            edit(w, [&](MapData& m) { paintBlock(m, {hit->point.x, hit->point.z}, layer_, blockHeight_, !erase); });
+            std::optional<glm::ivec4> region;
+            bool cleared = false;
+            edit(w, [&](MapData& m) {
+                for (const auto& cell : square(target)) {
+                    if (clearOverride(m, cell)) {
+                        cleared = true;
+                        const glm::ivec4 one(cell.x, cell.z, 1, 1);
+                        region = region ? unionRegion(*region, one) : one;
+                    }
+                }
+            });
+            if (cleared && region) {
+                rebake(w, region, true); // the bake's own value comes back
+                gesture_ = true;         // the stroke goes on
+            }
         }
         return;
     }
@@ -211,16 +204,49 @@ void Editor::drawPaint(World& w) {
         }
         return;
     }
+    // On a derived map the brush writes overrides; on a hand-painted one, the grid.
+    const auto strokeCells = [&](const std::vector<GridPos>& cells) {
+        edit(w, [&](MapData& m) {
+            if (derived) {
+                for (const auto& cell : cells) {
+                    setOverride(m, cell, brush_);
+                }
+            } else {
+                for (const auto& cell : cells) {
+                    paint(m.grid, brush_, cell, 0);
+                }
+            }
+        });
+    };
     switch (brushShape_) {
     case BrushShape::Single:
         if (down) {
-            edit(w, [&](MapData& m) { paint(m.grid, brush_, target, brushRadius_); });
+            strokeCells(square(target));
         }
         break;
     case BrushShape::Flood:
         if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
             gesture_ = false;
-            edit(w, [&](MapData& m) { floodFill(m.grid, brush_, target); });
+            if (derived) {
+                // The connected cells that share the start's walkability, on this layer.
+                std::vector<GridPos> cells, stack{target};
+                std::set<std::pair<int, int>> seen{{target.x, target.z}};
+                const bool walkable = c.walkable;
+                while (!stack.empty()) {
+                    const auto cell = stack.back();
+                    stack.pop_back();
+                    cells.push_back(cell);
+                    for (const auto [dx, dz] : {std::pair{1, 0}, std::pair{-1, 0}, std::pair{0, 1}, std::pair{0, -1}}) {
+                        const GridPos next{cell.x + dx, cell.z + dz, layer_};
+                        if (grid.inRange(next) && grid.at(next).walkable == walkable && seen.insert({next.x, next.z}).second) {
+                            stack.push_back(next);
+                        }
+                    }
+                }
+                strokeCells(cells);
+            } else {
+                edit(w, [&](MapData& m) { floodFill(m.grid, brush_, target); });
+            }
             gesture_ = false;
         }
         break;
@@ -241,7 +267,13 @@ void Editor::drawPaint(World& w) {
                 fillStart_.reset();
                 w.overlays().erase("editor:fillrect");
                 gesture_ = false;
-                edit(w, [&](MapData& m) { fillRect(m.grid, brush_, start, target); });
+                edit(w, [&](MapData& m) {
+                    if (derived) {
+                        setOverrideRect(m, start, target, brush_);
+                    } else {
+                        fillRect(m.grid, brush_, start, target);
+                    }
+                });
                 gesture_ = false;
             }
         }
@@ -249,44 +281,193 @@ void Editor::drawPaint(World& w) {
     }
 }
 
-void Editor::drawWalkability(World& w) {
-    ImGui::TextWrapped("Bake a first pass of walkability, heights and ramps from the map's geometry, then clean up "
-                       "with the brush. Objects smaller than a cell get collider boxes instead of whole blocked cells.");
-    if (ImGui::Button(ICON_FA_WAND_MAGIC_SPARKLES " Bake walkability...")) {
-        bakeDialog_ = true;
-        bakeOptions_.layer = layer_;
-        ImGui::OpenPopup("Bake walkability");
-    }
-    if (bakePreview_) {
-        ImGui::SameLine();
-        if (ImGui::Button(ICON_FA_CHECK " Apply preview")) {
-            const auto result = *bakePreview_;
-            const auto options = bakeOptions_;
-            gesture_ = false;
-            int changed = 0;
-            edit(w, [&](MapData& m) { changed = applyBake(m, result, options); });
-            gesture_ = false;
-            bakePreview_.reset();
-            status_ = "Baked walkability: " + std::to_string(changed) + " cell(s) changed, " +
-                      std::to_string(result.colliders.size()) + " box(es) added";
+// The placements the bake reads, in the form that tells a change: id, model,
+// position, yaw, scale and layer.
+Json bakedPlacementsJson(const MapData& map) {
+    Json out = Json::array();
+    for (const auto& p : map.placements) {
+        if (const auto model = bakedModelOf(p)) {
+            out.push_back({{"id", p.id},   {"model", *model},         {"position", toJson(p.position)},
+                           {"yaw", p.yaw}, {"scale", toJson(p.scale)}, {"layer", p.layer}});
         }
-        ImGui::SameLine();
-        if (ImGui::Button(ICON_FA_XMARK " Clear preview")) {
-            bakePreview_.reset();
-        }
-        ImGui::TextDisabled("%s", bakeSummary_.c_str());
-        ImGui::TextDisabled("green walkable, red blocked, yellow partial or unsure (check these), orange unreachable, "
-                            "blue water");
     }
-    drawBakeDialog(w);
+    return out;
 }
 
-void Editor::drawBakeDialog(World& w) {
-    if (!bakeDialog_) {
+void Editor::rebake(World& w, std::optional<glm::ivec4> region, bool joinGesture) {
+    auto options = BakeOptions::fromJson(w.authored().bake.options);
+    options.region = region;
+    rebake(w, options, joinGesture, false);
+}
+
+void Editor::rebake(World& w, const BakeOptions& given, bool joinGesture, bool storeOptions) {
+    const auto& authored = w.authored();
+    auto options = given;
+    options.layer = std::clamp(options.layer, 0, authored.grid.layerCount() - 1);
+    if (options.region && options.region->x <= 0 && options.region->y <= 0 &&
+        options.region->x + options.region->z >= authored.grid.width() &&
+        options.region->y + options.region->w >= authored.grid.depth()) {
+        options.region.reset(); // the whole map: a full bake
+    }
+    const auto scene = sceneForMap(authored, engine_.assets(), w.geometryPath());
+    const auto result = bakeWalkability(scene.pieces, authored.grid, options);
+    const Json optionsJson = storeOptions || authored.bake.options.empty() ? options.toJson() : authored.bake.options;
+    MapData fingerprinted = authored;
+    fingerprinted.bake.options = optionsJson;
+    const auto fingerprint = bakeFingerprint(fingerprinted, w.geometryPath(), gameFileReader(engine_.lua().gameRoot()));
+    int changed = 0;
+    const auto apply = [&](MapData& m) {
+        changed = applyBake(m, result, options);
+        m.bake.fingerprint = fingerprint;
+        m.bake.options = optionsJson;
+    };
+    if (joinGesture) {
+        history_.apply(w, apply, false);
+    } else {
+        gesture_ = false;
+        edit(w, apply);
+        gesture_ = false;
+    }
+    history_.settle(w);
+    gestureBakeSnapshot_.reset();
+    ++revision_;
+    status_ = (options.region ? "Re-baked walkability around the change: " : "Baked walkability: ") +
+              std::to_string(changed) + " cell(s) changed, " + std::to_string(w.authored().bake.colliders.size()) +
+              " box(es)";
+    for (const auto& problem : scene.problems) {
+        status_ += "; " + problem;
+    }
+    bakeStatusRevision_ = ~std::uint64_t{0};
+}
+
+void Editor::autoRebake(World& w) {
+    const Json before = std::move(*gestureBakeSnapshot_);
+    gestureBakeSnapshot_.reset();
+    const auto& authored = w.authored();
+    if (!authored.bake.autoBake || authored.bake.empty()) {
+        return; // a hand-painted map: Bake now opts in
+    }
+    const auto after = bakedPlacementsJson(authored);
+    if (before == after) {
+        bakeStatusRevision_ = ~std::uint64_t{0};
         return;
     }
+    const auto& grid = authored.grid;
+    std::optional<glm::ivec4> region;
+    const auto grow = [&](const Json& entry) {
+        Placement p;
+        p.position = jsonVec3(entry.at("position"));
+        p.yaw = entry.at("yaw");
+        p.scale = jsonVec3(entry.at("scale"));
+        const auto model = engine_.assets().tryModel(entry.at("model").get<std::string>());
+        const auto cells = model ? bakeRegionFor(*model, p, grid) : glm::ivec4(0, 0, grid.width(), grid.depth());
+        region = region ? unionRegion(*region, cells) : cells;
+    };
+    for (const auto& entry : before) {
+        if (std::find(after.begin(), after.end(), entry) == after.end()) {
+            grow(entry);
+        }
+    }
+    for (const auto& entry : after) {
+        if (std::find(before.begin(), before.end(), entry) == before.end()) {
+            grow(entry);
+        }
+    }
+    if (region) {
+        rebake(w, region, true);
+    }
+}
+
+void Editor::refreshBakeStatus(World& w) {
+    if (gesture_ || (bakeStatusRevision_ == revision_ && bakeStatusWorld_ == w.name())) {
+        return;
+    }
+    bakeStatusRevision_ = revision_;
+    bakeStatusWorld_ = w.name();
+    const auto& map = w.authored();
+    if (map.bake.empty()) {
+        bakeStale_ = false;
+        bakeStatus_.clear();
+        return;
+    }
+    const auto fingerprint = bakeFingerprint(map, w.geometryPath(), gameFileReader(engine_.lua().gameRoot()));
+    bakeStale_ = fingerprint != map.bake.fingerprint;
+    int walkable = 0, blocked = 0;
+    const int layer = std::clamp(layer_, 0, map.grid.layerCount() - 1);
+    for (int z = 0; z < map.grid.depth(); ++z) {
+        for (int x = 0; x < map.grid.width(); ++x) {
+            (map.grid.at(x, z, layer).walkable ? walkable : blocked)++;
+        }
+    }
+    bakeStatus_ = std::to_string(walkable) + " walkable, " + std::to_string(blocked) + " blocked cell(s), " +
+                  std::to_string(map.bake.colliders.size()) + " baked box(es), " +
+                  std::to_string(map.bake.overrides.size()) + " override(s)";
+}
+
+void Editor::drawWalkability(World& w) {
+    const auto& map = w.authored();
+    refreshBakeStatus(w);
+    bool autoBake = map.bake.autoBake && !map.bake.empty();
+    if (ImGui::Checkbox("Auto bake", &autoBake)) {
+        gesture_ = false;
+        edit(w, [&](MapData& m) {
+            m.bake.autoBake = autoBake;
+            if (m.bake.options.empty()) {
+                m.bake.options = BakeOptions{}.toJson();
+            }
+        });
+        gesture_ = false;
+        if (autoBake) {
+            rebake(w, std::nullopt, false);
+        }
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Derive walkability from the terrain and the placed models, again whenever a model is\n"
+                          "placed, moved, turned, scaled or removed. Fix exceptions with the brush.");
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(ICON_FA_WAND_MAGIC_SPARKLES " Bake now")) {
+        rebake(w, std::nullopt, false);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Options...")) {
+        bakeOptions_ = BakeOptions::fromJson(map.bake.options);
+        bakeOptions_.layer = layer_;
+        ImGui::OpenPopup("Bake options");
+    }
+    if (map.bake.empty()) {
+        ImGui::TextDisabled("Hand-painted walkability. Bake now derives it from the terrain and the placed\n"
+                            "models; Auto bake keeps it up to date.");
+    } else if (bakeStale_) {
+        ImGui::TextColored(ImVec4(1, 0.6f, 0.2f, 1), ICON_FA_TRIANGLE_EXCLAMATION
+                           " Bake out of date: the geometry, a model or a placement changed. Press Bake now.");
+    } else {
+        ImGui::TextDisabled("Fresh: %s", bakeStatus_.c_str());
+    }
+    ImGui::Checkbox("Show grid overlay", &showGrid_);
+    ImGui::SameLine();
+    ImGui::Checkbox("Cells routes avoid", &showBoxBlocked_);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Orange cells: walkable, but a box stands on them. Bodies slide along the box;\n"
+                          "planned routes go around these cells.");
+    }
+    ImGui::SameLine();
+    ImGui::Checkbox("Baked boxes", &handles_.bakedBoxes);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Orange outlines: the collider boxes the bake made from walls, posts and drops.");
+    }
+    ImGui::SameLine();
+    ImGui::Checkbox("Overrides", &showOverrides_);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Violet: cells fixed by hand with the brush; they keep their value through re-bakes.");
+    }
+    drawBakeOptions(w);
+}
+
+void Editor::drawBakeOptions(World& w) {
     ImGui::SetNextWindowSize(ImVec2(460, 0), ImGuiCond_Appearing);
-    if (!ImGui::BeginPopupModal("Bake walkability", &bakeDialog_, ImGuiWindowFlags_AlwaysAutoResize)) {
+    bool open = true;
+    if (!ImGui::BeginPopupModal("Bake options", &open, ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
     }
     auto& o = bakeOptions_;
@@ -294,6 +475,9 @@ void Editor::drawBakeDialog(World& w) {
     ImGui::SliderInt("Layer to write", &o.layer, 0, grid.layerCount() - 1);
     ImGui::SeparatorText("What counts as ground");
     ImGui::SliderInt("Samples per cell side", &o.samples, 2, 8);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("4 makes quarter-cell boxes, 8 eighth-cell boxes (finer, slower).");
+    }
     ImGui::SliderFloat("Max slope (degrees)", &o.maxSlopeDegrees, 5, 80, "%.0f");
     ImGui::DragFloat("Head room", &o.clearance, 0.05f, 0.5f, 5, "%.2f units");
     ImGui::DragFloat("Step", &o.step, 0.05f, 0.1f, 2, "%.2f units");
@@ -301,9 +485,13 @@ void Editor::drawBakeDialog(World& w) {
         ImGui::SetTooltip("Ground within this of the cell's floor is the same floor; also the largest step\n"
                           "between cells that still connects them (for finding unreachable islands).");
     }
-    ImGui::SliderFloat("Walkable above", &o.coverage, 0.5f, 1, "%.2f of the cell");
-    ImGui::SliderFloat("Blocked below", &o.partialCoverage, 0, 0.5f, "%.2f of the cell");
-    ImGui::TextDisabled("Between the two, the cell is walkable and the covered quarters get boxes.");
+    ImGui::SliderFloat("Walkable above", &o.minCoverage, 0, 1, "%.2f of the cell");
+    ImGui::TextDisabled("Below it the cell is blocked; above, the parts that are not ground get boxes.");
+    ImGui::Checkbox("Block the outer ring", &o.blockEdges);
+    ImGui::SameLine();
+    ImGui::Checkbox("Block unreachable islands", &o.pruneIslands);
+    ImGui::Checkbox("Boxes at drops inside a cell", &o.boxDrops);
+    ImGui::SeparatorText("This bake only");
     bool band = o.minHeight > -1e8f || o.maxHeight < 1e8f;
     if (ImGui::Checkbox("Only surfaces in a height band", &band)) {
         if (band) {
@@ -320,19 +508,6 @@ void Editor::drawBakeDialog(World& w) {
             ImGui::SetTooltip("For a bridge deck or an upper floor: bake only what lies between these heights into the layer");
         }
     }
-    ImGui::SeparatorText("What to write");
-    ImGui::Checkbox("Walkability", &o.writeWalkable);
-    ImGui::SameLine();
-    ImGui::Checkbox("Heights", &o.writeHeights);
-    ImGui::SameLine();
-    ImGui::Checkbox("Ramps", &o.writeRamps);
-    ImGui::Checkbox("Water tag", &o.writeWater);
-    ImGui::SameLine();
-    ImGui::Checkbox("Boxes for partial cells", &o.writeColliders);
-    ImGui::Checkbox("Block the outer ring", &o.blockEdges);
-    ImGui::SameLine();
-    ImGui::Checkbox("Block unreachable islands", &o.pruneIslands);
-    ImGui::Checkbox("Never unblock cells painted blocked", &o.keepBlocked);
     bool regional = o.region.has_value();
     if (ImGui::Checkbox("Only a rectangle of cells", &regional)) {
         if (regional) {
@@ -348,43 +523,17 @@ void Editor::drawBakeDialog(World& w) {
         }
     }
     ImGui::Separator();
-    const auto model = engine_.assets().tryModel(w.geometryPath());
-    if (!model) {
-        ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "The map has no geometry to bake from (%s)", w.geometryPath().c_str());
-    }
-    ImGui::BeginDisabled(!model);
-    if (ImGui::Button(ICON_FA_EYE " Preview")) {
-        bakePreview_ = bakeWalkability(*model, grid, o);
-        bakeSummary_ = std::to_string(bakePreview_->walkable) + " walkable, " + std::to_string(bakePreview_->blocked) +
-                       " blocked (" + std::to_string(bakePreview_->islands) + " unreachable), " +
-                       std::to_string(bakePreview_->partial) + " partial with " +
-                       std::to_string(bakePreview_->colliders.size()) + " box(es), " +
-                       std::to_string(bakePreview_->unsampled) + " without geometry";
+    if (ImGui::Button(ICON_FA_CHECK " Bake with these")) {
+        rebake(w, o, false, true);
         layer_ = o.layer;
-    }
-    ImGui::SameLine();
-    if (ImGui::Button(ICON_FA_CHECK " Bake and apply")) {
-        const auto result = bakeWalkability(*model, grid, o);
-        const auto options = o;
-        gesture_ = false;
-        int changed = 0;
-        edit(w, [&](MapData& m) { changed = applyBake(m, result, options); });
-        gesture_ = false;
-        bakePreview_.reset();
-        status_ = "Baked walkability: " + std::to_string(changed) + " cell(s) changed, " +
-                  std::to_string(result.colliders.size()) + " box(es) added";
-        layer_ = o.layer;
-        bakeDialog_ = false;
         ImGui::CloseCurrentPopup();
     }
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (ImGui::Button("Close") || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
-        bakeDialog_ = false;
-        ImGui::CloseCurrentPopup();
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("The settings above the line are kept with the map and used by Auto bake.");
     }
-    if (bakePreview_) {
-        ImGui::TextDisabled("%s", bakeSummary_.c_str());
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
 }
@@ -534,17 +683,19 @@ void Editor::drawMapTab() {
     if (ImGui::Button("Import Blender markers")) {
         importMarkers(*w);
     }
-    if (ImGui::CollapsingHeader("Grid painting", ImGuiTreeNodeFlags_DefaultOpen)) {
-        drawPaint(*w);
-    } else if (tool_ == Tool::Paint) {
-        tool_ = Tool::Translate;
+    // A new map derives its walkability as soon as it opens.
+    if (map.bake.autoBake && !map.bake.empty() && map.bake.fingerprint.empty() && !gesture_) {
+        rebake(*w, std::nullopt, false);
     }
-    if (ImGui::CollapsingHeader("Walkability bake")) {
+    if (ImGui::CollapsingHeader("Walkability", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::PushID("bake");
         drawWalkability(*w);
         ImGui::PopID();
-    } else {
-        drawBakeDialog(*w); // the modal stays open while its header is closed
+    }
+    if (ImGui::CollapsingHeader(map.bake.empty() ? "Paint walkability" : "Fix walkability by hand")) {
+        drawPaint(*w);
+    } else if (tool_ == Tool::Paint) {
+        tool_ = Tool::Translate;
     }
     if (ImGui::CollapsingHeader("Layer links")) {
         ImGui::PushID("links");

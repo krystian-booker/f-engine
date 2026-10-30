@@ -66,37 +66,6 @@ TEST_CASE("A* goes around walls and respects step height") {
     CHECK(findPath(flat, {7, 1, 0}, {6, 0, 0}, rules).empty());
 }
 
-TEST_CASE("reachable honours budget, jump limits, blocked and no-stop cells") {
-    Grid grid(9, 9, 1);
-    grid.at(5, 4).height = 2; // a tall pillar
-    StepRules rules;
-    rules.maxUp = 1;
-    rules.maxDown = 3;
-    rules.blocked.insert(cellKey({4, 3, 0}));
-    rules.noStop.insert(cellKey({3, 4, 0}));
-    const auto cells = reachable(grid, {4, 4, 0}, 2, rules);
-    auto find = [&](GridPos p) {
-        return std::find_if(cells.begin(), cells.end(), [&](const ReachCell& c) { return c.pos == p; });
-    };
-    CHECK(find({4, 4, 0}) != cells.end());
-    CHECK(find({5, 4, 0}) == cells.end()); // too high to climb
-    CHECK(find({4, 3, 0}) == cells.end()); // blocked by an enemy
-    REQUIRE(find({3, 4, 0}) != cells.end());
-    CHECK_FALSE(find({3, 4, 0})->stoppable);
-    CHECK(find({2, 4, 0}) != cells.end());
-    CHECK(find({1, 4, 0}) == cells.end()); // beyond the budget
-    const auto path = reachPath(cells, {2, 4, 0});
-    REQUIRE(path.size() == 2);
-    CHECK(path.back() == GridPos{2, 4, 0});
-}
-
-TEST_CASE("line of sight is blocked by higher terrain") {
-    Grid grid(10, 3, 1);
-    grid.at(5, 1).height = 3;
-    CHECK_FALSE(lineOfSight(grid, {1.5f, 1, 1.5f}, {8.5f, 1, 1.5f}, 0));
-    CHECK(lineOfSight(grid, {1.5f, 4, 1.5f}, {8.5f, 4, 1.5f}, 0));
-}
-
 TEST_CASE("area shapes produce the expected cell counts") {
     CHECK(areaOffsets(AreaShape::Diamond, 1, 2).size() == 12);
     CHECK(areaOffsets(AreaShape::Diamond, 0, 1).size() == 5);
@@ -229,19 +198,6 @@ TEST_CASE("diagonal steps cannot slip between tall pillars") {
     CHECK(findPath(grid, {0, 0, 0}, {1, 1, 0}, rules).size() == 1);
 }
 
-TEST_CASE("negative or non-finite tag costs are rejected") {
-    Grid grid(2, 1);
-    const auto road = grid.tagBit("road", true);
-    StepRules rules;
-    rules.tagCosts.emplace_back(road, -1.5f);
-    CHECK_THROWS_AS(reachable(grid, {0, 0, 0}, 3, rules), std::invalid_argument);
-    CHECK_THROWS_AS(findPath(grid, {0, 0, 0}, {1, 0, 0}, rules), std::invalid_argument);
-    rules.tagCosts = {{road, std::numeric_limits<float>::quiet_NaN()}};
-    CHECK_THROWS_AS(validateRules(rules), std::invalid_argument);
-    rules.tagCosts = {{road, 0.5f}};
-    CHECK_NOTHROW(validateRules(rules));
-}
-
 TEST_CASE("A* breaks ties on the cell key") {
     Grid grid(5, 5, 1);
     StepRules rules;
@@ -250,32 +206,6 @@ TEST_CASE("A* breaks ties on the cell key") {
     const std::vector<GridPos> expected{{1, 0, 0}, {2, 0, 0}, {2, 1, 0}, {2, 2, 0}};
     CHECK(first == expected);
     CHECK(findPath(grid, {0, 0, 0}, {2, 2, 0}, rules) == first);
-}
-
-TEST_CASE("line of sight traces every crossed cell, ignores the shooter's cell and sees bridges") {
-    Grid grid(10, 6, 1);
-    const auto wall = grid.tagBit("wall", true);
-    grid.at(1, 1).tags = wall;
-    CHECK(lineOfSight(grid, {1.5f, 1, 1.5f}, {8.5f, 1, 1.5f}, 0, wall));
-    grid.at(4, 1).tags = wall;
-    CHECK_FALSE(lineOfSight(grid, {1.5f, 1, 1.5f}, {8.5f, 1, 1.5f}, 0, wall));
-    // A line that only clips the corner of a tall cell (about 0.04 units inside it).
-    Grid corner(8, 8, 1);
-    corner.at(3, 3).height = 5;
-    CHECK_FALSE(lineOfSight(corner, {0.5f, 1, 5.53f}, {5.53f, 1, 0.5f}, 0));
-    corner.at(3, 3).height = 0;
-    CHECK(lineOfSight(corner, {0.5f, 1, 5.53f}, {5.53f, 1, 0.5f}, 0));
-    // Bridge decks block lines through them, not lines passing underneath.
-    Grid decks(10, 3, 1);
-    decks.addLayer("deck");
-    decks.at(4, 1, 1) = {2, true, Ramp::None, 0};
-    decks.at(5, 1, 1) = {2, true, Ramp::None, 0};
-    CHECK(lineOfSight(decks, {1.5f, 1, 1.5f}, {8.5f, 1, 1.5f}, 0));
-    CHECK_FALSE(lineOfSight(decks, {1.5f, 3, 1.5f}, {8.5f, 0.5f, 1.5f}, 0));
-    // Ground cliffs block a shooter standing on an upper layer.
-    decks.at(1, 1, 1) = {1, true, Ramp::None, 0};
-    decks.at(7, 1).height = 3;
-    CHECK_FALSE(lineOfSight(decks, {1.5f, 2, 1.5f}, {8.5f, 2, 1.5f}, 1));
 }
 
 TEST_CASE("diagonal lines and cones follow the diagonal") {
@@ -311,32 +241,6 @@ TEST_CASE("picking stops at cliff faces and hits bridge decks") {
     CHECK_FALSE(raycastGrid(grid, {20, 5, 20}, {1, 0, 0}));
 }
 
-TEST_CASE("zones of control end movement but stay reachable") {
-    // A 7x1 corridor; a foe's zone covers x = 3.
-    Grid grid(7, 3, 1);
-    StepRules rules;
-    rules.zoc.insert(cellKey({3, 1, 0}));
-    const auto cells = reachable(grid, {1, 1, 0}, 5, rules);
-    const auto at = [&](GridPos p) {
-        return std::find_if(cells.begin(), cells.end(), [&](const ReachCell& c) { return c.pos == p; });
-    };
-    REQUIRE(at({3, 1, 0}) != cells.end());
-    CHECK(at({3, 1, 0})->stoppable);
-    // (4, 1) is reached around the zone cell, never through it.
-    REQUIRE(at({4, 1, 0}) != cells.end());
-    CHECK(at({4, 1, 0})->cost == doctest::Approx(5));
-    CHECK(cells[static_cast<std::size_t>(at({4, 1, 0})->parent)].pos != GridPos{3, 1, 0});
-    // A zone cell only stops movement that enters it, not movement that starts there.
-    CHECK(reachable(grid, {3, 1, 0}, 1, rules).size() == 5);
-    // A* honours the same rule.
-    const auto path = findPath(grid, {1, 1, 0}, {5, 1, 0}, rules);
-    REQUIRE_FALSE(path.empty());
-    CHECK(std::find(path.begin(), path.end(), GridPos{3, 1, 0}) == path.end());
-    rules.zoc = {cellKey({3, 0, 0}), cellKey({3, 1, 0}), cellKey({3, 2, 0})};
-    CHECK(findPath(grid, {1, 1, 0}, {5, 1, 0}, rules).empty());
-    CHECK(findPath(grid, {1, 1, 0}, {3, 2, 0}, rules).size() == 3);
-}
-
 TEST_CASE("a cost function reprices or forbids steps") {
     Grid grid(5, 3, 1);
     StepRules rules;
@@ -355,13 +259,12 @@ TEST_CASE("a cost function reprices or forbids steps") {
     CHECK(std::find(path.begin(), path.end(), GridPos{2, 1, 0}) == path.end());
     // The cheapest route uses the road even though it is longer.
     CHECK(std::find(path.begin(), path.end(), GridPos{2, 2, 0}) != path.end());
-    const auto cells = reachable(grid, {0, 2, 0}, 1, rules);
-    CHECK(std::any_of(cells.begin(), cells.end(),
-                      [](const ReachCell& c) { return c.pos == GridPos{4, 2, 0}; }));
+    // Along the road the whole row is a plain four-step route.
+    CHECK(findPath(grid, {0, 2, 0}, {4, 2, 0}, rules).size() == 4);
     rules.cost = [](GridPos, GridPos, float) -> std::optional<float> {
         return -1.0f;
     };
-    CHECK_THROWS_AS(reachable(grid, {0, 0, 0}, 3, rules), std::invalid_argument);
+    CHECK_THROWS_AS(findPath(grid, {0, 0, 0}, {3, 0, 0}, rules), std::invalid_argument);
 }
 
 TEST_CASE("gap jumps cross pits and walls no higher than the lower end") {
@@ -383,12 +286,6 @@ TEST_CASE("gap jumps cross pits and walls no higher than the lower end") {
     REQUIRE(route.size() == 1);
     CHECK(route[0].cell == GridPos{4, 1, 0});
     CHECK(route[0].kind == StepKind::Jump);
-    const auto cells = reachable(grid, {1, 1, 0}, 3, rules);
-    const auto landing = std::find_if(cells.begin(), cells.end(),
-                                      [](const ReachCell& c) { return c.pos == GridPos{4, 1, 0}; });
-    REQUIRE(landing != cells.end());
-    CHECK(landing->kind == StepKind::Jump);
-    CHECK(landing->cost == doctest::Approx(3));
     // The raised wall blocks the jump from (4, 1) to (6, 1).
     CHECK(findPath(grid, {4, 1, 0}, {6, 1, 0}, rules).empty());
     grid.at(5, 1).height = 0;
@@ -422,11 +319,6 @@ TEST_CASE("diagonal gap jumps are opt-in and may not cut past a raised corner") 
     const auto route = findRoute(grid, {1, 1, 0}, {3, 3, 0}, rules).steps;
     REQUIRE(route.size() == 1);
     CHECK(route[0].kind == StepKind::Jump);
-    const auto cells = reachable(grid, {1, 1, 0}, 3, rules);
-    const auto landing = std::find_if(cells.begin(), cells.end(),
-                                      [](const ReachCell& c) { return c.pos == GridPos{3, 3, 0}; });
-    REQUIRE(landing != cells.end());
-    CHECK(landing->cost == doctest::Approx(2 * std::numbers::sqrt2_v<float>));
     // A pillar beside the line blocks it; one no higher than the ends does not.
     grid.at(2, 1).height = 1;
     CHECK(findPath(grid, {1, 1, 0}, {3, 3, 0}, rules).empty());
@@ -472,7 +364,7 @@ TEST_CASE("ladders join cells of any height difference, both ways") {
     CHECK_THROWS(Grid::fromJson(json));
 }
 
-TEST_CASE("rules.ladders = false keeps paths and reach off ladders") {
+TEST_CASE("rules.ladders = false keeps paths off ladders") {
     Grid grid(5, 3, 1);
     for (int x = 0; x < 5; ++x) {
         grid.at(x, 0).height = 4;
@@ -480,11 +372,7 @@ TEST_CASE("rules.ladders = false keeps paths and reach off ladders") {
     grid.setLinks({{2, 1, 0, 0, {0, -1}, LinkKind::Ladder}});
     StepRules rules;
     CHECK_FALSE(findRoute(grid, {0, 2, 0}, {0, 0, 0}, rules).steps.empty());
-    const auto reachesTop = [&] {
-        const auto cells = reachable(grid, {2, 1, 0}, 3, rules);
-        return std::any_of(cells.begin(), cells.end(),
-                           [](const ReachCell& c) { return c.pos == GridPos{2, 0, 0}; });
-    };
+    const auto reachesTop = [&] { return !findRoute(grid, {2, 1, 0}, {2, 0, 0}, rules).steps.empty(); };
     CHECK(reachesTop());
     rules.ladders = false;
     CHECK(findRoute(grid, {0, 2, 0}, {0, 0, 0}, rules).steps.empty());
@@ -558,31 +446,6 @@ TEST_CASE("cell coordinates of far-away and non-finite positions saturate instea
     CHECK_FALSE(grid.walkableAt({-Huge, Huge}, 0));
 }
 
-TEST_CASE("line of sight traces only the part of a segment over the grid") {
-    // The reviewer's probe: a 2e9-unit line took 40 seconds cell by cell, and
-    // 1e30 overflowed the cell count. Within the world bound scripts are held
-    // to (1e6) the clipped trace is exact.
-    Grid grid(10, 3, 1);
-    CHECK(lineOfSight(grid, {-1e6f, 1, 1.5f}, {1e6f, 1, 1.5f}, 0));
-    CHECK(lineOfSight(grid, {-1e6f, 1, -1e6f}, {1e6f, 1, 1e6f}, 0));
-    grid.at(5, 1).height = 3;
-    CHECK_FALSE(lineOfSight(grid, {-1e6f, 1, 1.5f}, {1e6f, 1, 1.5f}, 0));
-    CHECK_FALSE(lineOfSight(grid, {-1e9f, 1, 1.5f}, {1e9f, 1, 1.5f}, 0));
-    CHECK(lineOfSight(grid, {-1e6f, 4, 1.5f}, {1e6f, 4, 1.5f}, 0));
-    // Far beyond it the answer is only as precise as the floats, but the
-    // trace still ends at once.
-    (void)lineOfSight(grid, {-1e30f, 1, -1e30f}, {1e30f, 1, 1e30f}, 0);
-    (void)lineOfSight(grid, {-3.4e38f, 1, 1.5f}, {3.4e38f, 1, 1.5f}, 0);
-    (void)lineOfSight(grid, {-3.4e38f, -3.4e38f, -3.4e38f}, {3.4e38f, 3.4e38f, 3.4e38f}, 0);
-    // Lines that miss the grid see through.
-    CHECK(lineOfSight(grid, {-1e9f, 1, 50}, {1e9f, 1, 50}, 0));
-    CHECK(lineOfSight(grid, {-5, 1, -5}, {-1, 1, -1}, 0));
-    // Clipping keeps the blocking test exact for a segment entering the grid.
-    CHECK_FALSE(lineOfSight(grid, {-20, 1, 1.5f}, {8.5f, 1, 1.5f}, 0));
-    CHECK(lineOfSight(grid, {-20, 4, 1.5f}, {8.5f, 4, 1.5f}, 0));
-    CHECK_FALSE(lineOfSight(grid, {std::numeric_limits<float>::quiet_NaN(), 1, 1}, {1, 1, 1}, 0));
-}
-
 TEST_CASE("walk rows accept only 1, 0 and #, and tag masks must fit the tag list") {
     Grid grid(3, 1, 1);
     grid.at(1, 0).walkable = false;
@@ -617,9 +480,8 @@ TEST_CASE("a footprint wider than one cell needs every cell of it, and skips lad
     for (const auto& cell : path) {
         CHECK(cell.z <= 1);
     }
-    const auto cells = reachable(grid, {0, 0, 0}, 9, rules);
-    CHECK(std::none_of(cells.begin(), cells.end(),
-                       [](const ReachCell& c) { return c.pos.x == 5 || c.pos.z == 2; }));
+    CHECK(findPath(grid, {0, 0, 0}, {5, 0, 0}, rules).empty()); // the body would hang past x = 5
+    CHECK(findPath(grid, {0, 0, 0}, {0, 2, 0}, rules).empty()); // and past z = 2
     CHECK(grid.canStand({2.5f, 0.5f}, 0.2f, 0, 2));
     CHECK(grid.canStand({4.5f, 1.5f}, 0.2f, 0, 2));       // cells (4..5, 1..2) all exist
     CHECK_FALSE(grid.canStand({4.5f, 2.5f}, 0.2f, 0, 2)); // the second row hangs over the edge
@@ -662,7 +524,8 @@ TEST_CASE("flying rules cross unwalkable cells and height steps but not blocked 
     }
     rules.blockedTags = water;
     CHECK(findPath(grid, {0, 1, 0}, {7, 1, 0}, rules).empty());
-    CHECK(reachable(grid, {0, 1, 0}, 10, rules).size() == 9);
+    CHECK(findPath(grid, {0, 1, 0}, {2, 1, 0}, rules).size() == 2); // up to the water's edge
+    CHECK(findPath(grid, {0, 1, 0}, {4, 1, 0}, rules).empty());     // nothing crosses it
 }
 
 TEST_CASE("a search to a goal that cannot be entered ends without expanding anything") {
@@ -685,23 +548,6 @@ TEST_CASE("a search to a goal that cannot be entered ends without expanding anyt
     rules.blocked.clear();
     CHECK_FALSE(findRoute(grid, {0, 0, 0}, {19, 19, 0}, rules).steps.empty());
     CHECK(calls > 0);
-}
-
-TEST_CASE("reachability stops at its visit cap and says so") {
-    Grid grid(60, 60, 1);
-    StepRules rules;
-    rules.cost = [](GridPos, GridPos, float) -> std::optional<float> {
-        return 0.0f; // a free-movement rule would flood the grid
-    };
-    const auto capped = findReachable(grid, {30, 30, 0}, 1, rules, 100);
-    CHECK(capped.truncated);
-    CHECK(capped.cells.size() <= 500);
-    const auto full = findReachable(grid, {30, 30, 0}, 1, rules);
-    CHECK_FALSE(full.truncated);
-    CHECK(full.cells.size() == 3600);
-    const auto plain = findReachable(Grid(5, 5, 1), {2, 2, 0}, 2, StepRules{});
-    CHECK_FALSE(plain.truncated);
-    CHECK(plain.cells.size() == 13);
 }
 
 TEST_CASE("required and blocked tags are a passability class for standing and planning") {
@@ -729,7 +575,6 @@ TEST_CASE("required and blocked tags are a passability class for standing and pl
         CHECK((grid.at(cell).tags & water) != 0u);
     }
     CHECK(findPath(grid, {3, 0, 0}, {5, 2, 0}, boat).empty()); // the goal is land
-    CHECK(reachable(grid, {3, 1, 0}, 10, boat).size() == 6);
     // Either tag of a required set will do.
     boat.requiredTags = water | lava;
     CHECK(findPath(grid, {3, 1, 0}, {6, 1, 0}, boat).empty()); // (5, 1) is plain land in between
@@ -907,7 +752,7 @@ TEST_CASE("a wrapping grid folds cells, points and differences round the map") {
     CHECK(Grid::fromJson(json).links().size() == 1);
 }
 
-TEST_CASE("paths, reach and components cross a wrapping grid's seam") {
+TEST_CASE("paths and components cross a wrapping grid's seam") {
     Grid grid(10, 6, 1);
     StepRules rules;
     // Flat: the long way round is the only way.
@@ -928,11 +773,10 @@ TEST_CASE("paths, reach and components cross a wrapping grid's seam") {
     path = findPath(grid, {9, 0, 0}, {1, 2, 0}, diagonal);
     REQUIRE(path.size() == 2); // two diagonal steps over the corner of the seam
     CHECK(path[0] == GridPos{0, 1, 0});
-    // Reach spills over the seam, keyed on canonical cells.
-    const auto cells = reachable(grid, {0, 1, 0}, 1, rules);
-    CHECK(std::any_of(cells.begin(), cells.end(),
-                      [](const ReachCell& c) { return c.pos == GridPos{9, 1, 0}; }));
-    CHECK(std::none_of(cells.begin(), cells.end(), [](const ReachCell& c) { return c.pos.x < 0; }));
+    // One step over the seam, keyed on the canonical cell.
+    path = findPath(grid, {0, 1, 0}, {9, 1, 0}, rules);
+    REQUIRE(path.size() == 1);
+    CHECK(path[0] == GridPos{9, 1, 0});
     // Occupancy across the seam counts: a body on (9, 1) stops the short route.
     StepRules occupied = rules;
     occupied.blocked.insert(cellKey({9, 1, 0}));

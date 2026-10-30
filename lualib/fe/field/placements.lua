@@ -145,13 +145,17 @@ end
 
 function placements.prop(world, p)
   local props = p.props
+  -- A plain prop blocks through the map's walkability bake, which turns its
+  -- model into collider boxes; only a scripted prop (pages show and hide it,
+  -- so it cannot be baked) gets a round collider when solid.
+  local collider = props.solid and props.pages and { radius = props.radius or 0.45 } or nil
   local entity = world:spawn({
     id = p.id, position = p.position, layer = p.layer,
     -- The placement's own yaw and scale (the editor's gizmo); `props.yaw`
     -- and `props.scale` are older maps' way of saying the same thing.
     yaw = (p.yaw ~= 0 and p.yaw) or props.yaw, scale = (not placements.unit_scale(p.scale) and p.scale) or props.scale,
     mesh = { model = props.model, animation = props.animation, loop = props.loop ~= false, playing = props.animation ~= nil },
-    collider = props.solid and { radius = props.radius or 0.45 } or nil, props = props,
+    collider = collider, props = props,
   })
   -- Pages show and hide the mesh; no sprite is added for a prop.
   field().apply_pages(entity, p, { mesh = true, solid = props.solid })
@@ -243,9 +247,10 @@ placements.fields = {
   emitter = { { sprite = { type = { asset = "sprite" }, optional = true }, rate = "number" }, "Particles (fire, smoke, sparkles)." },
   prop = { {
     model = { type = { asset = "model" }, doc = ".glb file" }, animation = { type = "string", optional = true },
-    solid = { type = "boolean", optional = true },
+    solid = { type = "boolean", optional = true,
+      doc = "false: decoration bodies walk through (left out of the walkability bake); with pages, true adds a round collider" },
     pages = { type = { list = placements.page_schema }, optional = true, doc = "Event pages (show and hide the mesh)" },
-  }, "A 3D object (doors, windmills, crates)." },
+  }, "A 3D object (houses, windmills, crates): the walkability bake makes its collision from the model." },
   sound = { { sound = { type = { asset = "audio" } }, radius = { type = "number", default = 8 } }, "Looping positional sound." },
   save_point = { { sprite = { type = { asset = "sprite" }, optional = true } }, "Opens the save screen." },
   symbol = { { troop = { type = { ref = "troops" } }, sprite = { type = { asset = "sprite" } },

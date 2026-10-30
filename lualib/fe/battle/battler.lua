@@ -1,11 +1,5 @@
 --- A battle participant: a party Actor (sharing its HP/MP/states, so damage
 --- persists after battle) or an enemy built from data.
----
---- Obstacles (`obstacle = true` in the spec or the enemy data) are
---- battlers with HP that never take turns or act: barricades, crates and
---- other destructibles. Their side is always "obstacle" (a spec naming
---- another side is an error), so they never count for either side's
---- outcome.
 local Combatant = require("fe.rpg.combatant")
 local class = require("fe.class")
 local data = require("fe.data")
@@ -26,14 +20,12 @@ Battler.settings = {
 
 local next_id = 0
 
----@param spec {actor?: Actor, enemy?: string, side?: string, name?: string, position?: table, cell?: table, facing?: table, obstacle?: boolean}
+---@param spec {actor?: Actor, enemy?: string, side?: string, name?: string, position?: table}
 function Battler:init(spec)
   next_id = next_id + 1
   self.key = next_id
   self.position = spec.position
-  self.cell = spec.cell     -- grid cell in tactical battles
-  self.facing = spec.facing -- {x, z} ground direction in tactical battles
-  self.data = {}          -- free-form per-battle state (shields, boosts...)
+  self.data = {}          -- free-form per-battle state (gauges, marks...)
   self.buffs = {}         -- temporary modifiers (see Battler:buff)
   if spec.actor then
     self.actor = spec.actor
@@ -47,11 +39,7 @@ function Battler:init(spec)
     self.state_turns = {}
     self:init_resources(true)
   end
-  self.obstacle = spec.obstacle or (self.def and self.def.obstacle) or nil
-  if self.obstacle and spec.side ~= nil and spec.side ~= "obstacle" then
-    error("obstacle '" .. tostring(spec.enemy) .. "' cannot take side '" .. tostring(spec.side) .. "'", 2)
-  end
-  self.side = (self.obstacle and "obstacle") or spec.side or (spec.actor and "party") or "enemy"
+  self.side = spec.side or (spec.actor and "party") or "enemy"
   self.label = spec.name
 end
 
@@ -62,14 +50,14 @@ end
 
 function Battler:is_party() return self.side == "party" end
 
---- Whether the battler can act now (obstacles never do).
+--- Whether the battler can act now.
 function Battler:can_act()
-  return not self.obstacle and Combatant.can_act(self)
+  return Combatant.can_act(self)
 end
 
---- Whether schedulers give this battler turns (obstacles get none).
+--- Whether schedulers give this battler turns.
 function Battler:takes_turns()
-  return not self.obstacle and self:alive()
+  return self:alive()
 end
 
 --- How many actions the battler takes in each of its turns: the enemy

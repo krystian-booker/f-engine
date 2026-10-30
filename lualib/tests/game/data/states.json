@@ -5,7 +5,6 @@
   {"id": "sleep", "name": "Sleep", "turns": 2, "prevents_action": true, "ends_on_damage": true},
   {"id": "stun", "name": "Stun", "turns": 2, "prevents_action": true},
   {"id": "focus", "name": "Focus", "turns": 2, "modifiers": [{"stat": "critical", "add": 10}]},
-  {"id": "heavy", "name": "Heavy", "turns": 0, "modifiers": [{"stat": "move", "set": 1}]},
-  {"id": "anchored", "name": "Anchored", "turns": 0, "modifiers": [{"stat": "move", "set": 2, "priority": 5}]},
-  {"id": "broken", "name": "Broken", "turns": 2, "prevents_action": true}
+  {"id": "heavy", "name": "Heavy", "turns": 0, "modifiers": [{"stat": "speed", "set": 1}]},
+  {"id": "anchored", "name": "Anchored", "turns": 0, "modifiers": [{"stat": "speed", "set": 2, "priority": 5}]}
 ]

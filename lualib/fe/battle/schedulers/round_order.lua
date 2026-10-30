@@ -1,20 +1,19 @@
 --- Round-based turns: battlers choose actions, then turns resolve in order
 --- (skill `priority` first, then `order_key`, by default speed). Every
 --- living battler takes a turn each round, including ones that cannot act
---- (asleep, broken) or whose turn a rule layer skips (Battle:skips_turn):
+--- (asleep, stunned) or whose turn a rule layer skips (Battle:skips_turn):
 --- they get upkeep only, so their states still count down and turn hooks
---- still run. Obstacles take no turns.
+--- still run.
 ---
 --- Rule layers can reorder a round with `order(battle, entries, preview)`
 --- (entries are {battler, action, order}, sorted first-to-last; reorder in
 --- place). It runs when the round starts, again on the turns still to come
---- before each turn (so a battler broken mid-round moves back at once),
+--- before each turn (so a battler disabled mid-round can move back at once),
 --- and for previews (`preview = true`), so it must only reorder.
---- fe.battle.break uses it to send broken battlers to the back.
 ---
 --- `jitter` varies the speed order randomly. Each round's variation is
 --- rolled when the round before starts, so the next-round preview is the
---- order that will happen unless speeds, breaks or the line-up change.
+--- order that will happen unless speeds, states or the line-up change.
 ---
 --- Octopath Traveler's flow is `choose = "turn"`: the round order is
 --- known in advance (shown with the next round by the side-view HUD) and

@@ -62,8 +62,8 @@ class Diorama:
     """Collects coloured triangles and writes a binary glTF (GLB)."""
 
     def __init__(self):
-        self.vertices = {"opaque": [], "blend": [], "water": []}
-        self.indices = {"opaque": [], "blend": [], "water": []}
+        self.vertices = {"opaque": [], "blend": [], "water": [], "collision": []}
+        self.indices = {"opaque": [], "blend": [], "water": [], "collision": []}
         self.extra_nodes = []
 
     def triangle(self, points, color, channel="opaque"):
@@ -110,11 +110,21 @@ class Diorama:
         self.box(x, height * .55, z, 1.5, height * .7, 1.4, color)
         self.box(x, height * 1.1, z, .9, height * .45, .9, tuple(min(1, c * 1.15) for c in color))
 
+    def collision_box(self, x, y, z, w, h, d):
+        """A hidden box the walkability bake reads instead of the visible mesh."""
+        x0, x1, z0, z1 = x - w / 2, x + w / 2, z - d / 2, z + d / 2
+        self.quad([(x0, y + h, z0), (x0, y + h, z1), (x1, y + h, z1), (x1, y + h, z0)], (1, 1, 1), "collision")
+        for points in [[(x0, y, z1), (x1, y, z1), (x1, y + h, z1), (x0, y + h, z1)],
+                       [(x1, y, z0), (x0, y, z0), (x0, y + h, z0), (x1, y + h, z0)],
+                       [(x0, y, z0), (x0, y, z1), (x0, y + h, z1), (x0, y + h, z0)],
+                       [(x1, y, z1), (x1, y, z0), (x1, y + h, z0), (x1, y + h, z1)]]:
+            self.quad(points, (1, 1, 1), "collision")
+
     def write(self, path):
         binary = bytearray()
-        views, accessors, primitives = [], [], []
-        materials = {"opaque": 0, "blend": 1, "water": 2}
-        for channel in ("opaque", "blend", "water"):
+        views, accessors, primitives, collision = [], [], [], []
+        materials = {"opaque": 0, "blend": 1, "water": 2, "collision": 0}
+        for channel in ("opaque", "blend", "water", "collision"):
             verts, indices = self.vertices[channel], self.indices[channel]
             if not verts:
                 continue
@@ -138,10 +148,17 @@ class Diorama:
             views.append({"buffer": 0, "byteOffset": offset, "byteLength": len(indices) * 4, "target": 34963})
             index = len(accessors)
             accessors.append({"bufferView": len(views) - 1, "componentType": 5125, "count": len(indices), "type": "SCALAR"})
-            primitives.append({"attributes": attributes, "indices": index, "material": materials[channel]})
+            (collision if channel == "collision" else primitives).append(
+                {"attributes": attributes, "indices": index, "material": materials[channel]})
         nodes = [{"mesh": 0, "name": "scenery"}] + self.extra_nodes
+        meshes = [{"primitives": primitives}]
+        if collision:
+            # A hidden collider mesh: the walkability bake reads it instead of the visible one.
+            nodes.append({"mesh": len(meshes), "name": "collision",
+                          "extras": {"fengine": {"collision": True, "visible": False}}})
+            meshes.append({"primitives": collision})
         doc = {"asset": {"version": "2.0", "generator": "f-engine sample generator"}, "scene": 0,
-               "scenes": [{"nodes": list(range(len(nodes)))}], "nodes": nodes, "meshes": [{"primitives": primitives}],
+               "scenes": [{"nodes": list(range(len(nodes)))}], "nodes": nodes, "meshes": meshes,
                "buffers": [{"byteLength": len(binary)}], "bufferViews": views, "accessors": accessors,
                "materials": [{"pbrMetallicRoughness": {"baseColorFactor": [1, 1, 1, 1]}, "doubleSided": True},
                              {"pbrMetallicRoughness": {"baseColorFactor": [1, 1, 1, 1]}, "alphaMode": "BLEND", "doubleSided": True},
@@ -205,21 +222,33 @@ class GridBuilder:
         return result
 
 
+KEEP_AUTHORED = True  # --fresh: rewrite placements, zones and props from the generator's lists
+
+
 def write_map(folder, map_id, name, grid, scene, environment, points, lights=(), emitters=(), keep=True,
-              placements=(), zones=(), props=None):
+              placements=(), zones=(), props=None, overrides=()):
+    """Writes the map's geometry and map.json. The grid rows are a starting
+    point: `fengine_headless --bake <game>` derives walkability from the
+    geometry and the placed models afterwards (generate_samples.py --headless
+    runs it), keeping `overrides` (cells the bake would get wrong, such as the
+    map's doors on the blocked edge ring)."""
     target = folder / "maps" / map_id / "map.json"
     scene.write(folder / "maps" / map_id / "geometry.glb")
     authored = {"placements": list(placements), "zones": list(zones), "props": props or {}}
-    if keep and target.exists():
+    if keep and KEEP_AUTHORED and target.exists():
         previous = json.loads(target.read_text())
         for key in authored:
             if key in previous:
                 authored[key] = previous[key]
     document = {"format": 2, "id": map_id, "name": name, "geometry": "geometry.glb", "grid": grid.json(),
                 "points": points, **authored, "lights": list(lights), "emitters": list(emitters),
-                "colliders": [], "environment": environment}
+                "colliders": [], "bake": {"overrides": list(overrides)}, "environment": environment}
     write_json(target, document)
     return document
+
+
+def walkable_override(x, z, w=1, d=1):
+    return {"x": x, "z": z, "layer": 0, "w": w, "d": d, "walkable": True}
 
 
 # --------------------------------------------------------------------------- terrain helpers
@@ -280,6 +309,94 @@ def house(scene, grid, x, z, w, d, wall=(.74, .62, .45), roof=(.45, .22, .2)):
     grid.fill(x, z, x + w, z + d, walk=False)
 
 
+def prop_tree(path, height=1.8, colour=(.2, .38, .22)):
+    """A tree whose trunk alone blocks (a hidden collision box), so bodies walk under the crown."""
+    scene = Diorama()
+    scene.tree(0, 0, height, colour)
+    scene.collision_box(0, 0, 0, 0.3, height * .7, 0.3)
+    scene.write(path)
+
+
+def prop_lamp(path, colour=(1, .62, .26)):
+    scene = Diorama()
+    scene.box(0, 0, 0, 0.16, 1.9, 0.16, (.22, .2, .2))
+    scene.box(0, 1.9, 0, 0.32, 0.4, 0.32, tuple(c * 2.2 for c in colour[:3]))
+    scene.collision_box(0, 0, 0, 0.25, 1.9, 0.25)
+    scene.write(path)
+
+
+def prop_fence(path, length=2):
+    """A fence `length` cells long along x, a quarter cell thick: it stands on a
+    cell boundary and blocks both sides' edge quarters."""
+    scene = Diorama()
+    for x in (-length / 2 + 0.1, length / 2 - 0.1):
+        scene.box(x, 0, 0, 0.12, 1.0, 0.12, (.42, .3, .18))
+    for y in (0.35, 0.8):
+        scene.box(0, y, 0, length, 0.08, 0.06, (.52, .38, .22))
+    scene.collision_box(0, 0, 0, length, 1.0, 0.25)
+    scene.write(path)
+
+
+def kit_floor(path, cells, colour=(.52, .5, .46)):
+    """A floor slab `cells` x `cells`: the bake reads its top as ground."""
+    scene = Diorama()
+    scene.box(0, 0, 0, cells, 0.1, cells, colour, top=tuple(min(1, c * 1.1) for c in colour))
+    scene.write(path)
+
+
+def kit_cliff(path, cells, height=1.0, colour=PALETTE["cliff"]):
+    """A raised block whose top is a floor `height` up; its sides are cliff faces."""
+    scene = Diorama()
+    scene.box(0, 0, 0, cells, height, cells, colour, top=PALETTE["grass"])
+    scene.write(path)
+
+
+def kit_stairs(path, height=1.0, length=2):
+    """Stairs rising `height` over `length` cells along +x (origin at the centre of the base)."""
+    scene = Diorama()
+    steps = 8
+    for i in range(steps):
+        x0 = -length / 2 + i * length / steps
+        scene.box(x0 + length / steps / 2, 0, 0, length / steps, height * (i + 1) / steps, 1, PALETTE["stone"])
+    # The bake reads the slope from the collision ramp, not the steps.
+    for z0, z1 in ((-0.5, 0.5),):
+        scene.quad([(-length / 2, 0, z0), (-length / 2, 0, z1), (length / 2, height, z1), (length / 2, height, z0)],
+                   (1, 1, 1), "collision")
+        scene.quad([(length / 2, height, z0), (length / 2, height, z1), (length / 2, 0, z1), (length / 2, 0, z0)],
+                   (1, 1, 1), "collision")
+    scene.write(path)
+
+
+def vale_props(folder):
+    """Models for the Assets panel: props with their origin at the centre of
+    the base and footprints of whole cells, and a kit of ground pieces."""
+    prop_house(folder / "fx" / "house.glb", 4, 3)
+    prop_house(folder / "fx" / "house_small.glb", 3, 3, wall=(.66, .58, .52), roof=(.28, .3, .44))
+    prop_tree(folder / "fx" / "tree.glb")
+    prop_lamp(folder / "fx" / "lamp.glb")
+    prop_fence(folder / "fx" / "fence.glb")
+    kit = folder / "fx" / "kit"
+    kit_floor(kit / "floor_1x1.glb", 1)
+    kit_floor(kit / "floor_2x2.glb", 2)
+    kit_cliff(kit / "cliff_1x1.glb", 1)
+    kit_cliff(kit / "cliff_2x2.glb", 2)
+    kit_stairs(kit / "stairs_1x2.glb")
+
+
+def prop_house(path, w, d, wall=(.74, .62, .45), roof=(.45, .22, .2)):
+    """A house model for the editor's Assets panel: origin at the centre of its
+    base, footprint w x d cells, with a hidden collision box over the walls (the
+    roof's overhang does not block)."""
+    scene = Diorama()
+    scene.box(0, 0, 0, w, 2.2, d, wall)
+    scene.roof(0, 2.2, 0, w + 0.4, 1.4, d + 0.4, roof)
+    scene.box(0, 0.05, d / 2 + 0.02, 0.9, 1.4, 0.05, (.25, .17, .12))
+    for wx in (-w / 2 + 0.8, w / 2 - 0.8):
+        scene.box(wx, 1.0, d / 2 + 0.03, 0.6, 0.6, 0.05, (1.3, .9, .4))
+    scene.collision_box(0, 0, 0, w, 2.2, d)
+    scene.write(path)
+
+
 def tree(scene, grid, x, z, colour=(.2, .38, .22)):
     scene.tree(x + 0.5, z + 0.5, 1.8, colour)
     grid.fill(x, z, x + 1, z + 1, walk=False)
@@ -288,7 +405,19 @@ def tree(scene, grid, x, z, colour=(.2, .38, .22)):
 def lamp(scene, x, z, lights, colour=(1, .62, .26)):
     scene.box(x, 0, z, 0.16, 1.9, 0.16, (.22, .2, .2))
     scene.box(x, 1.9, z, 0.32, 0.4, 0.32, (2.2, 1.5, .6))
+    lamp_light(x, z, lights, colour)
+
+
+def lamp_light(x, z, lights, colour=(1, .62, .26)):
     lights.append({"position": [x, 2.1, z], "color": list(colour), "radius": 5.5, "intensity": 2.6, "flicker": 0.08})
+
+
+def prop(id_, model, x, z, yaw=0):
+    """A placed model: the walkability bake makes its collision from the model."""
+    placement = {"id": id_, "type": "prop", "position": [x, 0, z], "props": {"model": model}}
+    if yaw:
+        placement["yaw"] = yaw
+    return placement
 
 
 def water_patch(grid, x0, z0, x1, z1, depth=0.25, surface=-0.08):
@@ -349,6 +478,7 @@ def vale():
     sprite_sheet(folder, "slime", {"kind": "slime", "coat": (86, 177, 132)}, monster=True)
     sprite_sheet(folder, "wisp", {"kind": "wisp", "coat": (120, 170, 255)}, monster=True)
     sprite_sheet(folder, "golem", {"kind": "golem", "coat": (106, 112, 138)}, monster=True)
+    render_showcase(folder)
     chest_sprite(folder)
     crystal_sprite(folder, (90, 190, 255))
     standard_audio(folder, {"vale": (262, "major", 96), "grotto": (220, "minor", 80), "battle": (220, "minor", 150),
@@ -357,27 +487,33 @@ def vale():
     lut(folder / "ui" / "grotto.cube", (0.95, 1.0, 1.05), 1.1)
     backdrop(folder / "ui" / "hills.png", (84, 110, 96), 3, 4)
 
-    # Town: houses, pond, lamps, an exit north to the grotto.
+    vale_props(folder)
+
+    # Town: the terrain is ground, paths and the pond; houses, trees, lamps and
+    # a fence are placed models, and the walkability bake derives the grid.
     rng = random.Random(11)
     grid = GridBuilder(20, 16)
     paths = lambda x, z: PALETTE["path"] if (8 <= x <= 11 or 7 <= z <= 8) else PALETTE["grass"]
-    grid.fill(0, 0, 20, 1, walk=False); grid.fill(0, 15, 20, 16, walk=False)
-    grid.fill(0, 0, 1, 16, walk=False); grid.fill(19, 0, 20, 16, walk=False)
-    grid.fill(9, 0, 11, 1, walk=True)
-    grid.fill(9, 15, 11, 16, walk=True)
     lights = []
     water_patch(grid, 14, 10, 18, 13)
     scene = terrain(grid, paths, rng)
-    house(scene, grid, 2, 2, 4, 3)
-    house(scene, grid, 13, 2, 5, 3, wall=(.66, .58, .52), roof=(.28, .3, .44))
-    house(scene, grid, 2, 10, 4, 3, wall=(.7, .6, .5), roof=(.4, .3, .18))
-    for x, z in [(1, 6), (18, 6), (6, 13), (12, 14), (1, 13)]:
-        tree(scene, grid, x, z)
     for x, z in [(7.5, 6.5), (12.5, 9.5), (8.5, 12.5)]:
-        lamp(scene, x, z, lights)
+        lamp_light(x, z, lights)
     # A Blender-style marker node: the editor's "Import markers" turns it into a point.
     scene.extra_nodes.append({"name": "well", "translation": [6.5, 0, 8.5], "extras": {"fengine": {"spawn": "well"}}})
     placements = [
+        prop("house_inn", "fx/house.glb", 4, 3.5),                 # cells 2..5 x 2..4
+        prop("house_merchant", "fx/house_small.glb", 14.5, 3.5),   # cells 13..15 x 2..4
+        prop("house_south", "fx/house.glb", 4, 11.5),              # cells 2..5 x 10..12
+        prop("tree_west", "fx/tree.glb", 1.5, 6.5),
+        prop("tree_east", "fx/tree.glb", 18.5, 6.5),
+        prop("tree_south", "fx/tree.glb", 6.5, 13.5),
+        prop("tree_gate", "fx/tree.glb", 12.5, 14.5),
+        prop("tree_corner", "fx/tree.glb", 1.5, 13.5),
+        prop("lamp_plaza", "fx/lamp.glb", 7.5, 6.5),
+        prop("lamp_east", "fx/lamp.glb", 12.5, 9.5),
+        prop("lamp_south", "fx/lamp.glb", 8.5, 12.5),
+        prop("fence_pond", "fx/fence.glb", 14, 11, yaw=90),         # along the pond's west bank
         npc("elder", 5, 6, "elder", {"name": "Elder Rowan", "pages": [
             {"script": "events.elder", "trigger": "action"}]}),
         npc("merchant", 14, 6, "merchant", {"name": "Merchant", "script": "events.merchant"}),
@@ -405,7 +541,8 @@ def vale():
         {"entry": {"position": [9.5, 0, 14.5], "facing": [0, -1]}, "return": {"position": [9.5, 0, 1.8], "facing": [0, 1]}},
         lights=lights, placements=placements, zones=zones,
         props={"music": "vale", "battle_stage": "battle_grass", "camera": {"pitch": 42, "distance": 18, "fov": 30,
-                                                                          "min": [6, 5], "max": [14, 11]}})
+                                                                          "min": [6, 5], "max": [14, 11]}},
+        overrides=[walkable_override(9, 0, 2, 1), walkable_override(9, 15, 2, 1)])  # the doors on the edge ring
 
     # Grotto: cave walls, glowing crystals, random encounters, the guardian.
     rng = random.Random(12)
@@ -450,7 +587,8 @@ def vale():
         "weather": {"kind": "dust", "intensity": .8, "color": [.6, .8, 1, .6]},
         "post": {"bloom_strength": .55, "focus": .5, "focus_range": .2, "lut": "ui/grotto.cube"}},
         {"entry": {"position": [8, 0, 14.4], "facing": [0, -1]}}, lights=lights, placements=placements,
-        props={"music": "grotto", "battle_stage": "battle_cave", "camera": {"pitch": 46, "distance": 17, "fov": 30}})
+        props={"music": "grotto", "battle_stage": "battle_cave", "camera": {"pitch": 46, "distance": 17, "fov": 30}},
+        overrides=[walkable_override(7, 15, 2, 1)])  # the exit on the edge ring
 
     def grass_decor(scene, rng):
         for x, z in [(2, 2), (13, 2), (1, 12), (14, 12)]:
@@ -465,251 +603,6 @@ def vale():
     battle_stage(folder, "battle_cave", "Cavern", "cave", cave_decor, {
         "ambient": [.2, .24, .36], "sun_color": [.4, .5, .7], "fog_color": [.05, .08, .14], "fog_density": .03,
         "sky": {"mode": "color", "horizon": [.04, .05, .1]}, "post": {"bloom_strength": .5, "lut": "ui/grotto.cube"}})
-
-
-# --------------------------------------------------------------------------- Wayfarers (round-order, break and boost)
-
-def wayfarers():
-    folder = REPO / "samples" / "wayfarers"
-    looks = {
-        "rook": {"coat": (70, 90, 60), "hair": (40, 30, 26), "weapon": (210, 210, 220), "hat": (60, 50, 40)},
-        "selene": {"coat": (120, 70, 140), "hair": (230, 225, 240), "trim": (220, 200, 120)},
-        "ferryman": {"coat": (80, 110, 150), "hair": (150, 150, 150)},
-        "scholar": {"coat": (140, 120, 90), "hair": (90, 60, 40), "hat": (60, 60, 90)},
-        "barkeep": {"coat": (150, 60, 50), "hair": (40, 30, 30)},
-        "child": {"coat": (200, 160, 60), "hair": (120, 70, 30)},
-    }
-    for name, look in looks.items():
-        sprite_sheet(folder, name, look)
-    for name in ("rook", "selene"):
-        portrait(folder, name, looks[name])
-    sprite_sheet(folder, "wolf", {"kind": "wolf", "coat": (120, 120, 130)}, monster=True)
-    sprite_sheet(folder, "bandit", {"coat": (90, 60, 50), "hair": (30, 20, 20), "hat": (40, 40, 40), "weapon": (180, 180, 190)})
-    sprite_sheet(folder, "wisp", {"kind": "wisp", "coat": (255, 170, 90)}, monster=True)
-    render_showcase(folder)
-    chest_sprite(folder)
-    crystal_sprite(folder, (255, 200, 90))
-    standard_audio(folder, {"riverford": (294, "major", 100), "route": (262, "major", 116), "cliffhaven": (247, "minor", 90),
-                            "battle": (233, "minor", 156), "title": (262, "minor", 70)})
-    lut(folder / "ui" / "warm.cube", (1.06, 1.0, 0.92), 1.08)
-    lut(folder / "ui" / "dusk.cube", (1.05, 0.9, 0.95), 1.1)
-    backdrop(folder / "ui" / "ridge.png", (96, 104, 120), 5, 7)
-    world = Canvas(240, 135)
-    world.rect(0, 0, 240, 135, (40, 80, 120))
-    world.ellipse(90, 70, 70, 45, (90, 140, 80))
-    world.ellipse(170, 55, 50, 30, (120, 110, 90))
-    world.rect(60, 64, 120, 3, (200, 180, 120))
-    world.save(folder / "ui" / "worldmap.png")
-
-    # Riverford: a river crossed by a bridge on grid layer 1 (walk under or over it).
-    rng = random.Random(21)
-    grid = GridBuilder(22, 16, layers=2)
-    grid.fill(0, 0, 22, 1, walk=False); grid.fill(0, 15, 22, 16, walk=False)
-    grid.fill(0, 0, 1, 16, walk=False); grid.fill(21, 0, 22, 16, walk=False)
-    grid.fill(0, 7, 1, 9, walk=True); grid.fill(21, 7, 22, 9, walk=True)
-    lights = []
-    colour = lambda x, z: PALETTE["path"] if 7 <= z <= 8 else PALETTE["grass"]
-    water_patch(grid, 10, 1, 13, 15)
-    scene = terrain(grid, colour, rng)
-    # Bridge deck on layer 1, ramps at both ends link from the ground.
-    grid.fill(9, 7, 10, 9, layer=1, walk=True, height=0.0, ramp="e")
-    grid.fill(10, 7, 13, 9, layer=1, walk=True, height=1.0)
-    grid.fill(13, 7, 14, 9, layer=1, walk=True, height=0.0, ramp="w")
-    for z in (7, 8):
-        grid.links.append({"x": 9, "z": z, "from": 0, "to": 1, "dir": "e"})
-        grid.links.append({"x": 13, "z": z, "from": 0, "to": 1, "dir": "w"})
-    scene.ramp(9, 7, 10, 9, 0, 1, "x", PALETTE["wood"])
-    scene.box(11.5, 0.8, 8, 3, 0.2, 2, PALETTE["wood"])
-    scene.quad([(14, 0, 7), (14, 0, 9), (13, 1, 9), (13, 1, 7)], PALETTE["wood"])
-    house(scene, grid, 2, 2, 5, 3)
-    house(scene, grid, 15, 2, 5, 3, wall=(.6, .55, .5), roof=(.25, .35, .5))
-    house(scene, grid, 3, 11, 4, 3, wall=(.72, .5, .4))
-    for x, z in [(1, 5), (8, 13), (19, 12), (16, 10)]:
-        tree(scene, grid, x, z)
-    for x, z in [(8.5, 6.5), (14.5, 6.5), (5.5, 9.5)]:
-        lamp(scene, x, z, lights)
-    placements = [
-        npc("ferryman", 8, 9, "ferryman", {"name": "Ferryman", "verbs": ["inquire", "purchase"], "level": 3,
-                                           "info": "The cliffs north hide a shrine.", "reveals": "found_cliffhaven",
-                                           "wares": ["tonic", "ember_charm"], "script": "events.ferryman"}),
-        npc("scholar", 17, 6, "scholar", {"name": "Selene", "pages": [
-            {"script": "events.selene_join", "trigger": "action"},
-            {"when": {"flag": "selene_joined"}, "hidden": True}]}),
-        npc("barkeep", 4, 6, "barkeep", {"name": "Barkeep", "script": "events.tavern", "pages": [
-            {"script": "events.tavern", "trigger": "action", "when": {"hours": [6, 22]}},
-            {"script": "events.tavern_night", "trigger": "action", "when": {"hours": [22, 6]}}]}),
-        npc("child", 15, 11, "child", {"name": "Child", "routine": "wander", "verbs": ["inquire"], "level": 1,
-                                       "info": "Wolves hate fire!", "script": "events.child"}),
-        {"id": "river_chest", "type": "chest", "position": [11.5, 1.0, 8.5], "layer": 1,
-         "props": {"item": "tonic", "count": 2, "sprite": "sprites/chest.anim.json"}},
-        {"id": "save", "type": "save_point", "position": [6.5, 0, 8.5], "props": {"sprite": "sprites/crystal.anim.json"}},
-        {"id": "east_road", "type": "npc", "position": [20.5, 0, 7.5],
-         "props": {"name": "Signpost", "script": "events.signpost", "solid": False}},
-        door("to_route", 0, 7, "route", "east"), door("to_route2", 0, 8, "route", "east"),
-    ]
-    write_map(folder, "riverford", "Riverford", grid, scene, {
-        "ambient": [.42, .42, .4], "sun_color": [1, .88, .7], "fog_color": [.7, .74, .8], "fog_density": .01,
-        "sky": {"mode": "gradient", "cloud_cover": .5,
-                "backdrops": [{"image": "ui/ridge.png", "distance": 50, "height": 16, "width": 110, "yaw": 0, "elevation": -2}]},
-        "post": {"lut": "ui/warm.cube", "lut_blend_target": "ui/dusk.cube", "lut_blend": 0}},
-        {"west": {"position": [1.5, 0, 7.8], "facing": [1, 0]}, "start": {"position": [6.5, 0, 9.5]}}, lights=lights,
-        placements=placements, props={"music": "riverford", "daynight": True, "battle_stage": "stage_forest",
-                                      "camera": {"pitch": 40, "distance": 19, "fov": 30, "min": [6, 5], "max": [16, 11]}})
-
-    # The meadow route: encounters, visible enemies and chests.
-    rng = random.Random(22)
-    grid = GridBuilder(26, 12)
-    grid.fill(0, 0, 26, 1, walk=False); grid.fill(0, 11, 26, 12, walk=False)
-    grid.fill(1, 1, 25, 11, tag="encounter:meadow")
-    scene = terrain(grid, lambda x, z: PALETTE["path"] if 5 <= z <= 6 else PALETTE["grass"], rng)
-    for x in range(2, 24, 3):
-        tree(scene, grid, x, 2 if x % 2 else 9)
-    placements = [
-        {"id": "wolf_pack", "type": "symbol", "position": [14.5, 0, 8.5], "props": {"troop": "wolves",
-                                                                                   "sprite": "sprites/wolf.anim.json"}},
-        {"id": "route_chest", "type": "chest", "position": [20.5, 0, 3.5], "props": {"item": "ember_charm",
-                                                                                     "sprite": "sprites/chest.anim.json"}},
-        door("to_riverford", 25, 5, "riverford", "west"), door("to_riverford2", 25, 6, "riverford", "west"),
-        door("to_cliffhaven", 0, 5, "cliffhaven", "south"), door("to_cliffhaven2", 0, 6, "cliffhaven", "south"),
-    ]
-    write_map(folder, "route", "Meadow Road", grid, scene, {
-        "ambient": [.44, .44, .42], "sun_color": [1, .9, .75], "fog_color": [.7, .78, .85], "fog_density": .008,
-        "sky": {"mode": "gradient", "cloud_cover": .6}, "weather": {"kind": "leaves", "intensity": .5},
-        "post": {"lut": "ui/warm.cube"}},
-        {"east": {"position": [24.2, 0, 5.8], "facing": [-1, 0]}, "west": {"position": [1.6, 0, 5.8], "facing": [1, 0]}},
-        placements=placements, props={"music": "route", "battle_stage": "stage_plains", "daynight": True})
-
-    # Cliffhaven: terraces joined by ramps (stairs).
-    rng = random.Random(23)
-    grid = GridBuilder(18, 16)
-    grid.fill(0, 0, 18, 1, walk=False); grid.fill(0, 15, 18, 16, walk=False)
-    grid.fill(0, 0, 1, 16, walk=False); grid.fill(17, 0, 18, 16, walk=False)
-    grid.fill(1, 1, 17, 6, height=2.0)
-    grid.fill(1, 6, 17, 10, height=1.0)
-    grid.fill(8, 5, 10, 6, height=1.0, ramp="n")
-    grid.fill(8, 9, 10, 10, height=0.0, ramp="n")
-    scene = terrain(grid, lambda x, z: PALETTE["stone"] if z < 10 else PALETTE["sand"], rng)
-    lights = []
-    house(scene, grid, 3, 1, 4, 3, wall=(.7, .68, .64), roof=(.3, .3, .35))
-    for z in range(1, 4):
-        for x in range(3, 7):
-            grid.layers[0]["height"][z][x] = 2.0
-    scene.box(13.5, 2.0, 3.5, 1, 2.4, 1, (.8, .75, .6))
-    lights.append({"position": [13.5, 4.8, 3.5], "color": [1, .7, .4], "radius": 7, "intensity": 3, "type": "spot",
-                   "direction": [0, -1, 0], "inner_cone": 25, "outer_cone": 40})
-    placements = [
-        npc("shrine_keeper", 12, 4, "scholar", {"name": "Shrine Keeper", "script": "events.shrine"}),
-        door("to_route", 8, 14, "route", "west"), door("to_route2", 9, 14, "route", "west"),
-    ]
-    write_map(folder, "cliffhaven", "Cliffhaven", grid, scene, {
-        "ambient": [.38, .38, .42], "sun_color": [.95, .85, .75], "fog_color": [.75, .78, .85], "fog_density": .012,
-        "sky": {"mode": "gradient", "cloud_cover": .3}, "post": {"lut": "ui/warm.cube"}},
-        {"south": {"position": [8.8, 0, 13.6], "facing": [0, -1]}}, lights=lights, placements=placements,
-        props={"music": "cliffhaven", "battle_stage": "stage_plains",
-               "camera": {"pitch": 45, "distance": 18, "fov": 30}})
-
-    def forest(scene, rng):
-        for x, z in [(2, 2), (13, 2), (1, 12), (14, 12), (7, 1)]:
-            scene.tree(x + .5, z + .5, 2.4, (.18, .32, .2))
-    def plains(scene, rng):
-        for x, z in [(3, 2), (12, 12)]:
-            scene.box(x + .5, 0, z + .5, 1.2, .8, 1, (.5, .48, .45))
-    battle_stage(folder, "stage_forest", "Forest", "grass", forest, {
-        "ambient": [.4, .42, .4], "sun_color": [1, .9, .7], "fog_color": [.5, .6, .55], "fog_density": .015,
-        "sky": {"mode": "gradient"}, "post": {"lut": "ui/warm.cube"}})
-    battle_stage(folder, "stage_plains", "Plains", "grass", plains, {
-        "ambient": [.45, .45, .42], "sun_color": [1, .92, .78], "fog_color": [.7, .78, .85], "fog_density": .008,
-        "sky": {"mode": "gradient", "cloud_cover": .5}, "post": {"lut": "ui/warm.cube"}})
-
-
-# --------------------------------------------------------------------------- Ridgeline (grid tactics)
-
-def ridgeline():
-    folder = REPO / "samples" / "ridgeline"
-    looks = {
-        "cora": {"coat": (60, 80, 150), "hair": (200, 160, 80), "weapon": (220, 220, 230)},
-        "bram": {"coat": (90, 110, 60), "hair": (60, 40, 30), "hat": (70, 60, 40)},
-        "lio": {"coat": (220, 220, 230), "hair": (90, 60, 40), "trim": (80, 160, 220)},
-        "wren": {"coat": (130, 60, 60), "hair": (30, 30, 40)},
-        "raider": {"coat": (110, 50, 40), "hair": (40, 30, 30), "hat": (70, 60, 60), "weapon": (180, 180, 180)},
-        "captain": {"coat": (60, 30, 30), "hair": (20, 20, 20), "hat": (160, 130, 40), "weapon": (230, 210, 120)},
-    }
-    for name, look in looks.items():
-        sprite_sheet(folder, name, look)
-    for name in ("cora", "bram", "lio", "wren"):
-        portrait(folder, name, looks[name])
-    standard_audio(folder, {"camp": (220, "major", 84), "council": (196, "minor", 70), "battle": (220, "minor", 140),
-                            "title": (247, "minor", 66)})
-    lut(folder / "ui" / "ridge.cube", (1.02, 0.98, 0.95), 1.12)
-    backdrop(folder / "ui" / "peaks.png", (110, 116, 132), 6, 9)
-
-    # Camp: tents around a fire.
-    rng = random.Random(31)
-    grid = GridBuilder(16, 12)
-    grid.fill(0, 0, 16, 1, walk=False); grid.fill(0, 11, 16, 12, walk=False)
-    grid.fill(0, 0, 1, 12, walk=False); grid.fill(15, 0, 16, 12, walk=False)
-    grid.fill(7, 0, 9, 1, walk=True)
-    scene = terrain(grid, lambda x, z: PALETTE["grass"] if (x + z) % 5 else PALETTE["path"], rng)
-    lights = [{"position": [8, 1, 6], "color": [1, .55, .25], "radius": 8, "intensity": 3.5, "flicker": .25}]
-    for x, z, colour in [(2, 2, (.6, .5, .35)), (12, 2, (.45, .5, .6)), (2, 8, (.55, .45, .4)), (12, 8, (.5, .55, .45))]:
-        scene.box(x + 1, 0, z + .75, 2, .2, 1.5, colour)
-        scene.roof(x + 1, .2, z + .75, 2.2, 1.3, 1.6, colour)
-        grid.fill(x, z, x + 2, z + 2, walk=False)
-    scene.box(8, 0, 6, .8, .2, .8, (.3, .25, .2))
-    grid.fill(7, 5, 9, 7, walk=False)
-    placements = [
-        npc("bram", 5, 5, "bram", {"name": "Bram", "script": "events.talk_bram"}, facing=(1, 0)),
-        npc("lio", 10, 5, "lio", {"name": "Lio", "script": "events.talk_lio"}, facing=(-1, 0)),
-        npc("wren", 8, 8, "wren", {"name": "Wren", "script": "events.talk_wren"}, facing=(0, -1)),
-        {"id": "campfire", "type": "emitter", "position": [8, 0.2, 6],
-         "props": {"rate": 26, "lifetime": 1.0, "velocity": [0, 1.2, 0], "velocity_jitter": [0.2, 0.3, 0.2],
-                   "size": 0.12, "size_end": 0.02, "color": [2.4, 1.1, 0.3, 1], "color_end": [1.2, 0.3, 0.1, 0]}},
-        {"id": "fire_sound", "type": "sound", "position": [8, 0.5, 6], "props": {"sound": "audio/chime.wav", "radius": 4, "volume": 0.1}},
-        {"id": "to_ridge", "type": "npc", "position": [8, 0, 1.4],
-         "props": {"name": "Ridge path", "script": "events.ridge_path", "solid": False}},
-    ]
-    write_map(folder, "camp", "Ridge Camp", grid, scene, {
-        "ambient": [.22, .22, .32], "sun_color": [.45, .5, .75], "sun_direction": [.4, -1, .3],
-        "fog_color": [.1, .12, .2], "fog_density": .02, "sky": {"mode": "gradient", "top": [.03, .04, .12],
-                                                                 "horizon": [.2, .2, .35], "cloud_cover": .2},
-        "weather": {"kind": "embers", "intensity": .4}, "post": {"bloom_strength": .5, "lut": "ui/ridge.cube"}},
-        {"start": {"position": [8, 0, 9.5], "facing": [0, -1]}}, lights=lights, placements=placements,
-        props={"music": "camp", "camera": {"pitch": 44, "distance": 16, "fov": 30}})
-
-    # The ridge: terraces, ramps, grass (burns), a stream (freezes, conducts).
-    rng = random.Random(32)
-    grid = GridBuilder(18, 15)
-    heights = [
-        "000000000000000000", "001111000002222000", "001111000002222000", "001111110002222200",
-        "000011110000222200", "000000000000000000", "000000000000000000", "000000000000000000",
-        "000000000000000000", "000001100000110000", "000001100000110000", "000000000000000000",
-        "000000000000000000", "000000000000000000", "000000000000000000"]
-    for z, row in enumerate(heights):
-        for x, h in enumerate(row):
-            grid.layers[0]["height"][z][x] = float(h)
-    grid.fill(4, 5, 6, 6, height=0.0, ramp="n")
-    grid.fill(12, 5, 14, 6, height=1.0, ramp="n")
-    grid.fill(12, 6, 14, 7, height=0.0, ramp="n")
-    grid.fill(1, 6, 8, 9, tag="grass")
-    grid.fill(10, 7, 17, 9, tag="grass")
-    for z in range(15):
-        x = 8 + (1 if z % 4 < 2 else 0)
-        grid.fill(x, z, x + 1, z + 1, tag="water")
-        grid.layers[0]["height"][z][x] = -0.2
-    grid.fill(3, 12, 15, 14, tag="deploy")
-    colour = lambda x, z: (PALETTE["cliff"] if grid.layers[0]["height"][z][x] >= 1 else
-                           (.2, .4, .6) if grid.layers[0]["height"][z][x] < 0 else PALETTE["grass"])
-    scene = terrain(grid, colour, rng)
-    for x, z in [(1, 13), (16, 12), (16, 2), (0, 9)]:
-        tree(scene, grid, x, z)
-    write_map(folder, "ridge", "Hollow Ridge", grid, scene, {
-        "ambient": [.4, .4, .42], "sun_color": [1, .9, .78], "sun_direction": [-.5, -1, -.6],
-        "fog_color": [.7, .74, .82], "fog_density": .008,
-        "sky": {"mode": "gradient", "cloud_cover": .5,
-                "backdrops": [{"image": "ui/peaks.png", "distance": 55, "height": 20, "width": 120, "yaw": 0, "elevation": -4}]},
-        "post": {"focus": .5, "focus_range": .3, "lut": "ui/ridge.cube"}},
-        {"start": {"position": [8, 0, 12.5]}}, keep=True,
-        props={"music": "battle", "camera": {"pitch": 50, "distance": 20, "fov": 32}})
 
 
 # --------------------------------------------------------------------------- test fixture
@@ -1283,14 +1176,23 @@ def engine():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("targets", nargs="*", default=["fixture"], help="engine, fixture, vale, wayfarers, ridgeline, all")
+    parser.add_argument("targets", nargs="*", default=["fixture"], help="engine, fixture, vale, all")
+    parser.add_argument("--headless", help="fengine_headless executable: bakes each sample's walkability afterwards")
+    parser.add_argument("--fresh", action="store_true",
+                        help="rewrite placements, zones and map props from the generator (editor edits are lost)")
     args = parser.parse_args()
+    global KEEP_AUTHORED
+    KEEP_AUTHORED = not args.fresh
     targets = set(args.targets)
     if "all" in targets:
-        targets = {"engine", "fixture", "vale", "wayfarers", "ridgeline"}
+        targets = {"engine", "fixture", "vale"}
     for name in sorted(targets):
         globals()[name]()
         print(f"generated {name}")
+    if args.headless:
+        import subprocess
+        for name in sorted(targets & {"vale"}):
+            subprocess.run([args.headless, "--bake", str(REPO / "samples" / name)], check=True)
 
 
 if __name__ == "__main__":

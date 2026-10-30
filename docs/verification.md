@@ -28,11 +28,12 @@ Programs find `lualib` and the compiled shaders next to their executable (develo
 | `fengine_tests` | C++ core: pak archives (round trip, compression, damaged and path-traversing archives, mounts and loose-file precedence, the asset cache, `require` and `fe.fs` reading a packed game, content packs laid over a packed and a loose game), `user://` images and `fe.save.thumbnail_path`, grid, paths, reachability, line of sight, text layout and markup, world entities, movement and contacts, saves (backends, the size cap, sidecar summaries, the backup kept by rename and the guard against truncated files), input maps (the `+`/`-` suffix rule, per-action collapse thresholds, recorders and focus loss, gamepad connection events and their `pads` replay record), the clipboard and its backends, canvas and `canvas_fit`, the Lua sandbox and bindings, editor map edits and undo, the replay harness and recorder (ordered inputs, `wait_for` timeouts), text input queueing, display requests, adaptive vsync, the frame cap, background world loading, asset eviction and the referenced set, the log file, level filter, sink hook and crash report, `game.json` HDR fields and `fe.app.display().hdr`, game ids, executable self-location, local dates, the platform backends (stat tolerance and coalesced writes) and protected table reads, and the renderer's CPU side (light binning, shadow cascades, light shadow selection and tiles, decal projection, pixel snapping, blend pass order, tangents, glTF material import, KTX headers, the HDR output transform) |
 | `fengine_runtime_tests` | Runtime services without a window: audio through the mixer with no device (volumes, fades, voice release, playing/position, music seek, stem alignment, pitch, the pitch-preserving shifter's spectrum and duration, global pause, low-pass, reverb tail, ducking envelope, positional gain and pan), SDL input translation (focus, gamepads, mouse buttons, text and IME events), gamepad layouts and rumble on SDL virtual gamepads, window focus tracking |
 | `mirror_folder` | `cmake/MirrorFolder.cmake` in copy mode (how Windows builds stage `lualib` and shaders): a first copy, an update after files change, appear and disappear, and removal |
-| `check_unicode_path` | `fengine_headless --check` on a copy of `samples/ridgeline` in a folder named `Józef-łódź-ゲーム` (on Windows, the executables' manifest makes arguments and paths UTF-8) |
+| `check_unicode_path` | `fengine_headless --check` on a copy of `samples/vale` in a folder named `Józef-łódź-ゲーム` (on Windows, the executables' manifest makes arguments and paths UTF-8) |
 | `lua_library` | Every kit, against the fixture game in `lualib/tests/game` (`fengine_headless --test`) |
 | `lua_sandbox` | Hostile and careless scripts (`tests/sandbox/tests`, with the fixture game's `arena` map): out-of-range sizes, speeds, positions and integers, long lines of sight, handles of destroyed entities after their slot is reused, backtracking patterns and huge `table.move`/string results stopped by the watchdog or the library limits, resolver tags that expand too much, paths with a NUL, and deep recursion through metamethods, error handlers, path cost functions, ticks and reloads |
-| `check_<sample>` | `fengine_headless --check`: data tables against schemas, maps, placements against their types, script syntax and asset paths |
-| `lua_<sample>` | Each sample's `tests/*.lua`, which drive real game flows headless: events, council votes, battles and AI-vs-AI tactics |
+| `check_<sample>` | `fengine_headless --check`: data tables against schemas, maps, placements against their types, script syntax and asset paths (and a warning when a map's walkability bake is out of date) |
+| `bake_check_vale` | `fengine_headless --bake samples/vale --check-only`: every map's committed walkability is the bake of its terrain and placed models (`python3 tools/generate_samples.py vale --headless build/fengine_headless` regenerates and re-bakes them) |
+| `lua_<sample>` | Each sample's `tests/*.lua`, which drive real game flows headless: events, quests, shops and battles |
 | `replay_headless_<sample>_<name>` | Each sample replay run by `fengine_headless --replay` (no window; screenshots skipped) |
 | `engine_boundary` | `tools/ci/check_boundary.py`: no JRPG vocabulary in `engine/` |
 | `api_stubs_current` | `tools/ci/check_api.py`: `docs/api.md` and `lualib/types/fengine.d.lua` match the bindings |
@@ -40,7 +41,7 @@ Programs find `lualib` and the compiled shaders next to their executable (develo
 | `package_vale` | `tools/package_game.py --zip --self-check` on `samples/vale`: a pak-based package for the host OS whose packaged runtime passes `--check` (runtime builds). Text read or written without naming an encoding fails it (`-X warn_default_encoding`), since Windows would use the locale's code page |
 | `package_launchers` | The packager's `play.cmd` ends with a single CRLF and `play` has no CR, on any host |
 | `assetc_atlas*` | `fengine_assetc atlas` packs frames into a new folder and writes each clip's `loop` |
-| `assetc_cook*` | `fengine_assetc cook` turns a copy of `samples/wayfarers/fx` into BC7 `.ktx` files with mip chains (normal maps linear) and leaves sprite images alone |
+| `assetc_cook*` | `fengine_assetc cook` turns a copy of `samples/vale/fx` into BC7 `.ktx` files with mip chains (normal maps linear) and leaves sprite images alone |
 | `replay_<sample>_<name>` | With `FENGINE_RUN_REPLAYS=ON`, the windowed runtime plays the same replay and must finish with no failed assertions, screenshot differences or Lua errors (label `windowed`; `ctest -LE windowed` skips them) |
 
 When you change a binding, refresh the API files with `python3 tools/ci/check_api.py build/fengine_headless --update`.
@@ -69,10 +70,10 @@ A replay is a JSON array of commands, each with a `tick`, or an object `{"seed":
 
 ```sh
 # Windowed: renders, captures and compares screenshots
-./build/fengine samples/ridgeline --mute --user-data /tmp/ridge-user \
-  --replay samples/ridgeline/replays/battle.json
+./build/fengine samples/vale --mute --user-data /tmp/vale-user \
+  --replay samples/vale/replays/battle.json
 # Headless: no window or GPU; captures and comparisons are skipped
-./build/fengine_headless samples/ridgeline --replay samples/ridgeline/replays/battle.json
+./build/fengine_headless samples/vale --replay samples/vale/replays/battle.json
 ```
 
 A failed assertion, a timed-out wait, a screenshot difference or a Lua error makes the process exit non-zero. Use a separate `--user-data` folder so saved settings don't change key bindings; headless replays use a fresh temporary folder unless you pass `--user-data`. The windowed runtime also writes `log.txt` (and `crash.txt` after a crash) into the user-data folder, which is the first place to look when a replay fails on a CI machine.
@@ -81,7 +82,7 @@ To make a replay by playing, run `fengine <game> --record session.json`. It writ
 
 ### Reference images
 
-Rendering differs between backends, so references are kept per backend: `{backend}` in a `compare` path is bgfx's renderer name in lower case with only letters and digits (`metal`, `vulkan`, `direct3d11`, `opengl21`). They are stored 320 pixels across, which makes the 3D scene independent of the window's pixel density and averages out small rasterisation differences between GPUs of one backend. The canvas is scaled by whole multiples of the virtual resolution, so canvas drawing lands differently at another pixel size: capture references at the window size the replays run at in CI (1280x720 on Linux, the Retina size of the default window on macOS). `samples/vale/replays/postfx.json` and `samples/wayfarers/replays/render.json` compare every capture with `reference/{backend}/<name>.png`; the samples ship Metal references (`samples/*/replays/reference/metal/`, captured on Apple GPU hardware) and Vulkan and OpenGL references (`reference/vulkan/`, `reference/opengl43/`, captured on Linux under Xvfb with Mesa's lavapipe and llvmpipe, the renderers CI uses). On another backend those replays only check that each capture is a rendered frame until references exist for it.
+Rendering differs between backends, so references are kept per backend: `{backend}` in a `compare` path is bgfx's renderer name in lower case with only letters and digits (`metal`, `vulkan`, `direct3d11`, `opengl21`). They are stored 320 pixels across, which makes the 3D scene independent of the window's pixel density and averages out small rasterisation differences between GPUs of one backend. The canvas is scaled by whole multiples of the virtual resolution, so canvas drawing lands differently at another pixel size: capture references at the window size the replays run at in CI (1280x720 on Linux, the Retina size of the default window on macOS). `samples/vale/replays/postfx.json` and `render.json` compare every capture with `reference/{backend}/<name>.png`; the sample ships Metal references (`samples/vale/replays/reference/metal/`, captured on Apple GPU hardware) and Vulkan and OpenGL references (`reference/vulkan/`, `reference/opengl43/`, captured on Linux under Xvfb with Mesa's lavapipe and llvmpipe, the renderers CI uses). On another backend those replays only check that each capture is a rendered frame until references exist for it.
 
 To add references for a backend (or refresh them after an intended rendering change), run the replay on a machine with that backend with `--write-references`, inspect the written images, and commit them:
 
@@ -89,8 +90,8 @@ To add references for a backend (or refresh them after an intended rendering cha
 cd build/tests   # captures are relative to the working directory, as under ctest
 ../fengine ../../samples/vale --mute --user-data /tmp/vale-ref \
   --replay ../../samples/vale/replays/postfx.json --write-references
-../fengine ../../samples/wayfarers --mute --user-data /tmp/wayfarers-ref \
-  --replay ../../samples/wayfarers/replays/render.json --write-references
+../fengine ../../samples/vale --mute --user-data /tmp/vale-ref \
+  --replay ../../samples/vale/replays/render.json --write-references
 ```
 
 This writes `reference/vulkan/` (or `direct3d11/`, `opengl43/`...) next to the replay. Linux picks Vulkan where available and OpenGL otherwise (`VK_ICD_FILENAMES=/nonexistent.json` forces OpenGL, for its references); Windows uses Direct3D 11. On Linux, run it under `xvfb-run -a -s "-screen 0 1280x720x24"` as CI does. A run with `--write-references` still applies the rendered-frame check but compares nothing.
