@@ -14,6 +14,10 @@ struct RuntimeOptions {
     std::optional<std::uint64_t> seed;
     std::uint64_t frameLimit = 0;
     bool mute = false, tools = false, realtime = false;
+    // Frame cap while vsync is off (--max-fps); unset uses game.json max_fps.
+    std::optional<int> maxFps;
+    // Ask for an HDR back buffer (--hdr); game.json hdr_output does too.
+    bool hdr = false;
     // A replay's captures with a `compare` path replace their reference
     // images (for the running backend) instead of being compared.
     bool writeReferences = false;

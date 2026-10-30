@@ -1,5 +1,6 @@
 #include "engine/render/CustomShaders.h"
 #include "engine/core/Log.h"
+#include "engine/core/Paths.h"
 #include <SDL3/SDL_process.h>
 
 namespace fe {
@@ -83,13 +84,30 @@ CustomShaders::CustomShaders(std::filesystem::path gameRoot, std::filesystem::pa
     : gameRoot_(std::move(gameRoot)), shaderRoot_(std::move(shaderRoot)) {
 }
 
+bool CustomShaders::variantExists(const std::string& name) const {
+    std::error_code ec;
+    if (std::filesystem::is_regular_file(sourceOf(gameRoot_, name), ec)) {
+        return true;
+    }
+    try {
+        return isFile(gameRoot_ / "shaders" / shaderBackend() / ("fs_" + name + ".bin"));
+    } catch (const std::exception&) {
+        return false; // no shader backend (no renderer, or the no-op one): nothing to load
+    }
+}
+
 int CustomShaders::slot(const std::string& name) {
     const auto [found, added] = slots_.try_emplace(name, static_cast<int>(entries_.size()));
     if (added) {
         Entry entry;
-        entry.name = name;
-        std::error_code ec;
-        entry.source = std::filesystem::last_write_time(sourceOf(gameRoot_, name), ec);
+        entry.color.name = name;
+        entry.shadow.name = name + "_shadow";
+        entry.distort.name = name + "_distort";
+        for (auto* variant : entry.variants()) {
+            std::error_code ec;
+            variant->source = std::filesystem::last_write_time(sourceOf(gameRoot_, variant->name), ec);
+            variant->exists = variantExists(variant->name);
+        }
         entries_.push_back(std::move(entry));
     }
     return found->second;
@@ -121,42 +139,58 @@ std::filesystem::path CustomShaders::binary(const std::string& name,
     return shipped;
 }
 
-bgfx::ProgramHandle CustomShaders::program(int slot, ShaderVertex vertex) {
-    auto& entry = entries_.at(static_cast<std::size_t>(slot));
+bgfx::ProgramHandle CustomShaders::load(Variant& variant, ShaderVertex vertex, bool required) {
     const auto v = static_cast<std::size_t>(vertex);
-    if (entry.tried[v]) {
-        return entry.programs[v].get();
+    if (variant.tried[v]) {
+        return variant.programs[v].get();
     }
-    entry.tried[v] = true;
+    variant.tried[v] = true;
+    if (!required && !variant.exists) {
+        return variant.programs[v].get(); // an optional variant the game does not ship
+    }
     std::string error = "compiling it failed";
     try {
-        if (const auto file = binary(entry.name, entry.source); !file.empty()) {
-            entry.programs[v] = Program(loadProgram(
+        if (const auto file = binary(variant.name, variant.source); !file.empty()) {
+            variant.programs[v] = Program(loadProgram(
                 shaderRoot_ / shaderBackend() / (std::string(shaderVertexName(vertex)) + ".bin"), file));
         }
     } catch (const std::exception& failure) {
         error = failure.what();
     }
-    if (!entry.programs[v].valid() && !entry.reported) {
-        entry.reported = true;
+    if (!variant.programs[v].valid() && !variant.reported) {
+        variant.reported = true;
         log(LogLevel::Error,
-            "Game shader '" + entry.name + "' unavailable, the engine's shader is used: " + error);
+            "Game shader '" + variant.name + "' unavailable, the engine's shader is used: " + error);
     }
-    return entry.programs[v].get();
+    return variant.programs[v].get();
 }
 
-void CustomShaders::forget(Entry& entry) {
-    for (auto& program : entry.programs) {
+bgfx::ProgramHandle CustomShaders::program(int slot, ShaderVertex vertex) {
+    return load(entries_.at(static_cast<std::size_t>(slot)).color, vertex, true);
+}
+
+bgfx::ProgramHandle CustomShaders::shadowProgram(int slot, ShaderVertex vertex) {
+    return load(entries_.at(static_cast<std::size_t>(slot)).shadow, vertex, false);
+}
+
+bgfx::ProgramHandle CustomShaders::distortProgram(int slot, ShaderVertex vertex) {
+    return load(entries_.at(static_cast<std::size_t>(slot)).distort, vertex, false);
+}
+
+void CustomShaders::forget(Variant& variant) {
+    for (auto& program : variant.programs) {
         program.reset();
     }
-    entry.tried = {};
-    entry.reported = false;
+    variant.tried = {};
+    variant.reported = false;
 }
 
 void CustomShaders::reload(std::filesystem::path shaderRoot) {
     shaderRoot_ = std::move(shaderRoot);
     for (auto& entry : entries_) {
-        forget(entry);
+        for (auto* variant : entry.variants()) {
+            forget(*variant);
+        }
     }
 }
 
@@ -166,11 +200,16 @@ void CustomShaders::poll() {
         return;
     }
     for (auto& entry : entries_) {
-        std::error_code ec;
-        const auto time = std::filesystem::last_write_time(sourceOf(gameRoot_, entry.name), ec);
-        if (!ec && time != entry.source) {
-            entry.source = time;
-            forget(entry);
+        for (auto* variant : entry.variants()) {
+            std::error_code ec;
+            const auto time = std::filesystem::last_write_time(sourceOf(gameRoot_, variant->name), ec);
+            // A shadow or distortion variant may appear or go while the game runs.
+            const bool exists = variantExists(variant->name);
+            if ((!ec && time != variant->source) || exists != variant->exists) {
+                variant->source = time;
+                variant->exists = exists;
+                forget(*variant);
+            }
         }
     }
 #endif

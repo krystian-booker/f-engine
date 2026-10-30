@@ -1,5 +1,4 @@
 #pragma once
-#include "engine/core/Json.h"
 #include <deque>
 #include <glm/glm.hpp>
 #include <map>
@@ -9,6 +8,8 @@
 #include <vector>
 
 namespace fe {
+class InputRecorder;
+
 // Device-agnostic input. Platform code feeds raw inputs by name ("key:Z",
 // "pad:a", "pad1:a", "mouse:left", axes "pad:leftx"); scripts declare actions
 // and axes and bind raw inputs to them. The engine ships no default bindings.
@@ -50,6 +51,16 @@ public:
         float deadzone = 0.2f;
         float value = 0;
     };
+    // An action's binding, split into the raw input it reads and how: "pad:leftx-"
+    // reads pad:leftx and is down past the threshold on the negative side,
+    // "pad:leftx+" on the positive side, anything else by absolute value. The
+    // suffix rule applies only to analog inputs (gamepad names, or inputs an
+    // axis lists as analog), so keys named "-" or "Keypad +" bind as they are.
+    struct Binding {
+        std::string input;
+        int direction = 0; // 0 absolute, -1 negative side, 1 positive side
+    };
+    [[nodiscard]] Binding parseBinding(const std::string& bound) const;
 
     void define(const std::string& action, std::vector<std::string> inputs, float threshold = 0.5f);
     void defineAxis(const std::string& axis, Axis definition);
@@ -60,7 +71,7 @@ public:
     // digital: 1 down, 0 up; analog: -1..1. Values are queued until tick().
     void feed(const std::string& input, float value);
     void feedMouse(glm::vec2 canvasPosition);
-    void feedWheel(float delta) { wheel_ += delta; }
+    void feedWheel(float delta);
     void setDevice(const std::string& device, const std::string& name = {});
     // The gamepad with this number was used (last_device becomes "gamepad").
     void usePad(int number);
@@ -71,7 +82,13 @@ public:
     // characters); both are queued until tick().
     void feedText(std::string_view utf8);
     void feedComposition(std::string text, int cursor);
+    // The window lost focus: every raw input that is down (or queued to go
+    // down) is released and any IME composition ends, all through the same
+    // queue as other input, so a recorder sees the releases too.
     void focusLost();
+    // Everything fed from now on is also reported to `recorder` (null stops).
+    void setRecorder(InputRecorder* recorder) { recorder_ = recorder; }
+    [[nodiscard]] InputRecorder* recorder() const { return recorder_; }
 
     // Script requests carried out by the platform layer.
     void beginText(std::optional<glm::vec4> rect, std::string kind);
@@ -83,10 +100,11 @@ public:
     std::vector<Rumble> takeRumble();
 
     // Applies queued input and recomputes action and axis state. Each raw
-    // input changes between up and down at most once per tick; further
-    // changes wait for the next tick, so a press and release inside one tick
-    // read as pressed this tick and released the next, and a release and
-    // re-press as released then pressed.
+    // input changes between up and down at most once per tick, for every
+    // action bound to it at that action's threshold (and at 0.5 for axes and
+    // pressedInputs); further changes wait for the next tick, so a press and
+    // release inside one tick read as pressed this tick and released the
+    // next, and a release and re-press as released then pressed.
     void tick(double dt);
     [[nodiscard]] bool held(const std::string& action) const;
     [[nodiscard]] bool pressed(const std::string& action) const;
@@ -114,6 +132,16 @@ public:
     [[nodiscard]] const std::map<std::string, Action>& actions() const { return actions_; }
 
 private:
+    // One up/down test an action (or the 0.5 default) applies to a raw input.
+    struct Edge {
+        float threshold = 0.5f;
+        int direction = 0;
+        [[nodiscard]] bool down(float value) const;
+    };
+    [[nodiscard]] std::vector<Edge> edgesOf(const std::string& input) const;
+    [[nodiscard]] bool analogInput(std::string_view input) const;
+    // Whether two values agree on every edge of the input.
+    [[nodiscard]] static bool sameSide(const std::vector<Edge>& edges, float a, float b);
     void applyPending();
     std::map<std::string, Action> actions_;
     std::map<std::string, Axis> axes_;
@@ -126,11 +154,13 @@ private:
     std::optional<std::pair<std::string, int>> pendingComposition_;
     std::string composition_;
     int compositionCursor_ = 0;
+    bool composing_ = false; // the last pre-edit string fed was not empty
     TextEntry textEntry_;
     bool textEntryChanged_ = false;
     std::vector<Rumble> rumble_;
     glm::vec2 mouse_{0}, previousMouse_{0};
     bool mouseMoved_ = false;
     float wheel_ = 0, wheelTick_ = 0;
+    InputRecorder* recorder_ = nullptr;
 };
 } // namespace fe

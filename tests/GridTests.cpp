@@ -579,3 +579,260 @@ TEST_CASE("line of sight traces only the part of a segment over the grid") {
     CHECK(lineOfSight(grid, {-20, 4, 1.5f}, {8.5f, 4, 1.5f}, 0));
     CHECK_FALSE(lineOfSight(grid, {std::numeric_limits<float>::quiet_NaN(), 1, 1}, {1, 1, 1}, 0));
 }
+
+TEST_CASE("walk rows accept only 1, 0 and #, and tag masks must fit the tag list") {
+    Grid grid(3, 1, 1);
+    grid.at(1, 0).walkable = false;
+    auto json = grid.toJson();
+    json["layers"][0]["walk"] = {"1#0"};
+    CHECK_FALSE(Grid::fromJson(json).at(1, 0).walkable);
+    json["layers"][0]["walk"] = {"1x0"};
+    CHECK_THROWS_WITH(Grid::fromJson(json), doctest::Contains("walk rows use 1, 0 or #"));
+    json["layers"][0]["walk"] = {"110"};
+    json["tags"] = {"water"};
+    json["layers"][0]["tags"] = {"0 1 0"};
+    CHECK(Grid::fromJson(json).at(1, 0).tags == 1);
+    json["layers"][0]["tags"] = {"0 2 0"};
+    CHECK_THROWS_WITH(Grid::fromJson(json), doctest::Contains("tag bits"));
+    json.erase("tags");
+    json["layers"][0]["tags"] = {"0 1 0"};
+    CHECK_THROWS(Grid::fromJson(json));
+}
+
+TEST_CASE("a footprint wider than one cell needs every cell of it, and skips ladders") {
+    // A corridor three cells deep with a pillar at (3, 1).
+    Grid grid(6, 3, 1);
+    grid.at(3, 1).walkable = false;
+    StepRules rules;
+    CHECK_FALSE(findPath(grid, {0, 0, 0}, {5, 0, 0}, rules).empty());
+    rules.footprint = 2;
+    CHECK(findPath(grid, {0, 0, 0}, {4, 0, 0}, rules).empty()); // rows 0-1 and 1-2 both meet the pillar
+    CHECK(findPath(grid, {0, 0, 0}, {4, 2, 0}, rules).empty()); // the goal hangs over the edge
+    grid.at(3, 1).walkable = true;
+    const auto path = findPath(grid, {0, 0, 0}, {4, 0, 0}, rules);
+    REQUIRE_FALSE(path.empty());
+    for (const auto& cell : path) {
+        CHECK(cell.z <= 1);
+    }
+    const auto cells = reachable(grid, {0, 0, 0}, 9, rules);
+    CHECK(std::none_of(cells.begin(), cells.end(),
+                       [](const ReachCell& c) { return c.pos.x == 5 || c.pos.z == 2; }));
+    CHECK(grid.canStand({2.5f, 0.5f}, 0.2f, 0, 2));
+    CHECK(grid.canStand({4.5f, 1.5f}, 0.2f, 0, 2));       // cells (4..5, 1..2) all exist
+    CHECK_FALSE(grid.canStand({4.5f, 2.5f}, 0.2f, 0, 2)); // the second row hangs over the edge
+    CHECK_FALSE(grid.canStand({5.5f, 0.5f}, 0.2f, 0, 2));
+    rules.footprint = 0;
+    CHECK_THROWS_AS(validateRules(rules), std::invalid_argument);
+    rules.footprint = MaxFootprint + 1;
+    CHECK_THROWS_AS(validateRules(rules), std::invalid_argument);
+    // A ladder up a cliff carries one-cell bodies only.
+    Grid cliff(5, 3, 1);
+    for (int x = 0; x < 5; ++x) {
+        cliff.at(x, 0).height = 4;
+    }
+    cliff.setLinks({{2, 1, 0, 0, {0, -1}, LinkKind::Ladder}});
+    rules.footprint = 1;
+    CHECK_FALSE(findRoute(cliff, {0, 2, 0}, {0, 0, 0}, rules).steps.empty());
+    rules.footprint = 2;
+    CHECK(findRoute(cliff, {0, 1, 0}, {0, 0, 0}, rules).steps.empty());
+}
+
+TEST_CASE("flying rules cross unwalkable cells and height steps but not blocked tags") {
+    Grid grid(8, 3, 1);
+    for (int z = 0; z < 3; ++z) {
+        grid.at(3, z).walkable = false;
+        grid.at(5, z).height = 3;
+    }
+    const auto water = grid.tagBit("water", true);
+    StepRules rules;
+    CHECK(findPath(grid, {0, 1, 0}, {7, 1, 0}, rules).empty());
+    rules.fly = true;
+    const auto path = findPath(grid, {0, 1, 0}, {7, 1, 0}, rules);
+    REQUIRE(path.size() == 7);
+    CHECK(std::find(path.begin(), path.end(), GridPos{3, 1, 0}) != path.end());
+    CHECK(std::find(path.begin(), path.end(), GridPos{5, 1, 0}) != path.end());
+    CHECK(grid.canStand({3.5f, 1.5f}, 0.2f, 0, 1, true));
+    CHECK_FALSE(grid.canStand({3.5f, 1.5f}, 0.2f, 0));
+    CHECK_FALSE(grid.canStand({8.5f, 1.5f}, 0.2f, 0, 1, true));
+    for (int z = 0; z < 3; ++z) {
+        grid.at(3, z).tags = water;
+    }
+    rules.blockedTags = water;
+    CHECK(findPath(grid, {0, 1, 0}, {7, 1, 0}, rules).empty());
+    CHECK(reachable(grid, {0, 1, 0}, 10, rules).size() == 9);
+}
+
+TEST_CASE("a search to a goal that cannot be entered ends without expanding anything") {
+    Grid grid(20, 20, 1);
+    const auto lava = grid.tagBit("lava", true);
+    grid.at(19, 19).tags = lava;
+    StepRules rules;
+    rules.blockedTags = lava;
+    int calls = 0;
+    rules.cost = [&](GridPos, GridPos, float base) -> std::optional<float> {
+        ++calls;
+        return base;
+    };
+    CHECK(findRoute(grid, {0, 0, 0}, {19, 19, 0}, rules).steps.empty());
+    CHECK(calls == 0);
+    rules.blockedTags = 0;
+    rules.blocked.insert(cellKey({19, 19, 0}));
+    CHECK(findRoute(grid, {0, 0, 0}, {19, 19, 0}, rules).steps.empty());
+    CHECK(calls == 0);
+    rules.blocked.clear();
+    CHECK_FALSE(findRoute(grid, {0, 0, 0}, {19, 19, 0}, rules).steps.empty());
+    CHECK(calls > 0);
+}
+
+TEST_CASE("reachability stops at its visit cap and says so") {
+    Grid grid(60, 60, 1);
+    StepRules rules;
+    rules.cost = [](GridPos, GridPos, float) -> std::optional<float> {
+        return 0.0f; // a free-movement rule would flood the grid
+    };
+    const auto capped = findReachable(grid, {30, 30, 0}, 1, rules, 100);
+    CHECK(capped.truncated);
+    CHECK(capped.cells.size() <= 500);
+    const auto full = findReachable(grid, {30, 30, 0}, 1, rules);
+    CHECK_FALSE(full.truncated);
+    CHECK(full.cells.size() == 3600);
+    const auto plain = findReachable(Grid(5, 5, 1), {2, 2, 0}, 2, StepRules{});
+    CHECK_FALSE(plain.truncated);
+    CHECK(plain.cells.size() == 13);
+}
+
+TEST_CASE("required and blocked tags are a passability class for standing and planning") {
+    // A river of water cells down the middle, a lava cell on the far bank.
+    Grid grid(8, 3, 1);
+    const auto water = grid.tagBit("water", true);
+    const auto lava = grid.tagBit("lava", true);
+    for (int z = 0; z < 3; ++z) {
+        grid.at(3, z).tags = grid.at(4, z).tags = water;
+    }
+    grid.at(6, 1).tags = lava;
+    // A boat (flying, water only) stands on water alone; a walker stands anywhere but lava.
+    CHECK(grid.canStand({3.5f, 1.5f}, 0.2f, 0, 1, true, 0, water));
+    CHECK_FALSE(grid.canStand({2.5f, 1.5f}, 0.2f, 0, 1, true, 0, water));
+    CHECK_FALSE(grid.canStand({3.4f, 1.5f}, 0.49f, 0, 1, true, 0, water)); // its disc touches the bank
+    CHECK(grid.canStand({6.5f, 1.5f}, 0.2f, 0));
+    CHECK_FALSE(grid.canStand({6.5f, 1.5f}, 0.2f, 0, 1, false, lava));
+    CHECK_FALSE(grid.canStand({6.5f, 1.5f}, 0.2f, 0, 2, false, lava)); // one cell of the footprint is lava
+    StepRules boat;
+    boat.fly = true;
+    boat.requiredTags = water;
+    const auto along = findPath(grid, {3, 0, 0}, {4, 2, 0}, boat);
+    REQUIRE_FALSE(along.empty());
+    for (const auto& cell : along) {
+        CHECK((grid.at(cell).tags & water) != 0u);
+    }
+    CHECK(findPath(grid, {3, 0, 0}, {5, 2, 0}, boat).empty()); // the goal is land
+    CHECK(reachable(grid, {3, 1, 0}, 10, boat).size() == 6);
+    // Either tag of a required set will do.
+    boat.requiredTags = water | lava;
+    CHECK(findPath(grid, {3, 1, 0}, {6, 1, 0}, boat).empty()); // (5, 1) is plain land in between
+    boat.jump = {1, 0, 0, false};
+    CHECK_FALSE(findPath(grid, {3, 1, 0}, {6, 1, 0}, boat).empty()); // a tagless cell is a gap to jump
+    StepRules walker;
+    walker.blockedTags = lava;
+    const auto around = findPath(grid, {0, 1, 0}, {7, 1, 0}, walker);
+    REQUIRE_FALSE(around.empty());
+    CHECK(std::find(around.begin(), around.end(), GridPos{6, 1, 0}) == around.end());
+}
+
+TEST_CASE("a goal in another connected component is rejected before the search expands anything") {
+    // A wall splits the grid; the goal is behind it.
+    Grid grid(20, 20, 1);
+    for (int z = 0; z < 20; ++z) {
+        grid.at(10, z).walkable = false;
+    }
+    StepRules rules;
+    int calls = 0;
+    rules.cost = [&](GridPos, GridPos, float base) -> std::optional<float> {
+        ++calls;
+        return base;
+    };
+    CHECK(findRoute(grid, {0, 0, 0}, {19, 19, 0}, rules).steps.empty());
+    CHECK(calls == 0);
+    CHECK(grid.component({0, 0, 0}) != grid.component({19, 19, 0}));
+    CHECK(grid.component({10, 5, 0}) == -1);
+    CHECK(grid.component({20, 0, 0}) == -1);
+    // Opening the wall is seen whichever way the cell is written.
+    grid.at(10, 7).walkable = true;
+    CHECK_FALSE(findRoute(grid, {0, 0, 0}, {19, 19, 0}, rules).steps.empty());
+    CHECK(calls > 0);
+    auto closed = grid.at(10, 7);
+    closed.walkable = false;
+    grid.setCell({10, 7, 0}, closed);
+    calls = 0;
+    CHECK(findRoute(grid, {0, 0, 0}, {19, 19, 0}, rules).steps.empty());
+    CHECK(calls == 0);
+    // Writing the same cell again changes nothing; a change bumps the revision.
+    const auto revision = grid.revision();
+    grid.setCell({10, 7, 0}, closed);
+    CHECK(grid.revision() == revision);
+    grid.setCell({10, 8, 0}, GridCell{});
+    CHECK(grid.revision() > revision);
+    CHECK(grid.component({0, 0, 0}) == grid.component({19, 19, 0}));
+    // Flying and gap jumps leave a component, so they search as usual.
+    grid.setCell({10, 8, 0}, closed);
+    StepRules fly = rules;
+    fly.fly = true;
+    calls = 0;
+    CHECK_FALSE(findRoute(grid, {0, 0, 0}, {19, 19, 0}, fly).steps.empty());
+    CHECK(calls > 0);
+    StepRules hop = rules;
+    hop.jump = {1, 0, 0, false};
+    calls = 0;
+    CHECK_FALSE(findRoute(grid, {0, 0, 0}, {19, 19, 0}, hop).steps.empty());
+    CHECK(calls > 0);
+    // A start that is not walkable itself has no component and still searches.
+    grid.at(0, 0).walkable = false;
+    grid.setCell({10, 8, 0}, GridCell{});
+    calls = 0;
+    CHECK_FALSE(findRoute(grid, {0, 0, 0}, {19, 19, 0}, rules).steps.empty());
+    CHECK(calls > 0);
+}
+
+TEST_CASE("links and ladders join components; a cell edit splits them again") {
+    // Two islands on the ground joined by nothing but a bridge layer, then a ladder.
+    Grid grid(7, 3, 2);
+    for (int z = 0; z < 3; ++z) {
+        grid.at(3, z).walkable = false;
+    }
+    CHECK(grid.component({0, 1, 0}) != grid.component({6, 1, 0}));
+    for (int x = 2; x <= 4; ++x) {
+        grid.at(x, 1, 1) = {0, true, Ramp::None, 1};
+    }
+    grid.setLinks({{2, 1, 0, 1, {1, 0}}, {4, 1, 1, 0, {1, 0}}});
+    CHECK(grid.component({0, 1, 0}) == grid.component({6, 1, 0}));
+    CHECK(grid.component({3, 1, 1}) == grid.component({0, 1, 0}));
+    StepRules rules;
+    int calls = 0;
+    rules.cost = [&](GridPos, GridPos, float base) -> std::optional<float> {
+        ++calls;
+        return base;
+    };
+    CHECK_FALSE(findRoute(grid, {0, 1, 0}, {6, 1, 0}, rules).steps.empty());
+    CHECK(calls > 0);
+    // Breaking the deck splits them; a ladder up the gap joins them again.
+    grid.at(3, 1, 1).walkable = false;
+    calls = 0;
+    CHECK(findRoute(grid, {0, 1, 0}, {6, 1, 0}, rules).steps.empty());
+    CHECK(calls == 0);
+    CHECK(grid.component({0, 1, 0}) != grid.component({6, 1, 0}));
+    grid.setLinks({{2, 1, 0, 0, {1, 0}, LinkKind::Ladder}}); // foot (2, 1), top (3, 1): still unwalkable
+    CHECK(grid.component({0, 1, 0}) != grid.component({6, 1, 0}));
+    grid.setLinks({{2, 1, 0, 1, {1, 0}, LinkKind::Ladder}, {4, 1, 1, 0, {1, 0}}}); // up onto the deck's end
+    grid.at(3, 1, 1).walkable = true;
+    grid.at(2, 1, 1).walkable = false;
+    CHECK(grid.component({0, 1, 0}) == grid.component({6, 1, 0}));
+    calls = 0;
+    const auto route = findRoute(grid, {0, 1, 0}, {6, 1, 0}, rules);
+    REQUIRE_FALSE(route.steps.empty());
+    CHECK(std::any_of(route.steps.begin(), route.steps.end(),
+                      [](const PathStep& s) { return s.kind == StepKind::Climb; }));
+    // Components survive copies, revision and all.
+    const Grid copy = grid;
+    CHECK(copy.component({0, 1, 0}) == copy.component({6, 1, 0}));
+    CHECK(copy.revision() == grid.revision());
+}

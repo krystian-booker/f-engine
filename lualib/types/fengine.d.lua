@@ -42,13 +42,17 @@ fe.dev.traceback = nil
 ---@type fun(): boolean
 fe.dev.enabled = nil
 
---- Record a timing shown in the profiler.
+--- Record a timing shown in the profiler (at most 256 distinct names per run).
 ---@type fun(name: string, milliseconds: number)
 fe.dev.zone = nil
 
 --- High-resolution seconds for profiling.
 ---@type fun(): number
 fe.dev.clock = nil
+
+--- Last frame's timings and counts (quality settings, debug overlays): milliseconds between the last two frames, the time spent in main.update and main.draw, the worlds' draw calls, entities and particles across loaded worlds, and Lua memory in KiB. frame_ms and draw_calls are 0 in headless runs.
+---@type fun(): {frame_ms: number, lua_update_ms: number, lua_draw_ms: number, draw_calls: integer, entities: integer, particles: integer, memory_kb: integer}
+fe.dev.stats = nil
 
 --- Recent script errors.
 ---@type fun(): {message: string, time: number}[]
@@ -120,7 +124,7 @@ fe.random = fe.random or {}
 ---@type fun(seed?: integer): RandomStream
 fe.random.new = nil
 
---- The run's base seed.
+--- The run's base seed (an integer; its low 48 bits).
 ---@type fun(): integer
 fe.random.seed = nil
 
@@ -150,9 +154,25 @@ fe.fs.read = nil
 ---@type fun(path: string): boolean
 fe.fs.exists = nil
 
---- Sorted entries of a folder; folders end with '/'.
+--- Sorted entries of a folder inside the game folder ('@fe/' for lualib, like read and exists); folders end with '/'.
 ---@type fun(folder: string): string[]
 fe.fs.list = nil
+
+--- Sorted entries of a folder inside the user files folder (<user data>/files; the folder itself when omitted); folders end with '/'. A missing folder lists nothing. For mods and other content the player drops in: a game lists `mods/`, reads each `mods/<name>/mod.json` with user_read and merges what it describes.
+---@type fun(folder?: string): string[]
+fe.fs.user_list = nil
+
+--- The bytes of a file inside the user files folder (binary-safe), or nil when there is none. Paths with '..' or NUL raise.
+---@type fun(path: string): string?
+fe.fs.user_read = nil
+
+--- Write a file inside the user files folder, atomically (a crash leaves the old or the new file), creating folders on the way; any bytes. A file holds at most 16 MiB and the folder 256 MiB in all; past either the write raises and nothing changes.
+---@type fun(path: string, bytes: string)
+fe.fs.user_write = nil
+
+--- Delete a file, or a folder with everything in it, inside the user files folder; false when there was none.
+---@type fun(path: string): boolean
+fe.fs.user_remove = nil
 
 --- Application, window and asset-loading services.
 fe.app = fe.app or {}
@@ -189,8 +209,8 @@ fe.app.fullscreen = nil
 ---@type fun(mode: boolean|'borderless'|'exclusive')
 fe.app.set_fullscreen = nil
 
---- Window and monitor settings. width and height are the window size in screen units, or the exclusive fullscreen mode; monitor indexes monitors; modes are the exclusive fullscreen modes of that monitor, largest first. Headless runs report one monitor the size of game.json's window.
----@type fun(): {fullscreen: false|'borderless'|'exclusive', width: integer, height: integer, vsync: 'on'|'off'|'adaptive', monitor: integer, monitors: {name: string, width: integer, height: integer, refresh: number}[], modes: {width: integer, height: integer, refresh: number}[]}
+--- Window and monitor settings. width and height are the window size in screen units, or the exclusive fullscreen mode; monitor indexes monitors; modes are the exclusive fullscreen modes of that monitor, largest first. hdr is true when the frame is presented to a high dynamic range back buffer (game.json hdr_output or --hdr, and the renderer supports one). Headless runs report one monitor the size of game.json's window.
+---@type fun(): {fullscreen: false|'borderless'|'exclusive', width: integer, height: integer, vsync: 'on'|'off'|'adaptive', monitor: integer, hdr: boolean, monitors: {name: string, width: integer, height: integer, refresh: number}[], modes: {width: integer, height: integer, refresh: number}[]}
 fe.app.display = nil
 
 --- Change display settings; omitted fields stay. fullscreen = true means 'borderless' (a desktop-sized window); 'exclusive' switches the monitor to the display mode closest to width x height. Applied after the frame; fe.app.display() shows the request until then. The engine does not store these: keep them in the player's settings (fe.config) and apply them at start.
@@ -200,6 +220,10 @@ fe.app.set_display = nil
 --- The player's preferred language and region as a BCP 47 tag, such as 'en-US' or 'ja' (from the operating system; 'en-US' in headless runs).
 ---@type fun(): string
 fe.app.locale = nil
+
+--- The number with the decimal and digit-group separators of a language: `locale` is a BCP 47 tag (default fe.app.locale()), of which the language subtag chooses from a built-in table (en, de, fr, es, it, pt, ja, zh, ko, ru, pl, nl, sv, tr; others format as English; languages that group with a space use a no-break space). `decimals` (0 to 20) is 0 for a whole number and 2 otherwise by default; the number is rounded to it. fe.i18n.number uses the current language.
+---@type fun(number: number, options?: {decimals?: integer, locale?: string}): string
+fe.app.format_number = nil
 
 --- Write a PNG screenshot to <user data>/screenshots/<path> (a .png path).
 ---@type fun(path: string)
@@ -236,9 +260,25 @@ fe.save.read = nil
 ---@type fun(): {slot: string, meta: table, modified: number, thumbnail: boolean, backup?: true}[]
 fe.save.list = nil
 
---- Delete a slot.
+--- Delete a slot, with its thumbnail and blobs.
 ---@type fun(slot: string)
 fe.save.delete = nil
+
+--- Store bytes (any string, binary included) next to a slot under `name` (slot naming rules), through the save backend: world snapshots for a new game plus, replay inputs, anything that is not JSON. At most 16 MiB; the slot need not exist yet. Deleting the slot deletes its blobs.
+---@type fun(slot: string, name: string, bytes: string)
+fe.save.write_blob = nil
+
+--- A slot's blob, or nil when there is none.
+---@type fun(slot: string, name: string): string?
+fe.save.read_blob = nil
+
+--- Delete one of a slot's blobs.
+---@type fun(slot: string, name: string)
+fe.save.remove_blob = nil
+
+--- Names of a slot's blobs, sorted.
+---@type fun(slot: string): string[]
+fe.save.blobs = nil
 
 --- Capture the next frame's 3D scenes (no canvas UI, screen effects or editor) as the slot's thumbnail.
 ---@type fun(slot: string)
@@ -383,14 +423,14 @@ fe.text = fe.text or {}
 fe.text.font = nil
 
 --- Name a color for {color:name}.
----@type fun(name: string, color: any)
+---@type fun(name: string, color: Color)
 fe.text.color = nil
 
 --- Register an {icon:id} image.
 ---@type fun(id: string, spec: {image: string, rect?: Rect})
 fe.text.icon = nil
 
---- Resolve custom tags such as {player} or {var:name}; nil removes the resolver. A resolver may replace or remove itself; the call in progress finishes with the old one. Its errors are reported and the tag is shown as written. A resolver that resolves markup with tags through fe.text or fe.canvas.text nests: more than 8 nested resolver calls raise one error from the outermost fe.text or fe.canvas.text call, as does the watchdog stopping a resolver. Tags in a replacement resolve too, up to 4 levels deep; replacements totalling more than 1 MiB (1048576 bytes) for one call raise an error.
+--- Resolve custom tags such as {player} or {var:name}; nil removes the resolver. It runs under a C call (from fe.text, fe.canvas.text and the frame's text layout) and must not yield: a task.wait in it raises 'attempt to yield across a C-call boundary'. A resolver may replace or remove itself; the call in progress finishes with the old one. Its errors are reported and the tag is shown as written. A resolver that resolves markup with tags through fe.text or fe.canvas.text nests: more than 8 nested resolver calls raise one error from the outermost fe.text or fe.canvas.text call, as does the watchdog stopping a resolver. Tags in a replacement resolve too, up to 4 levels deep; replacements totalling more than 1 MiB (1048576 bytes) for one call raise an error.
 ---@type fun(resolver: (fun(tag: string): string?)|nil)
 fe.text.resolver = nil
 
@@ -468,8 +508,8 @@ fe.canvas.quad_count = nil
 --- Music layers with loop points, crossfades, seeking and pitch; sounds and voices; buses with volume, low-pass, reverb and ducking; positional sounds heard from a world's camera.
 fe.audio = fe.audio or {}
 
---- Play music on a layer, crossfading from what was there. `sync` starts a stem at the main layer's position, sample-aligned. `pitch` (0.25-4) changes speed and pitch together; `volume` is 0 to 4.
----@type fun(path: string, options?: {layer?: string, fade?: number, loop_start?: number, loop_end?: number, volume?: number, pitch?: number, loop?: boolean, sync?: boolean})
+--- Play music on a layer, crossfading from what was there. `sync` starts a stem at the main layer's position, sample-aligned. `pitch` (0.25-4) changes speed and pitch together, or with `preserve_speed` the pitch alone (the track keeps its duration; outside 0.5-2 it falls back to changing both); `volume` is 0 to 4.
+---@type fun(path: string, options?: {layer?: string, fade?: number, loop_start?: number, loop_end?: number, volume?: number, pitch?: number, preserve_speed?: boolean, loop?: boolean, sync?: boolean})
 fe.audio.music = nil
 
 --- Fade out one layer, or all music.
@@ -488,8 +528,8 @@ fe.audio.set_music_volume = nil
 ---@type fun(layer?: string): number
 fe.audio.music_pitch = nil
 
---- Speed and pitch of a layer, 0.25 to 4 (1 = normal); setting 'main' also sets its synced stems.
----@type fun(layer: string, pitch: number)
+--- Speed and pitch of a layer, 0.25 to 4 (1 = normal); setting 'main' also sets its synced stems. With `preserve_speed` only the pitch changes and the track keeps its duration (0.5 to 2; outside that it changes both, logged once).
+---@type fun(layer: string, pitch: number, options?: {preserve_speed?: boolean})
 fe.audio.set_music_pitch = nil
 
 --- Path playing on a layer.
@@ -504,16 +544,16 @@ fe.audio.music_position = nil
 ---@type fun(layer: string, seconds: number)
 fe.audio.seek_music = nil
 
---- Play a sound; returns a voice id. With `position` it is heard from `world`'s camera (default the focus world) each tick: silent beyond `radius` (8) and panned by the camera's right vector. `volume` >= 0, `pitch` 0.1 to 4, `pan` -1 to 1.
----@type fun(path: string, options?: {volume?: number, pitch?: number, pan?: number, loop?: boolean, bus?: string, position?: Vec3, world?: World, radius?: number}): integer
+--- Play a sound; returns a voice id. With `position` it is heard from `world`'s camera (default the focus world) each tick: silent beyond `radius` (8) and panned by the camera's right vector. `volume` 0 to 4 (like music and buses), `pitch` 0.1 to 4 (speed and pitch together, or the pitch alone with `preserve_speed`, within 0.5 to 2), `pan` -1 to 1.
+---@type fun(path: string, options?: {volume?: number, pitch?: number, preserve_speed?: boolean, pan?: number, loop?: boolean, bus?: string, position?: Vec3, world?: World, radius?: number}): integer
 fe.audio.sound = nil
 
 --- Stop a voice.
 ---@type fun(voice: integer, fade?: number)
 fe.audio.stop = nil
 
---- Change a playing voice; omitted fields keep their value.
----@type fun(voice: integer, change: {volume?: number, pan?: number, pitch?: number, position?: Vec3})
+--- Change a playing voice; omitted fields keep their value. Ranges as for fe.audio.sound: `volume` 0 to 4, `pan` -1 to 1, `pitch` 0.1 to 4 (`preserve_speed` keeps the voice's duration under the pitch change, within 0.5 to 2).
+---@type fun(voice: integer, change: {volume?: number, pan?: number, pitch?: number, preserve_speed?: boolean, position?: Vec3})
 fe.audio.set_voice = nil
 
 --- The voice has not finished or been stopped (paused voices still play). False without audio.
@@ -619,8 +659,8 @@ Entity.face = nil
 ---@type fun(self: Entity, spec: table)
 Entity.configure = nil
 
---- Walk to a position (pathfinding by default; `speed` 0 to 1000 sets the mover's); options come second, so a planned route is `move_to(nil, {path = cells})`. The target layer defaults to the current one if walkable there, else the walkable layer whose surface is nearest the target's y. `path` may instead be a list of cells ({x, z, layer}: walked through their centres) or points ({x, y, z}) to follow as given, then `target` if any; cells marked `jump` or `climb` (from world:path or world:reachable) are jumped to or climbed. Emits 'arrived' once at the end, or 'blocked' (at once when no path exists or the search stops at its 200000-cell cap, without moving); jumps emit 'jump_start'/'landed' and ladder climbs 'climb_start'/'climb_end'.
----@type fun(self: Entity, target: Vec3|nil, options?: {path?: boolean|(Cell|Vec3)[], speed?: number, layer?: integer})
+--- Walk to a position (pathfinding by default; `speed` 0 to 1000 sets the mover's); options come second, so a planned route is `move_to(nil, {path = cells})`. The target layer defaults to the current one if walkable there, else the walkable layer whose surface is nearest the target's y. `path` may instead be a list of cells ({x, z, layer}: walked through their centres) or points ({x, y, z}) to follow as given, then `target` if any; cells marked `jump` or `climb` (from world:path or world:reachable) are jumped to or climbed. `rules` are the planning rules of world:path (diagonal, blocked_tags, required_tags, tag_costs, blocked, no_stop, zoc, jump, ladders, cost) for the built-in planner; without them it plans 8-directional with the mover's limits and its own blocked_tags/required_tags. Emits 'arrived' once at the end, or 'blocked' (at once when no path exists or the search stops at its 200000-cell cap, without moving); jumps emit 'jump_start'/'landed' and ladder climbs 'climb_start'/'climb_end'.
+---@type fun(self: Entity, target: Vec3|nil, options?: {path?: boolean|(Cell|Vec3)[], speed?: number, layer?: integer, rules?: table})
 Entity.move_to = nil
 
 --- Stop moving.
@@ -635,6 +675,10 @@ Entity.drive = nil
 ---@type fun(self: Entity, target: Vec3, options?: {height?: number, duration?: number, layer?: integer})
 Entity.jump = nil
 
+--- Throw the body with a velocity in units/second (each component within the world bound): it flies a ballistic arc under the world's `gravity` (set_movement_tuning), keeping its horizontal speed until a solid entity, a collider box, a cliff face or the grid's edge stops it (it then drops straight down), and lands on the first surface it falls onto that it may stand on (any layer; its tags and fly apply), or with none on the lowest layer's surface. A landing inside a box or a solid body moves to the nearest free spot within `landing_search`; with none it lands there anyway and 'blocked' follows 'landed'. Emits 'jump_start' and 'landed'. A zero velocity above the ground is a fall; a launch during a jump or launch replaces it from where the body is; during a ladder climb it is an error.
+---@type fun(self: Entity, velocity: Vec3)
+Entity.launch = nil
+
 --- Walking, jumping, climbing or being driven.
 ---@type fun(self: Entity): boolean
 Entity.moving = nil
@@ -643,15 +687,19 @@ Entity.moving = nil
 ---@type fun(self: Entity, position: Vec3, layer?: integer): boolean
 Entity.can_occupy = nil
 
---- Add or configure movement; nil removes it. `speed` (units/second) is 0 to 1000, `max_step` 0 to 1000 and `radius` 0 to 0.49. `jump` lets planned paths jump gaps (see world:path); ladders are climbed at `climb_speed` (default 1.5, at most 1000), also when steering into one.
----@type fun(self: Entity, settings?: {speed?: number, max_step?: number, radius?: number, collide?: boolean, climb_speed?: number, jump?: {distance: integer, max_up?: number, max_down?: number, diagonal?: boolean}|false}|nil)
+--- Movement. A table adds or configures it (and returns the new state), no argument reads it (nil without a mover), nil removes it. `speed` (units/second) is 0 to 1000, `max_step` 0 to 1000 and `radius` 0 to 0.49. `jump` lets planned paths jump gaps (see world:path); ladders are climbed at `climb_speed` (default 1.5, at most 1000), also when steering into one. `footprint` (1 to 8, default 1) is the square of cells the mover occupies, anchored at its cell towards +x and +z, and `fly` lets it stand on and path over unwalkable cells and height steps. `blocked_tags` and `required_tags` (grid tag names from the map's tag list; an unknown name is an error) are its passability class, flying or not: it never stands on or paths through a cell carrying a blocked tag or, when `required_tags` is not empty, a cell with none of them (a boat is `{fly = true, required_tags = {'water'}}`). They are read back as name lists and plan `move_to(target)`; rules given to move_to replace them.
+---@type fun(self: Entity, settings?: {speed?: number, max_step?: number, radius?: number, collide?: boolean, climb_speed?: number, footprint?: integer, fly?: boolean, blocked_tags?: string[], required_tags?: string[], jump?: {distance: integer, max_up?: number, max_down?: number, diagonal?: boolean}|false}|nil): table?
 Entity.mover = nil
 
---- Make the entity a moving surface (rafts, lifts): its position is the top, `size` (default 1 x 1, at most 64 x 64) the footprint. Movers and colliders standing on it ride along; grid cells whose centre it covers on its layer are walkable at its height while it is there. Move it with mover{collide = false} or place(); nil removes it.
----@type fun(self: Entity, settings?: {size?: {x: number, z: number}}|nil)
+--- Make the entity a moving surface (rafts, lifts): its position is the top, `size` (default 1 x 1, at most 64 x 64) the footprint. Movers and colliders standing on it ride along; grid cells whose centre it covers on its layer are walkable at its height while it is there. Move it with mover{collide = false} or place(). No argument reads it (nil without one); nil removes it.
+---@type fun(self: Entity, settings?: {size?: {x: number, z: number}}|nil): table?
 Entity.platform = nil
 
---- Add or change the sprite and return its current state (e:sprite() reads it); nil removes it.
+--- The 16 numbers a game shader (sprite or mesh `shader`) reads as `u_params[4]`: a list of up to 16 numbers in order (`u_params[0].x` first; missing ones are 0), for dissolve amounts, hit timers and the like. No argument reads them (nil when never set); nil removes them (zeros).
+---@type fun(self: Entity, values?: number[]|nil): number[]?
+Entity.shader_params = nil
+
+--- Add or change the sprite and return its state; e:sprite() reads it (nil when the entity has no sprite) and nil removes it.
 ---@type fun(self: Entity, settings?: table|nil): table?
 Entity.sprite = nil
 
@@ -659,28 +707,28 @@ Entity.sprite = nil
 ---@type fun(self: Entity, clip: string, restart?: boolean)
 Entity.clip = nil
 
---- Add or change a glTF mesh (props, doors...); nil removes it.
----@type fun(self: Entity, settings?: table|nil)
+--- Add or change a glTF mesh (props, doors...) and return its state; e:mesh() reads it (nil without one) and nil removes it.
+---@type fun(self: Entity, settings?: table|nil): table?
 Entity.mesh = nil
 
 --- Play a mesh animation by name.
 ---@type fun(self: Entity, animation: string, loop?: boolean)
 Entity.play = nil
 
---- Attach a light (position is an offset); nil removes it.
----@type fun(self: Entity, settings?: table|nil)
+--- Attach a light (position is an offset; `enabled = false` keeps it but turns it off) and return its state; e:light() reads it (nil without one) and nil removes it.
+---@type fun(self: Entity, settings?: table|nil): table?
 Entity.light = nil
 
---- Attach particles (the settings replace the previous ones); `paused = true|false` stops or resumes spawning, and a table with no other field keeps the settings. nil removes the emitter.
----@type fun(self: Entity, settings?: table|nil)
+--- Attach particles (the settings replace the previous ones) and return their state; `paused = true|false` stops or resumes spawning, and a table with no other field keeps the settings. e:emitter() reads it (nil without one) and nil removes the emitter.
+---@type fun(self: Entity, settings?: table|nil): table?
 Entity.emitter = nil
 
---- Contact shape: an upright cylinder, `radius` 0 to 64 (default 0.25) and `height` 0 to 1000 (default 1.6). Solid colliders block movers; all report contacts. nil removes it.
----@type fun(self: Entity, settings?: {radius?: number, height?: number, solid?: boolean}|nil)
+--- Contact shape: an upright cylinder, `radius` 0 to 64 (default 0.25) and `height` 0 to 1000 (default 1.6). Solid colliders block movers; all report contacts. e:collider() reads it (nil without one) and nil removes it.
+---@type fun(self: Entity, settings?: {radius?: number, height?: number, solid?: boolean}|nil): table?
 Entity.collider = nil
 
---- Looping positional sound (waterfalls, fires), heard while its world is drawn; nil removes it.
----@type fun(self: Entity, settings?: {sound: string, radius?: number, volume?: number}|nil)
+--- Looping positional sound (waterfalls, fires), heard while its world is drawn. e:audio() reads it (nil without one) and nil removes it.
+---@type fun(self: Entity, settings?: {sound: string, radius?: number, volume?: number}|nil): table?
 Entity.audio = nil
 
 --- Tags.
@@ -719,7 +767,7 @@ Entity.detach = nil
 ---@type fun(self: Entity, lift?: number, alpha?: number): number, number, boolean
 Entity.screen_position = nil
 
---- Remove the entity.
+--- Remove the entity. Like every other method it raises on a handle whose entity is already gone (check e:valid() first when that is expected).
 ---@type fun(self: Entity)
 Entity.destroy = nil
 
@@ -730,6 +778,8 @@ Entity.destroy = nil
 ---@field pitch number Degrees above the horizon, held within -89 to 89.9 (89.9 is top-down).
 ---@field distance number Distance from the target (0.1 to 10000).
 ---@field fov number Vertical field of view in degrees (1 to 170).
+---@field orthographic boolean Parallel projection from the same orbit position (pixel-exact 2D views; default false). The view covers `ortho_height` world units vertically; distance then only sets the near and far planes. Shadows, picking, `project` and `ray` follow it.
+---@field ortho_height number World units visible vertically when orthographic (0.01 to 100000). 0 (the default) derives it from distance and fov, the height a perspective view covers at the target, so toggling `orthographic` keeps the framing; reading returns the height in effect.
 ---@field shake Vec3 Visual offset (screen shake), not interpolated. Reading returns a copy; assign a whole table.
 local Camera = {}
 
@@ -788,7 +838,15 @@ World.environment = nil
 ---@type fun(self: World, changes: table)
 World.set_environment = nil
 
---- Simulated seconds.
+--- The movers' thresholds and route-jump shape for this world (see set_movement_tuning).
+---@type fun(self: World): {arrive_distance: number, snap_distance: number, stuck_share: number, stuck_seconds: number, jump_arc_base: number, jump_arc_per_unit: number, jump_arc_per_rise: number, jump_minimum_seconds: number, landing_search: number, gravity: number}
+World.movement_tuning = nil
+
+--- Tune this world's movers; omitted fields keep their value. `arrive_distance` (0.001-1, default 0.05): a waypoint counts as reached within it, stopping short is a block; `snap_distance` (0-1, 0.02): a waypoint this close is reached even when the tick's step is shorter; `stuck_share` (0-1, 0.1) and `stuck_seconds` (0.05-60, 1): a route whose ticks cover less than that share of their step for that long is `blocked`; a route jump's apex is `jump_arc_base` + `jump_arc_per_unit` x horizontal length + `jump_arc_per_rise` x |height difference| (each 0-16; 0.4, 0.2, 0.5) and lasts at least `jump_minimum_seconds` (0.01-10, 0.3); `landing_search` (0-16, 1) is how far around a blocked landing the nearest free spot is looked for; `gravity` (0.1-1000, 20 units/second^2) pulls down bodies in flight after entity:launch.
+---@type fun(self: World, changes: {arrive_distance?: number, snap_distance?: number, stuck_share?: number, stuck_seconds?: number, jump_arc_base?: number, jump_arc_per_unit?: number, jump_arc_per_rise?: number, jump_minimum_seconds?: number, landing_search?: number, gravity?: number})
+World.set_movement_tuning = nil
+
+--- Simulated seconds of this world (advanced by its ticks at its time_scale, not while paused). A method rather than a property like `paused` and `time_scale`: a Lua value cannot be both (`w:time()` would call a number), so the spelling stays for compatibility.
 ---@type fun(self: World): number
 World.time = nil
 
@@ -800,16 +858,16 @@ World.spawn = nil
 ---@type fun(self: World, id: string): Entity?
 World.find = nil
 
---- Entities with a tag and/or within a radius.
----@type fun(self: World, filter?: {tag?: string, near?: Vec3, radius?: number}): Entity[]
+--- Entities with a tag and/or within a radius (XZ distance from `near`). With `fields` the result is a struct of arrays instead of a list of handles: `n` entities and one array per requested field (`entity` handles, `x`, `y`, `z` positions, `layer`, `id`, `cell_x`, `cell_z`), so a HUD or a tactics kit reads two hundred positions a tick with a handful of tables rather than a handle and a table per entity.
+---@type fun(self: World, filter?: {tag?: string, near?: Vec3, radius?: number, fields?: string[]}): Entity[]|{n: integer, entity?: Entity[], x?: number[], y?: number[], z?: number[], layer?: integer[], id?: string[], cell_x?: integer[], cell_z?: integer[]}
 World.query = nil
 
---- Events since the last call: contact_begin/end, arrived, blocked, jump_start, landed, climb_start, climb_end, anim_event, anim_finished, zone_enter/exit (entities with a mover or collider). Events naming an entity destroyed before they are read are dropped. At most 4096 are kept; older ones are dropped with a warning when nobody reads them.
----@type fun(self: World): {type: string, a?: Entity, b?: Entity, name?: string}[]
+--- Events since the last call: contact_begin/end, arrived, blocked, jump_start, landed, climb_start, climb_end, anim_event, anim_finished, zone_enter/exit (entities with a mover or collider) and cell_enter (a mover entered a new grid cell; `cell` is that cell). Events naming an entity destroyed before they are read are dropped. At most 4096 are kept; older ones are dropped with a warning when nobody reads them.
+---@type fun(self: World): {type: string, a?: Entity, b?: Entity, name?: string, cell?: Cell}[]
 World.events = nil
 
---- Render this world this frame (call from draw; several worlds draw in call order). `rect` = {x, y, w, h} in canvas pixels draws it into that part of the screen (picture-in-picture). `target` draws it off-screen instead, at the rect's size (default: the whole canvas; x and y are unused), for fe.canvas.image('rt:<target>') to show (minimaps, 3D portraits). `camera` replaces the world's camera for this draw only; unset fields copy the world camera, and it does not shake unless `shake` is given. Like the world camera it is interpolated between the values of the last two ticks (per world, target and order of such draws), so pass tick values such as entity.position. `post` overrides environment post fields for this draw only (a minimap without depth of field or bloom: post = {depth_of_field = false, bloom = false}).
----@type fun(self: World, options?: {rect?: Rect, target?: string, camera?: {target?: Vec3, yaw?: number, pitch?: number, distance?: number, fov?: number, shake?: Vec3}, post?: table})
+--- Render this world this frame (call from draw; several worlds draw in call order). `rect` = {x, y, w, h} in canvas pixels draws it into that part of the screen (picture-in-picture). `target` draws it off-screen instead, at the rect's size (default: the whole canvas; x and y are unused), for fe.canvas.image('rt:<target>') to show (minimaps, 3D portraits). `camera` replaces the world's camera for this draw only (`orthographic` and `ortho_height` as on Camera); unset fields copy the world camera, and it does not shake unless `shake` is given. Like the world camera it is interpolated between the values of the last two ticks (per world, target and order of such draws), so pass tick values such as entity.position. `post` overrides environment post fields for this draw only (a minimap without depth of field or bloom: post = {depth_of_field = false, bloom = false}).
+---@type fun(self: World, options?: {rect?: Rect, target?: string, camera?: {target?: Vec3, yaw?: number, pitch?: number, distance?: number, fov?: number, orthographic?: boolean, ortho_height?: number, shake?: Vec3}, post?: table})
 World.draw = nil
 
 --- The world's camera.
@@ -836,12 +894,12 @@ World.cells_with_tag = nil
 ---@type fun(self: World, position: Vec3, layer?: integer): number
 World.height_at = nil
 
---- A* path of cells (excluding the start). Rules: diagonal, max_step, max_up, max_down, blocked_tags, tag_costs (non-negative extra cost per tag), blocked, no_stop, zoc (cells that end movement), jump = {distance, max_up?, max_down?, diagonal?} (gap jumps along the axes, and with diagonal = true the diagonals, over up to `distance` unwalkable, blocked-tag or sunken cells), ladders (default true; false never climbs ladder links), cost = fun(from, to, base): number|false (per step; false = impassable; the two cell tables are reused between calls). Layer changes follow links and ladders the way movers do; steps that jump or climb a ladder are marked `jump`/`climb`. The search expands at most 200000 cells; when it stops there before reaching the goal the list has `truncated = true` and is empty or a route that may not be the cheapest.
+--- A* path of cells (excluding the start; empty when none exists, found without a search when the goal cannot be entered or, without fly or jump, lies in another connected part of the grid). Rules: diagonal, max_step, max_up, max_down, footprint (1 to 8 cells per side, anchored at the cell towards +x and +z), fly (unwalkable cells and height steps are ignored), blocked_tags, required_tags (cells with none of them cannot be entered; every name must be in the map's tag list), tag_costs (non-negative extra cost per tag), blocked, no_stop, zoc (cells that end movement), jump = {distance, max_up?, max_down?, diagonal?} (gap jumps along the axes, and with diagonal = true the diagonals, over up to `distance` unwalkable, blocked-tag or sunken cells), ladders (default true; false never climbs ladder links), cost = fun(from, to, base): number|false (per step; false = impassable; the two cell tables are reused between calls; it runs under a C call, inside the search, so it must not yield: a task.wait in it raises 'attempt to yield across a C-call boundary'). Layer changes follow links and ladders the way movers do; steps that jump or climb a ladder are marked `jump`/`climb`. The search expands at most 200000 cells; when it stops there before reaching the goal the list has `truncated = true` and is empty or a route that may not be the cheapest.
 ---@type fun(self: World, from: Cell, to: Cell, rules?: table): {truncated?: true, [integer]: {x: integer, z: integer, layer: integer, jump?: true, climb?: true}}
 World.path = nil
 
---- Every cell reachable within a movement budget (tactical move ranges), with the rules of world:path. The first entry is the start cell, which has no `parent`; every other entry's `parent` is the index in this list of the cell it is reached from, so `while c.parent do c = list[c.parent] end` walks back to the start. `jump`/`climb` mark how the step from the parent enters the cell. Zone-of-control cells are reachable but nothing is reached through them.
----@type fun(self: World, start: Cell, budget: number, rules?: table): {x: integer, z: integer, layer: integer, cost: number, parent?: integer, stop: boolean, jump?: true, climb?: true}[]
+--- Every cell reachable within a movement budget (tactical move ranges), with the rules of world:path. The first entry is the start cell, which has no `parent`; every other entry's `parent` is the index in this list of the cell it is reached from, so `while c.parent do c = list[c.parent] end` walks back to the start. `jump`/`climb` mark how the step from the parent enters the cell. Zone-of-control cells are reachable but nothing is reached through them. Like world:path the search expands at most 200000 cells; when it stops there the list has `truncated = true` and may be incomplete.
+---@type fun(self: World, start: Cell, budget: number, rules?: table): {truncated?: true, [integer]: {x: integer, z: integer, layer: integer, cost: number, parent?: integer, stop: boolean, jump?: true, climb?: true}}
 World.reachable = nil
 
 --- Whether terrain blocks the straight line between two points: ground cells, walkable upper-layer surfaces it passes through and cells with a blocking tag. `layer` is the shooter's layer; its own cell is ignored.
@@ -914,6 +972,10 @@ fe.world.load_progress = nil
 --- Create the world from a background load, replacing a world of that name. Before progress reaches 1 it waits for the map file and leaves undecoded assets to load on first use. Raises the load's error (a missing or invalid map). The ticket is used up.
 ---@type fun(ticket: integer): World
 fe.world.finish_load = nil
+
+--- Drop a background load that will not be finished (a cancelled warp): the ticket stops advancing and becomes unknown; a worker still parsing the map finishes in the background and its result is discarded, and assets already decoded stay in the cache like any other.
+---@type fun(ticket: integer)
+fe.world.cancel_load = nil
 
 --- Storefront services: unlockable milestones and stats. A port or game module can supply a store backend (Steam, a console SDK); the default keeps them in the user-data folder (platform.json).
 fe.platform = fe.platform or {}

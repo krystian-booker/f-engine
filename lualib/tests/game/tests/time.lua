@@ -332,6 +332,82 @@ return {
     scene.clear()
   end,
 
+  ["timelines keep their spacing under hit-stop"] = function(t)
+    fresh()
+    local w = fe.world.load("timeline", "arena")
+    local timeline = require("fe.timeline")
+    local fired = {}
+    local job = task.spawn(function()
+      task.bind(w)
+      timeline.play({ { time = 0, command = "mark" }, { time = 0.2, command = "mark" }, { time = 0.4, command = "mark" } },
+        { mark = function() fired[#fired + 1] = task.time() end })
+    end)
+    game.hit_stop(5, 0.25, w)
+    t.wait_until(function() return job.status ~= "running" end, 300)
+    t.eq(#fired, 3)
+    t.near(fired[2] - fired[1], 0.8, 0.05, "0.2 s of world time at quarter speed")
+    t.near(fired[3] - fired[2], 0.8, 0.05, "and the next entry waits its turn too")
+    game.reset_time()
+    fe.world.unload("timeline")
+  end,
+
+  ["a nested cutscene leaves the outer skip in place"] = function(t)
+    fresh()
+    field.start("arena", "start")
+    local inner_skipped, after_inner, walked
+    local walker = field.world:spawn({ id = "walker", position = { x = 2.5, z = 3.5 }, mover = { speed = 0.5 } })
+    local job = task.spawn(function()
+      cutscene.play(function()
+        dialogue.say("Guide", "Outer.", { speed = 0 })
+        task.wait(30)
+        cutscene.play(function()
+          inner_skipped = task.skipping()
+          dialogue.say("Guide", "Inner.")
+        end, { letterbox = false })
+        after_inner = task.skipping()
+        cutscene.actor(walker):walk_to({ x = 8.5, z = 3.5 }, { path = false })
+        walked = walker.position.x
+      end, { skippable = true, letterbox = false })
+    end)
+    t.tick(5)
+    press(t, "key:Tab")
+    press(t, "key:Z")
+    t.wait_until(function() return job.status ~= "running" end, 120)
+    t.eq(job.status, "done")
+    t.ok(inner_skipped, "the inner cutscene runs under the outer skip")
+    t.ok(after_inner, "which it leaves in place")
+    t.near(walked, 8.5, 0.01, "so the rest of the outer cutscene still jumps to its end")
+    t.eq(fe.screen.get().fade[4], 0)
+    scene.clear()
+  end,
+
+  ["game.paused is true when every loaded world is paused by any means"] = function(t)
+    fresh()
+    local a = fe.world.load("all_a", "arena")
+    local b = fe.world.load("all_b", "arena")
+    local others = {}
+    for _, name in ipairs(fe.world.list()) do
+      if name ~= "all_a" and name ~= "all_b" then others[#others + 1] = fe.world.get(name) end
+    end
+    for _, w in ipairs(others) do w.paused = true end
+    local release_a = game.pause(a)
+    b.paused = true
+    local announced
+    local disconnect = game.pause_changed:connect(function(v) announced = v end)
+    t.tick(1)
+    t.ok(game.paused, "a hold on one world and the others paused by hand")
+    t.eq(announced, true)
+    b.paused = false
+    t.tick(1)
+    t.ok(not game.paused)
+    t.eq(announced, false)
+    disconnect()
+    release_a()
+    for _, w in ipairs(others) do w.paused = false end
+    fe.world.unload("all_a")
+    fe.world.unload("all_b")
+  end,
+
   ["declining the skip prompt plays the cutscene on"] = function(t)
     fresh()
     field.start("arena", "start")

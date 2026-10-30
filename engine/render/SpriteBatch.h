@@ -15,15 +15,23 @@ public:
         bgfx::TextureHandle atlas = BGFX_INVALID_HANDLE, palette = BGFX_INVALID_HANDLE;
         // Images laid out like the atlas; invalid when the sheet has none.
         bgfx::TextureHandle normal = BGFX_INVALID_HANDLE, emissive = BGFX_INVALID_HANDLE;
-        glm::vec2 texel{0}; // 1 / atlas size, for outlines
+        glm::vec2 texel{0};       // 1 / atlas size, for outlines
+        float outlineWidth = 1;   // atlas texels the outline reaches out
         bool paletteSwap = false;
         // A game sprite shader for the opaque and transparent passes; invalid = the engine's.
         bgfx::ProgramHandle program = BGFX_INVALID_HANDLE;
+        // Its shadow variant, for the shadow and silhouette passes; invalid = the engine's.
+        bgfx::ProgramHandle shadowProgram = BGFX_INVALID_HANDLE;
+        // The entity's u_params for those shaders; null = all zero. Quads
+        // with different parameters cannot share a draw.
+        const ShaderParams* params = nullptr;
         bool operator==(const Material& other) const {
             return atlas.idx == other.atlas.idx && palette.idx == other.palette.idx &&
                    normal.idx == other.normal.idx && emissive.idx == other.emissive.idx &&
-                   texel == other.texel && paletteSwap == other.paletteSwap &&
-                   program.idx == other.program.idx;
+                   texel == other.texel && outlineWidth == other.outlineWidth &&
+                   paletteSwap == other.paletteSwap &&
+                   program.idx == other.program.idx && shadowProgram.idx == other.shadowProgram.idx &&
+                   params == other.params;
         }
     };
     struct MaterialHash {

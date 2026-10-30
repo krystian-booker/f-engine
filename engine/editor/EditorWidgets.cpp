@@ -38,12 +38,4 @@ bool editLayer(const char* label, int& layer, const Grid& grid, int lowest) {
     layer = std::clamp(layer, lowest, std::max(lowest, grid.layerCount() - 1));
     return changed;
 }
-std::string uniqueId(const std::string& prefix, const std::vector<Placement>& placements) {
-    for (std::size_t n = placements.size() + 1;; ++n) {
-        const auto id = prefix + std::to_string(n);
-        if (std::none_of(placements.begin(), placements.end(), [&](const auto& p) { return p.id == id; })) {
-            return id;
-        }
-    }
-}
 } // namespace fe::editorui

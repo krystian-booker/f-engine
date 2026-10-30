@@ -1,4 +1,5 @@
 #pragma once
+#include <cmath>
 #include <deque>
 #include <optional>
 #include <string>
@@ -27,6 +28,9 @@ struct DisplayState {
     VsyncMode vsync = VsyncMode::On;
     int monitor = 1; // 1-based index into monitors
     std::vector<Monitor> monitors;
+    // The back buffer is a high dynamic range format (game.json hdr_output or
+    // --hdr, and the backend provided one); false headless.
+    bool hdr = false;
 };
 
 // A change scripts asked for; unset fields keep their value.
@@ -84,5 +88,44 @@ public:
 private:
     static constexpr std::size_t Window = 30;
     std::deque<double> frames_;
+};
+
+// Frame cap for when vsync is off (game.json "max_fps"): says how long to
+// wait before starting each frame so that frames start one interval apart.
+// Deadlines advance by whole intervals, so timing jitter does not accumulate;
+// a frame that arrives more than an interval late starts at once and the
+// schedule restarts from it.
+class FrameCap {
+public:
+    explicit FrameCap(int maxFps = 0) { setMaxFps(maxFps); }
+    void setMaxFps(int maxFps) {
+        const double interval = maxFps > 0 ? 1.0 / maxFps : 0.0;
+        if (interval != interval_) {
+            interval_ = interval;
+            next_ = -1;
+        }
+    }
+    [[nodiscard]] int maxFps() const {
+        return interval_ > 0 ? static_cast<int>(std::lround(1 / interval_)) : 0;
+    }
+    [[nodiscard]] double interval() const { return interval_; }
+    // `now` in seconds on any monotonic clock; returns the seconds to wait
+    // before this frame may start (0 when uncapped or already due).
+    [[nodiscard]] double wait(double now) {
+        if (interval_ <= 0) {
+            return 0;
+        }
+        if (next_ < 0 || now - next_ > interval_) {
+            next_ = now + interval_;
+            return 0;
+        }
+        const double wait = next_ - now;
+        next_ += interval_;
+        return wait > 0 ? wait : 0;
+    }
+    void reset() { next_ = -1; }
+
+private:
+    double interval_ = 0, next_ = -1;
 };
 } // namespace fe

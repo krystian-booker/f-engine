@@ -1,7 +1,46 @@
 #include "engine/render/SpriteGeometry.h"
 #include <cmath>
+#include <numbers>
 
 namespace fe {
+int clipDirection(int rows, glm::vec2 facing, float cameraYaw) {
+    const int count = std::max(1, rows);
+    const float angle = std::atan2(-facing.x, facing.y) + glm::radians(cameraYaw);
+    return (static_cast<int>(std::round(angle / (2 * std::numbers::pi_v<float>)*count)) % count + count) %
+           count;
+}
+
+SpritePlacement placeSpriteClip(const Sprite& s, const SpriteAnimation& animation, const SpriteClip& clip,
+                                glm::vec3 feet, glm::vec2 facing, const Camera& camera, double alpha,
+                                int pixelsPerUnit) {
+    const int direction =
+        s.direction >= 0
+            ? s.direction
+            : clipDirection(static_cast<int>(clip.directions.size()), facing, camera.interpolatedYaw(alpha));
+    SpritePlacement placement;
+    placement.frame = &clip.frameAt(direction, glm::mix(s.previousTime, s.time, alpha));
+    const float ppu =
+        static_cast<float>(animation.pixelsPerUnit > 0 ? animation.pixelsPerUnit : pixelsPerUnit);
+    placement.size = glm::vec2(placement.frame->rect.z, placement.frame->rect.w) / ppu * s.scale;
+    placement.pivot = animation.pivot;
+    placement.lying = s.mode == SpriteMode::Flat || s.mode == SpriteMode::Decal;
+    const auto forward = camera.forward(alpha);
+    glm::vec3 position = feet, right = camera.right(alpha), up(0, 1, 0);
+    if (s.mode == SpriteMode::Facing) {
+        up = glm::normalize(glm::cross(right, forward));
+    } else if (placement.lying) {
+        right = glm::vec3(1, 0, 0);
+        up = glm::vec3(0, 0, -1);
+        position.y += FlatSpriteLift;
+    }
+    position += right * (s.pixelOffset.x / ppu) + up * (-s.pixelOffset.y / ppu);
+    position -= forward * s.depthBias;
+    placement.anchor = position;
+    placement.right = right;
+    placement.up = up;
+    return placement;
+}
+
 void projectDecal(const Grid& grid, int layer, glm::vec2 min, glm::vec2 max, glm::vec2 uv0, glm::vec2 uv1,
                   float lift, std::vector<DecalQuad>& out) {
     if (max.x <= min.x || max.y <= min.y) {

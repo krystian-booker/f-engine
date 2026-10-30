@@ -85,7 +85,14 @@ struct ImageCache {
             std::string uri = source->uri;
             cgltf_decode_uri(uri.data());
             uri.resize(std::strlen(uri.c_str()));
-            result.file = path.parent_path() / uri;
+            // Confined to the model's folder: a shipped .pak must not reach
+            // outside the game through a "../../" image URI.
+            try {
+                result.file = resolveInside(path.parent_path(), uri);
+            } catch (const std::exception&) {
+                throw std::runtime_error("glTF image '" + uri + "' lies outside the model's folder: " +
+                                         path.string());
+            }
             result.image = std::make_shared<Image>(Image::load(result.file));
         } else {
             throw std::runtime_error("glTF images must use a file URI or a GLB buffer view");
@@ -159,7 +166,10 @@ Material readMaterial(const cgltf_material* source, ImageCache& images, const Js
     material.normalSampler = readSampler(source->normal_texture);
     material.normalScale = source->normal_texture.scale;
     material.transparent = source->alpha_mode == cgltf_alpha_mode_blend;
-    material.alphaCutoff = source->alpha_mode == cgltf_alpha_mode_mask ? source->alpha_cutoff : 0.01f;
+    // OPAQUE ignores alpha, as the glTF spec says; BLEND skips what would be invisible.
+    material.alphaCutoff = source->alpha_mode == cgltf_alpha_mode_mask    ? source->alpha_cutoff
+                           : source->alpha_mode == cgltf_alpha_mode_blend ? 0.01f
+                                                                          : 0.0f;
     material.doubleSided = source->double_sided;
     if (source->unlit) {
         material.kind = MaterialKind::Unlit;
@@ -356,6 +366,9 @@ void readAnimations(const cgltf_data& data, Model& model) {
                 animation.channels.push_back(std::move(out));
             }
         }
+        // pose() composes a node's local matrix from its run of channels.
+        std::stable_sort(animation.channels.begin(), animation.channels.end(),
+                         [](const AnimationChannel& a, const AnimationChannel& b) { return a.node < b.node; });
         model.animations.push_back(std::move(animation));
     }
 }
@@ -432,12 +445,16 @@ Model Model::load(const std::filesystem::path& path) {
         node.properties = nodeProperties(source);
         if (source.has_matrix) {
             const auto matrix = glm::make_mat4(source.matrix);
+            const glm::vec3 c0(matrix[0]), c1(matrix[1]), c2(matrix[2]);
             node.translation = glm::vec3(matrix[3]);
-            node.scale = {glm::length(glm::vec3(matrix[0])), glm::length(glm::vec3(matrix[1])),
-                          glm::length(glm::vec3(matrix[2]))};
-            node.rotation = glm::quat_cast(glm::mat3(glm::vec3(matrix[0]) / node.scale.x,
-                                                     glm::vec3(matrix[1]) / node.scale.y,
-                                                     glm::vec3(matrix[2]) / node.scale.z));
+            node.scale = {glm::length(c0), glm::length(c1), glm::length(c2)};
+            // A mirrored node (negative determinant) keeps its mirroring as a
+            // negative x scale, so the rotation below is a proper rotation.
+            if (glm::dot(c0, glm::cross(c1, c2)) < 0) {
+                node.scale.x = -node.scale.x;
+            }
+            node.rotation =
+                glm::quat_cast(glm::mat3(c0 / node.scale.x, c1 / node.scale.y, c2 / node.scale.z));
         } else {
             if (source.has_translation) {
                 node.translation = glm::make_vec3(source.translation);
@@ -490,8 +507,8 @@ Model Model::load(const std::filesystem::path& path) {
         part.hidden = part.hidden || !shown[static_cast<std::size_t>(part.node)];
     }
     readAnimations(*data, model);
-    std::vector<glm::mat4> matrices;
-    model.pose(-1, 0, matrices);
+    model.bakeRestPose();
+    const auto& matrices = model.restPose;
     model.min = glm::vec3(std::numeric_limits<float>::max());
     model.max = -model.min;
     for (const int n : model.order) {
@@ -542,38 +559,68 @@ int Model::animation(const std::string& name) const {
     return -1;
 }
 
-void Model::pose(int index, float time, std::vector<glm::mat4>& matrices) const {
-    std::vector<glm::vec3> translation(nodes.size()), scale(nodes.size());
-    std::vector<glm::quat> rotation(nodes.size());
+namespace {
+glm::mat4 localMatrix(glm::vec3 translation, const glm::quat& rotation, glm::vec3 scale) {
+    return glm::translate(glm::mat4(1), translation) * glm::mat4_cast(rotation) *
+           glm::scale(glm::mat4(1), scale);
+}
+} // namespace
+
+void Model::bakeRestPose() {
+    restLocal.resize(nodes.size());
     for (std::size_t n = 0; n < nodes.size(); ++n) {
-        translation[n] = nodes[n].translation;
-        rotation[n] = nodes[n].rotation;
-        scale[n] = nodes[n].scale;
+        restLocal[n] = localMatrix(nodes[n].translation, nodes[n].rotation, nodes[n].scale);
     }
-    if (index >= 0 && index < static_cast<int>(animations.size())) {
-        for (const auto& channel : animations[static_cast<std::size_t>(index)].channels) {
-            const auto value = sample(channel, time);
-            const auto n = static_cast<std::size_t>(channel.node);
-            switch (channel.target) {
-            case AnimationChannel::Target::Translation:
-                translation[n] = glm::vec3(value);
-                break;
-            case AnimationChannel::Target::Rotation:
-                rotation[n] = glm::quat(value.w, value.x, value.y, value.z);
-                break;
-            case AnimationChannel::Target::Scale:
-                scale[n] = glm::vec3(value);
-                break;
-            }
+    restPose.clear();
+    pose(-1, 0, restPose);
+}
+
+void Model::pose(int index, float time, std::vector<glm::mat4>& matrices) const {
+    const bool animated = index >= 0 && index < static_cast<int>(animations.size());
+    if (!animated && restPose.size() == nodes.size()) {
+        matrices = restPose;
+        return;
+    }
+    // Local matrices first, then each node's world matrix in place: parents
+    // come before children in `order`, so a parent is already world space.
+    matrices.resize(nodes.size());
+    if (restLocal.size() == nodes.size()) {
+        std::copy(restLocal.begin(), restLocal.end(), matrices.begin());
+    } else {
+        for (std::size_t n = 0; n < nodes.size(); ++n) {
+            matrices[n] = localMatrix(nodes[n].translation, nodes[n].rotation, nodes[n].scale);
         }
     }
-    matrices.assign(nodes.size(), glm::mat4(1));
+    if (animated) {
+        const auto& channels = animations[static_cast<std::size_t>(index)].channels;
+        for (std::size_t c = 0; c < channels.size();) {
+            const int n = channels[c].node;
+            const auto& node = nodes[static_cast<std::size_t>(n)];
+            glm::vec3 translation = node.translation, scale = node.scale;
+            glm::quat rotation = node.rotation;
+            for (; c < channels.size() && channels[c].node == n; ++c) {
+                const auto value = sample(channels[c], time);
+                switch (channels[c].target) {
+                case AnimationChannel::Target::Translation:
+                    translation = glm::vec3(value);
+                    break;
+                case AnimationChannel::Target::Rotation:
+                    rotation = glm::quat(value.w, value.x, value.y, value.z);
+                    break;
+                case AnimationChannel::Target::Scale:
+                    scale = glm::vec3(value);
+                    break;
+                }
+            }
+            matrices[static_cast<std::size_t>(n)] = localMatrix(translation, rotation, scale);
+        }
+    }
     for (const int n : order) {
         const auto i = static_cast<std::size_t>(n);
-        const auto local = glm::translate(glm::mat4(1), translation[i]) * glm::mat4_cast(rotation[i]) *
-                           glm::scale(glm::mat4(1), scale[i]);
         const int parent = nodes[i].parent;
-        matrices[i] = parent >= 0 ? matrices[static_cast<std::size_t>(parent)] * local : local;
+        if (parent >= 0) {
+            matrices[i] = matrices[static_cast<std::size_t>(parent)] * matrices[i];
+        }
     }
 }
 } // namespace fe

@@ -135,6 +135,23 @@ TEST_CASE("zone overlays use the zone's layer") {
     CHECK(zoneCells(everywhere, grid, 1).front().layer == 1);
 }
 
+TEST_CASE("zone ids are checked like the loader checks them: unique and not empty") {
+    std::vector<Zone> zones{{"gate", "zone", {0, 0}, {1, 1}, -1, Json::object()},
+                            {"well", "zone", {2, 2}, {3, 3}, -1, Json::object()}};
+    Zone renamed = zones[1];
+    CHECK(editProblem(zones, renamed, 1).empty()); // its own id
+    renamed.id = "gate";
+    CHECK(editProblem(zones, renamed, 1) == "Zone ids must be unique and not empty");
+    renamed.id.clear();
+    CHECK_FALSE(editProblem(zones, renamed, 1).empty());
+    renamed.id = "spring";
+    CHECK(editProblem(zones, renamed, 1).empty());
+    Zone added{"gate", "zone", {4, 4}, {5, 5}, -1, Json::object()};
+    CHECK_FALSE(editProblem(zones, added, zones.size()).empty());
+    added.id = "zone3";
+    CHECK(editProblem(zones, added, zones.size()).empty());
+}
+
 TEST_CASE("marker import skips markers that don't fit instead of throwing") {
     auto map = arena();
     Model model;
@@ -325,4 +342,69 @@ TEST_CASE("a collider edited in the World tab blocks at its new radius at once, 
     collider.solid = false;
     editCollider(world, post, collider);
     CHECK(world.canOccupy(walker, near, 0));
+}
+
+TEST_CASE("a gesture's later edits do not serialise the map; settle records what it left") {
+    Worlds w;
+    MapEditHistory history;
+    // One step, then the rest of a paint stroke.
+    history.apply(w.field, [](MapData& m) { m.name = "stroke 1"; });
+    history.apply(w.field, [](MapData& m) { m.name = "stroke 2"; }, false);
+    history.apply(w.field, [](MapData& m) { m.name = "stroke 3"; }, false);
+    CHECK(history.undoCount(w.field) == 1);
+    // Undo and redo settle on their own.
+    CHECK(history.undo(w.field));
+    CHECK(w.field.authored().name == arena().name);
+    CHECK(history.redo(w.field));
+    CHECK(w.field.authored().name == "stroke 3");
+    history.apply(w.field, [](MapData& m) { m.name = "stroke 4"; }, false);
+    // Released: the reloaded (saved) world continues the history.
+    history.settle(w.field);
+    World saved{"field", MapData::fromJson(w.field.authored().toJson()), w.assets, 6};
+    history.sync(saved);
+    CHECK(history.undoCount(saved) == 1);
+    CHECK(history.undo(saved));
+    CHECK(saved.authored().name == arena().name);
+    // A world replaced while a stroke's head is still stale drops its history: conservative.
+    history.apply(saved, [](MapData& m) { m.name = "again"; });
+    history.apply(saved, [](MapData& m) { m.name = "again 2"; }, false);
+    World reloaded{"field", MapData::fromJson(saved.authored().toJson()), w.assets, 7};
+    history.sync(reloaded);
+    CHECK(history.undoCount(reloaded) == 0);
+    // An edit that joins a gesture on another world object starts a step there.
+    history.apply(w.battle, [](MapData& m) { m.name = "elsewhere"; }, false);
+    CHECK(history.undoCount(w.battle) == 1);
+    CHECK(history.undo(w.battle));
+    CHECK(w.battle.authored().name == arena().name);
+}
+
+TEST_CASE("a transform edited in the World tab moves the entity in the collision hash at once") {
+    Worlds w;
+    auto& world = w.field;
+    world.paused = true;
+    const auto walker = world.spawn("", {2.5f, 0, 5.5f});
+    world.registry().emplace<Mover>(walker);
+    const auto post = world.spawn("", {8.5f, 0, 5.5f});
+    world.registry().emplace<Collider>(post, Collider{0.4f, 1.6f, true});
+    const glm::vec3 near{3.5f, 0, 5.5f};
+    CHECK(world.canOccupy(walker, near, 0));
+    editTransform(world, post, near, 0);
+    CHECK(world.registry().get<Transform>(post).position.x == doctest::Approx(3.5f));
+    CHECK_FALSE(world.canOccupy(walker, near, 0));
+    editTransform(world, post, {8.5f, 0, 5.5f}, 0);
+    CHECK(world.canOccupy(walker, near, 0));
+}
+
+TEST_CASE("editor forms read mistyped JSON as absent instead of throwing") {
+    using namespace editorui;
+    const Json record = Json::parse(R"({"id": 7, "name": "x", "rate": "fast", "on": 1, "list": {}, "obj": []})");
+    CHECK(jsonString(record, "id", "fallback") == "fallback");
+    CHECK(jsonString(record, "name", "fallback") == "x");
+    CHECK(jsonNumber(record, "rate", 2) == 2);
+    CHECK(jsonNumber(record, "id", 2) == 7);
+    CHECK(jsonBool(record, "on", false) == false);
+    CHECK(jsonArray(record, "list").is_array());
+    CHECK(jsonObject(record, "obj").is_object());
+    CHECK(jsonString(Json::array(), "id", "none") == "none");
+    CHECK(jsonString(Json(), "id", "none") == "none");
 }

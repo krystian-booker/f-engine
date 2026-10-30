@@ -55,7 +55,40 @@ void bindSave(Engine& engine) {
             "from its previous version; an unreadable slot has meta = {corrupt = true}.")
         .fn(
             "delete", [&saves](const std::string& slot) { saves.remove(slot); }, "fun(slot: string)",
-            "Delete a slot.")
+            "Delete a slot, with its thumbnail and blobs.")
+        .fn(
+            "write_blob",
+            [&saves](const std::string& slot, const std::string& name, const std::string& bytes) {
+                saves.writeBlob(slot, name, bytes);
+            },
+            "fun(slot: string, name: string, bytes: string)",
+            "Store bytes (any string, binary included) next to a slot under `name` (slot naming rules), "
+            "through the save backend: world snapshots for a new game plus, replay inputs, anything that "
+            "is not JSON. At most 16 MiB; the slot need not exist yet. Deleting the slot deletes its blobs.")
+        .fn(
+            "read_blob",
+            [&saves](const std::string& slot, const std::string& name) -> sol::optional<std::string> {
+                if (auto bytes = saves.readBlob(slot, name)) {
+                    return *bytes;
+                }
+                return sol::nullopt;
+            },
+            "fun(slot: string, name: string): string?", "A slot's blob, or nil when there is none.")
+        .fn(
+            "remove_blob",
+            [&saves](const std::string& slot, const std::string& name) { saves.removeBlob(slot, name); },
+            "fun(slot: string, name: string)", "Delete one of a slot's blobs.")
+        .fn(
+            "blobs",
+            [&saves](sol::this_state state, const std::string& slot) {
+                sol::state_view lua(state);
+                auto out = lua.create_table();
+                for (const auto& name : saves.listBlobs(slot)) {
+                    out.add(name);
+                }
+                return out;
+            },
+            "fun(slot: string): string[]", "Names of a slot's blobs, sorted.")
         .fn(
             "thumbnail",
             [&engine, &saves](const std::string& slot) {
@@ -346,16 +379,19 @@ void bindAudio(Engine& engine) {
                     o.loopEnd = lua::get(t, "loop_end", o.loopEnd);
                     o.volume = lua::within(lua::get(t, "volume", o.volume), 0.0f, 4.0f, "volume");
                     o.pitch = lua::within(lua::get(t, "pitch", o.pitch), 0.25f, 4.0f, "pitch");
+                    o.preserveSpeed = lua::get(t, "preserve_speed", o.preserveSpeed);
                     o.loop = lua::get(t, "loop", o.loop);
                     o.sync = lua::get(t, "sync", o.sync);
                 }
                 audio.playMusic(resolveInside(root, path), o);
             },
             "fun(path: string, options?: {layer?: string, fade?: number, loop_start?: number, loop_end?: "
-            "number, volume?: number, pitch?: number, loop?: boolean, sync?: boolean})",
+            "number, volume?: number, pitch?: number, preserve_speed?: boolean, loop?: boolean, sync?: "
+            "boolean})",
             "Play music on a layer, crossfading from what was there. `sync` starts a stem at the main "
-            "layer's position, sample-aligned. `pitch` (0.25-4) changes speed and pitch together; `volume` "
-            "is 0 to 4.")
+            "layer's position, sample-aligned. `pitch` (0.25-4) changes speed and pitch together, or with "
+            "`preserve_speed` the pitch alone (the track keeps its duration; outside 0.5-2 it falls back to "
+            "changing both); `volume` is 0 to 4.")
         .fn(
             "stop_music",
             [&audio](sol::object layer, sol::object fade) {
@@ -388,11 +424,17 @@ void bindAudio(Engine& engine) {
             "fun(layer?: string): number", "Speed and pitch of a music layer (default 'main').")
         .fn(
             "set_music_pitch",
-            [&audio](const std::string& layer, float pitch) {
-                audio.setMusicPitch(layer, lua::within(pitch, 0.25f, 4.0f, "pitch"));
+            [&audio](const std::string& layer, float pitch, sol::object settings) {
+                bool preserveSpeed = false;
+                if (const auto options = lua::options(settings, "pitch options")) {
+                    preserveSpeed = lua::get(*options, "preserve_speed", false);
+                }
+                audio.setMusicPitch(layer, lua::within(pitch, 0.25f, 4.0f, "pitch"), preserveSpeed);
             },
-            "fun(layer: string, pitch: number)",
-            "Speed and pitch of a layer, 0.25 to 4 (1 = normal); setting 'main' also sets its synced stems.")
+            "fun(layer: string, pitch: number, options?: {preserve_speed?: boolean})",
+            "Speed and pitch of a layer, 0.25 to 4 (1 = normal); setting 'main' also sets its synced stems. "
+            "With `preserve_speed` only the pitch changes and the track keeps its duration (0.5 to 2; "
+            "outside that it changes both, logged once).")
         .fn(
             "current_music",
             [&audio](sol::object layer) {
@@ -416,8 +458,9 @@ void bindAudio(Engine& engine) {
                 SoundOptions o;
                 if (const auto options = lua::options(settings, "sound options")) {
                     const auto& t = *options;
-                    o.volume = lua::atLeast(lua::get(t, "volume", o.volume), 0.0f, "volume");
+                    o.volume = lua::within(lua::get(t, "volume", o.volume), 0.0f, 4.0f, "volume");
                     o.pitch = lua::within(lua::get(t, "pitch", o.pitch), 0.1f, 4.0f, "pitch");
+                    o.preserveSpeed = lua::get(t, "preserve_speed", o.preserveSpeed);
                     o.pan = lua::within(lua::get(t, "pan", o.pan), -1.0f, 1.0f, "pan");
                     o.loop = lua::get(t, "loop", o.loop);
                     o.bus = lua::get(t, "bus", o.bus);
@@ -441,11 +484,12 @@ void bindAudio(Engine& engine) {
                 }
                 return audio.playSound(resolveInside(root, path), o);
             },
-            "fun(path: string, options?: {volume?: number, pitch?: number, pan?: number, loop?: boolean, "
-            "bus?: string, position?: Vec3, world?: World, radius?: number}): integer",
+            "fun(path: string, options?: {volume?: number, pitch?: number, preserve_speed?: boolean, pan?: "
+            "number, loop?: boolean, bus?: string, position?: Vec3, world?: World, radius?: number}): integer",
             "Play a sound; returns a voice id. With `position` it is heard from `world`'s camera (default "
             "the focus world) each tick: silent beyond `radius` (8) and panned by the camera's right vector. "
-            "`volume` >= 0, `pitch` 0.1 to 4, `pan` -1 to 1.")
+            "`volume` 0 to 4 (like music and buses), `pitch` 0.1 to 4 (speed and pitch together, or the "
+            "pitch alone with `preserve_speed`, within 0.5 to 2), `pan` -1 to 1.")
         .fn(
             "stop",
             [&audio](int voice, sol::object fade) {
@@ -458,14 +502,27 @@ void bindAudio(Engine& engine) {
                 const auto number = [&t](const char* key) {
                     return lua::opt<float>(lua::field(t, key), (std::string("Field '") + key + "'").c_str());
                 };
-                VoiceChange change{number("volume"), number("pan"), number("pitch"), std::nullopt};
+                VoiceChange change{number("volume"), number("pan"), number("pitch"), std::nullopt,
+                                   lua::opt<bool>(lua::field(t, "preserve_speed"), "Field 'preserve_speed'")};
+                if (change.volume) {
+                    change.volume = lua::within(*change.volume, 0.0f, 4.0f, "volume");
+                }
+                if (change.pan) {
+                    change.pan = lua::within(*change.pan, -1.0f, 1.0f, "pan");
+                }
+                if (change.pitch) {
+                    change.pitch = lua::within(*change.pitch, 0.1f, 4.0f, "pitch");
+                }
                 if (const sol::object position = lua::field(t, "position"); !lua::absent(position)) {
                     change.position = lua::position(position);
                 }
                 audio.setSound(voice, change);
             },
-            "fun(voice: integer, change: {volume?: number, pan?: number, pitch?: number, position?: Vec3})",
-            "Change a playing voice; omitted fields keep their value.")
+            "fun(voice: integer, change: {volume?: number, pan?: number, pitch?: number, preserve_speed?: "
+            "boolean, position?: Vec3})",
+            "Change a playing voice; omitted fields keep their value. Ranges as for fe.audio.sound: `volume` "
+            "0 to 4, `pan` -1 to 1, `pitch` 0.1 to 4 (`preserve_speed` keeps the voice's duration under the "
+            "pitch change, within 0.5 to 2).")
         .fn(
             "playing", [&audio](int voice) { return audio.playing(voice); }, "fun(voice: integer): boolean",
             "The voice has not finished or been stopped (paused voices still play). False without audio.")

@@ -64,10 +64,6 @@ function starter.main(options)
     options.new_game()
   end
 
-  --- Exposed for tests and tools: start over from scratch.
-  starter.new_game = begin_new_game
-  devtools.new_game = begin_new_game
-
   local function continue(slot)
     start_over()
     if options.continue then
@@ -77,6 +73,16 @@ function starter.main(options)
       begin_new_game()
     end
   end
+
+  --- Exposed for tests, tools and the game's own screens (a game over):
+  --- `starter.new_game()` starts over from scratch, `starter.continue(slot)`
+  --- resumes a save that was just loaded (cancelling tasks and resetting
+  --- locks first, as the title's Continue does) and `starter.start_over()`
+  --- is that reset alone.
+  starter.new_game = begin_new_game
+  starter.continue = continue
+  starter.start_over = start_over
+  devtools.new_game = begin_new_game
 
   local function load_everything()
     config.load({ language = options.language })

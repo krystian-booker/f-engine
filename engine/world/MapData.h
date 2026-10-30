@@ -1,5 +1,6 @@
 #pragma once
 #include "engine/nav/Grid.h"
+#include <cmath>
 #include <glm/glm.hpp>
 #include <map>
 #include <string>
@@ -105,11 +106,16 @@ struct PostSettings {
     std::string tonemap = "aces"; // aces | none
     std::string lut, lutBlendTarget;
     float lutBlend = 0;
-    int pixelScale = 1; // >1 renders the 3D scene at reduced resolution
+    // 1..8: the 3D scene renders at the output size over this and is scaled
+    // up in the composite, with nearest filtering for a whole number (crisp
+    // pixel art) and bilinear otherwise (dynamic resolution).
+    float pixelScale = 1;
     std::vector<CustomPost> custom;
     [[nodiscard]] bool fxaa() const {
         return antialias == "fxaa" || (antialias == "auto" && pixelScale == 1);
     }
+    // The scene is upsampled with nearest filtering: a whole scale above 1.
+    [[nodiscard]] bool pixelated() const { return pixelScale > 1 && pixelScale == std::floor(pixelScale); }
 };
 
 // Look of `material: water` surfaces.

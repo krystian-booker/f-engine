@@ -2,6 +2,7 @@
 #include "engine/core/Pack.h"
 #include "engine/core/Paths.h"
 #include "engine/runtime/Engine.h"
+#include "engine/script/LuaHost.h"
 #include <doctest/doctest.h>
 #include <fstream>
 #include <random>
@@ -241,7 +242,7 @@ TEST_CASE("the asset cache, scripts and fe.fs read a game from its pak") {
     Engine engine(std::move(options));
     REQUIRE(engine.start());
     auto& lua = engine.lua();
-    CHECK(engine.mainModule().as<sol::table>().get<std::string>("helper") == "from pak");
+    CHECK(lua.require(engine.config().entry).as<sol::table>().get<std::string>("helper") == "from pak");
     CHECK(lua.console("fe.fs.read('data/items.json')") == "{\"potion\": 3}");
     CHECK(lua.console("fe.fs.exists('data/items.json')") == "true");
     CHECK(lua.console("fe.fs.exists('data')") == "true");

@@ -183,12 +183,31 @@ def write_launcher(stage, runtime, platform):
         launcher.chmod(0o755)
 
 
-def bundle_identifier(title):
-    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-") or "game"
+def game_id(config):
+    """game.json's stable id (see docs/authoring.md), derived from a plain title as the engine does."""
+    explicit = config.get("id")
+    if explicit is not None:
+        if not isinstance(explicit, str) or not re.fullmatch(r"[a-z0-9_-]{1,64}", explicit):
+            raise ValueError(f"game.json id must be 1 to 64 of a-z, 0-9, '_' and '-': {explicit!r}")
+        return explicit
+    title = config.get("title", "f-engine game")
+    identifier = game_id(config)
+    if re.search(r"[^A-Za-z0-9_ -]", title):
+        raise ValueError(f"The title {title!r} has characters outside a-z, 0-9, '_', '-' and spaces: "
+                         "game.json needs an \"id\"")
+    derived = re.sub(r" +", "-", title.lower().strip()).strip("-")
+    if not re.fullmatch(r"[a-z0-9_-]{1,64}", derived):
+        raise ValueError(f"No game id can be derived from the title {title!r}: game.json needs an \"id\"")
+    return derived
+
+
+def bundle_identifier(slug):
+    """A reverse-DNS identifier from the game's id."""
+    slug = re.sub(r"[^a-z0-9-]+", "-", slug).strip("-") or "game"
     return f"org.fengine.{slug}"
 
 
-def make_app(stage, title, version, runtime):
+def make_app(stage, title, identifier, version, runtime):
     """A macOS application bundle; the runtime plays Contents/Resources/game."""
     app = stage / f"{title}.app"
     contents = app / "Contents"
@@ -196,7 +215,7 @@ def make_app(stage, title, version, runtime):
     resources = contents / "Resources"
     resources.mkdir()
     shutil.copy2(runtime, contents / "MacOS" / "fengine")
-    info = {"CFBundleName": title, "CFBundleDisplayName": title, "CFBundleIdentifier": bundle_identifier(title),
+    info = {"CFBundleName": title, "CFBundleDisplayName": title, "CFBundleIdentifier": bundle_identifier(identifier),
             "CFBundleExecutable": "fengine", "CFBundlePackageType": "APPL", "CFBundleVersion": version,
             "CFBundleShortVersionString": version, "LSMinimumSystemVersion": "11.0",
             "NSHighResolutionCapable": True}
@@ -238,15 +257,15 @@ def png(width, height, rgb):
             chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
 
 
-def make_appimage(stage, title, runtime, appimagetool, work):
-    """<title>-x86_64.AppImage from the bin/ layout: AppDir/usr holds bin/ and the game."""
+def make_appimage(stage, title, identifier, runtime, appimagetool, work):
+    """<id>-x86_64.AppImage from the bin/ layout: AppDir/usr holds bin/ and the game."""
     appdir = work / "AppDir"
     usr = appdir / "usr"
     shutil.copytree(stage / "bin", usr / "bin")
     shutil.copy2(stage / "game.pak", usr / "game.pak")
     if (stage / "game").is_dir():
         shutil.copytree(stage / "game", usr / "game")
-    slug = bundle_identifier(title).rsplit(".", 1)[1]
+    slug = bundle_identifier(identifier).rsplit(".", 1)[1]
     app_run = appdir / "AppRun"
     app_run.write_text(f'#!/bin/sh\nexec "$(dirname "$(readlink -f "$0")")/usr/bin/{runtime.name}" "$@"\n',
                        encoding="utf-8", newline="")
@@ -309,6 +328,7 @@ def package(args):
             raise ValueError(f"Missing game file: {required}")
     config = json.loads((game / "game.json").read_text(encoding="utf-8"))
     title = config.get("title", "f-engine game")
+    identifier = game_id(config)
     if args.validator:
         subprocess.run([str(args.validator.resolve()), "--check", str(game)], check=True)
     runtime = args.runtime.resolve(strict=True)
@@ -350,7 +370,7 @@ def package(args):
         if platform == "macos":
             if "/" in title or title.startswith("."):
                 raise ValueError(f"The game title can't name an app bundle: {title!r}")
-            engine = game_dir = make_app(stage, title, str(config.get("version", "1.0")), runtime)
+            engine = game_dir = make_app(stage, title, identifier, str(config.get("version", "1.0")), runtime)
             executable_dir = engine.parent / "MacOS"
         else:
             engine = executable_dir = stage / "bin"
@@ -378,7 +398,7 @@ def package(args):
             write_launcher(stage, runtime, platform)
             how = "Run play.cmd." if platform == "windows" else "Run ./play."
         if appimagetool:
-            make_appimage(stage, title, runtime, appimagetool, work)
+            make_appimage(stage, title, identifier, runtime, appimagetool, work)
         (stage / "README.txt").write_text(f"{title}\n\n{how}\n"
                                           "Saves and settings use the platform user-data directory.\n",
                                           encoding="utf-8")

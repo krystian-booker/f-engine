@@ -20,12 +20,15 @@
 --- `stats.compute` folds them in.
 local tablex = require("fe.tablex")
 
-local stats = { list = {}, by_id = {}, resource_list = {}, resource_by_id = {} }
+local stats = { list = {}, by_id = {}, resource_list = {}, resource_by_id = {},
+  --- Bumped by every define/resources call; combatants key their stat caches by it.
+  version = 0 }
 
 --- Declare the stats (replaces previous definitions).
 ---@param list {id: string, name?: string, short?: string, min?: number, max?: number, integer?: boolean}[]
 function stats.define(list)
   stats.list, stats.by_id = {}, {}
+  stats.version = stats.version + 1
   for _, def in ipairs(list) do
     def.name = def.name or def.id
     def.min = def.min or 0
@@ -39,6 +42,7 @@ end
 ---@param map table<string, {max: string|number, name?: string, start?: number|"max", battle_only?: boolean}>
 function stats.resources(map)
   stats.resource_list, stats.resource_by_id = {}, {}
+  stats.version = stats.version + 1
   local ids = {}
   for id in pairs(map) do ids[#ids + 1] = id end
   table.sort(ids)

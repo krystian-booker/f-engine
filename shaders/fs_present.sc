@@ -9,7 +9,9 @@ SAMPLER2D(s_freeze, 1);
 // [3] flash rgb, amount
 // [4] letterbox bar height (fraction of the screen), aspect ratio, texture origin bottom-left (0/1), frozen (0/1)
 // [5] radial blur, radial centre x, y, chromatic aberration
-uniform vec4 u_present[6];
+// [6] output encoding (0 sRGB as is, 1 scRGB linear, 2 HDR10 PQ), linear scale (paper white over
+//     the reference white, or the paper white in nits for PQ)
+uniform vec4 u_present[7];
 
 // Positions use screen coordinates: 0..1 with y down, like the canvas.
 vec2 texel(vec2 p) { return u_present[4].z > 0.5 ? vec2(p.x, 1.0 - p.y) : p; }
@@ -24,6 +26,11 @@ vec3 look(vec2 p, bool frozen) {
     float strength = u_present[5].x;
     float chromatic = u_present[5].w;
     if (strength <= 0.0 && chromatic <= 0.0) return fetch(p, frozen);
+    if (strength <= 0.0) {
+        // Chromatic aberration alone: one split tap, not the 12 of the blur.
+        vec2 d = chromaticShift(p, chromatic);
+        return vec3(fetch(p + d, frozen).r, fetch(p, frozen).g, fetch(p - d, frozen).b);
+    }
     vec2 c = u_present[5].yz;
     vec3 sum = vec3_splat(0.0);
     for (int i = 0; i < 12; ++i) {
@@ -67,6 +74,36 @@ float transitionCover(vec2 p) {
 }
 
 float hash(vec2 v) { return fract(sin(dot(v, vec2(12.9898, 78.233))) * 43758.5453); }
+
+vec3 srgbToLinear(vec3 c) {
+    vec3 low = c / 12.92;
+    vec3 high = pow((c + 0.055) / 1.055, vec3_splat(2.4));
+    return mix(low, high, step(0.04045, c));
+}
+
+// SMPTE ST 2084 of luminance in nits; FrameMath::pqEncode mirrors it.
+vec3 pqEncode(vec3 nits) {
+    const float m1 = 2610.0 / 16384.0, m2 = 2523.0 / 4096.0 * 128.0, c1 = 3424.0 / 4096.0,
+                c2 = 2413.0 / 4096.0 * 32.0, c3 = 2392.0 / 4096.0 * 32.0;
+    vec3 y = pow(clamp(nits / 10000.0, 0.0, 1.0), vec3_splat(m1));
+    return pow((c1 + c2 * y) / (1.0 + c3 * y), vec3_splat(m2));
+}
+
+vec3 rec709ToRec2020(vec3 c) {
+    return vec3(dot(vec3(0.6274, 0.3293, 0.0433), c), dot(vec3(0.0691, 0.9195, 0.0114), c),
+                dot(vec3(0.0164, 0.0880, 0.8956), c));
+}
+
+// The frame (worlds and canvas, composed in sRGB) for the back buffer:
+// untouched for an 8-bit one; decoded to linear light and scaled to the paper
+// white for an HDR one (FrameMath::outputColor).
+vec3 encodeOutput(vec3 color) {
+    float mode = u_present[6].x;
+    if (mode < 0.5) return color;
+    vec3 light = srgbToLinear(clamp(color, 0.0, 1.0)); // `linear` is an HLSL keyword
+    if (mode < 1.5) return light * u_present[6].y;
+    return pqEncode(rec709ToRec2020(light) * u_present[6].y);
+}
 
 // Shatter: the screen splits into triangular shards (two per cell of an 8x5
 // grid) that spin, shrink and fall at staggered times. Returns whether `p`
@@ -122,5 +159,5 @@ void main() {
     color *= step(bar, p.y) * step(p.y, 1.0 - bar);
     color = mix(color, u_present[2].rgb, u_present[2].a);
     color += u_present[3].rgb * u_present[3].a;
-    gl_FragColor = vec4(color, 1.0);
+    gl_FragColor = vec4(encodeOutput(color), 1.0);
 }

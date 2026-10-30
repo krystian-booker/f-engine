@@ -3,6 +3,12 @@
 
 Usage: check_api.py <fengine_headless> [--update]
 --update rewrites lualib/types/fengine.d.lua and docs/api.md in place.
+
+The engine itself checks each binding's LuaLS signature against the
+parameters its C++ reads (BindingDocs::add): a development build throws at
+registration and every build refuses `--write-api` while they disagree, so a
+non-zero exit here with "declares N parameter(s) but the binding reads M" on
+stderr is a documentation bug in the binding's signature string.
 """
 import filecmp
 import shutil
@@ -21,7 +27,10 @@ def main():
         return 2
     update = "--update" in sys.argv[2:]
     with tempfile.TemporaryDirectory() as folder:
-        subprocess.run([sys.argv[1], "--write-api", folder], check=True, stdout=subprocess.DEVNULL)
+        run = subprocess.run([sys.argv[1], "--write-api", folder], stdout=subprocess.DEVNULL)
+        if run.returncode != 0:
+            print("fengine_headless --write-api failed (a binding's signature disagrees with its C++?)")
+            return run.returncode
         stale = []
         for name, target in TARGETS.items():
             fresh = Path(folder) / name

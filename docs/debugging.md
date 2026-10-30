@@ -26,7 +26,7 @@ The plan asked for an evaluation of an EmmyLua- or DAP-compatible debugger for d
 
 Integrate the EmmyLua debugger as an opt-in, dev-only feature:
 
-1. Add a CMake option `FENGINE_LUA_DEBUGGER` (default OFF, ignored when `FENGINE_DEV=OFF`) that fetches EmmyLuaDebugger with CPM and links `emmy_core` into `fengine_runtime` only.
+1. Add a CMake option `FENGINE_LUA_DEBUGGER` (default OFF, ignored when `FENGINE_DEV=OFF`) that fetches EmmyLuaDebugger with CPM and links `emmy_core` into `fengine_core` (the static library that holds `LuaHost`, `CMakeLists.txt`), in development builds only; the windowed runtime reaches it through `fengine_runtime` (the static library of `cmake/Runtime.cmake`, which `fengine` links) and the headless tool through `fengine_headless`.
 2. Add a runtime flag `--debugger <port>`. `LuaHost` turns the watchdog off, opens `emmy_core` from C++ and starts a TCP listener before `main.lua` runs. Games and release builds never see it.
 3. While the debugger holds the game paused, `MainLoop` keeps pumping SDL events and shows a "paused in debugger" overlay instead of advancing logic.
 4. Add a VS Code `launch.json` example to the docs.

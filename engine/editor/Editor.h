@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <entt/entity/entity.hpp>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <sol/forward.hpp>
 #include <string>
@@ -45,7 +46,10 @@ public:
     void drawErrors();
 
 private:
-    World* world();
+    // The world the editor shows. Panels hold the pointer for the frame, so a
+    // Lua call-out that replaces the world (play_from, a warp) cannot pull it
+    // from under them; the next frame picks up the new one.
+    std::shared_ptr<World> world();
     void close();
     void refreshSchemas();
     // Applies a map edit to the authored and live map; the first edit of a

@@ -11,6 +11,10 @@ struct ShadowCamera {
     glm::vec3 position{0}, forward{0, 0, -1}, right{1, 0, 0}, up{0, 1, 0};
     float fovY = 0.5f; // radians
     float aspect = 1, nearPlane = 0.1f, farPlane = 50;
+    // Orthographic view: a box `orthoHeight` high (times aspect wide) instead
+    // of a frustum; fovY is then ignored.
+    bool orthographic = false;
+    float orthoHeight = 10;
     // Where cascade splits start growing; the first cascade still reaches back to nearPlane.
     float splitStart = 1;
 };
@@ -67,7 +71,10 @@ float lightShadowPriority(const LightSettings& light, glm::vec3 focus);
 
 // Gives tiles to the highest-priority lights first (ties keep candidate
 // order). A light that does not fit in the tiles left is skipped, so a
-// cheaper spot light further down may still get one.
+// cheaper spot light further down may still get one. The first form writes
+// into `slots` and uses `order` as scratch (nothing allocated once warm).
+void chooseShadowLights(const std::vector<LightShadowCandidate>& candidates, std::vector<LightShadowSlot>& slots,
+                        std::vector<std::size_t>& order, int tileBudget = LightShadowTiles);
 std::vector<LightShadowSlot> chooseShadowLights(const std::vector<LightShadowCandidate>& candidates,
                                                 int tileBudget = LightShadowTiles);
 
@@ -82,7 +89,9 @@ int cubeFace(glm::vec3 direction);
 
 // One view per tile: a spot light's cone, or a point light's cube faces in
 // cubeFace order. Faces are a little wider than 90 degrees so filtering near
-// their edges stays inside the rendered area.
+// their edges stays inside the rendered area. The first form appends to `views`.
+void lightShadowViews(const LightSettings& light, int firstTile, bool homogeneousDepth, bool originBottomLeft,
+                      std::vector<LightShadowView>& views);
 std::vector<LightShadowView> lightShadowViews(const LightSettings& light, int firstTile,
                                               bool homogeneousDepth, bool originBottomLeft);
 

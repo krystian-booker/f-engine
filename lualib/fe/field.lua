@@ -8,10 +8,11 @@
 --- field.zone("music", function(zone, entered) sound.music(zone.props.track) end)
 --- field.verb("steal", {input = "info", label = "Steal", when = has_wares, run = steal})
 --- ```
---- Map placements are spawned by type. Built-in types: npc, chest, door,
---- sign, light, emitter, prop, sound, save_point, symbol. Any of them can be
---- replaced, and games add their own. Placement props are documented with
---- fe.schema.entity so the editor shows the right fields.
+--- Map placements are spawned by type. Built-in types (fe.field.placements):
+--- npc, chest, door, sign, light, emitter, prop, sound, save_point, symbol,
+--- hidden_item. Any of them can be replaced, and games add their own.
+--- Placement props are documented with fe.schema.entity so the editor
+--- shows the right fields.
 ---
 --- Extending without forking this file:
 ---   * registries: `field.define` (placement types), `field.zone` (zone
@@ -22,16 +23,25 @@
 ---   * signals (many listeners; return true to mark an event handled):
 ---     `entered`, `interacted`, `hud`, `menu_requested`, `treasure`;
 ---   * module functions the scene calls, each replaceable: `field.control`,
----     `field.target`, `field.interact`, `field.choose_verb`, `field.touch`,
+---     `field.target`, `field.verbs_for`, `field.interact`,
+---     `field.choose_verb`, `field.touch`, `field.retouch`,
 ---     `field.handle_events`, `field.update_routines`,
 ---     `field.update_followers`, `field.update_encounters`, `field.give`,
 ---     `field.announce`, `field.on_save_point`, `field.on_encounter`,
----     `field.follower_sprites`, `field.load_world`;
----   * `field.Scene` is the scene class (`field.scene` its instance).
+---     `field.follower_sprites`, `field.player_sprite`, `field.make_player`,
+---     `field.load_world`, `field.spawn_placements`, `field.spawn_followers`,
+---     `field.apply_pages`, `field.map_scripts`, `field.stop_map_tasks`,
+---     `field.wants_autosave`;
+---   * `field.Scene` is the scene class (`field.scene` its instance);
+---   * the placement types live in fe.field.placements and the follower
+---     trail in fe.field.followers; a game replaces either module by path.
 ---
 --- Phases: `Scene:update` (before the world moves) handles control, event
 --- pages and routines; `Scene:post_update` (after it moved) handles this
---- tick's world events, encounters, followers and the camera.
+--- tick's world events, encounters, followers and the camera. Both keep
+--- running while a message box or choice is on screen: the box does not
+--- block the scenes under it, and the field gates its input instead
+--- (`field.can_control` needs the field on top of the scene stack).
 ---
 --- Time: event pages, interactions and cutscenes run in tasks bound to the
 --- field world (`task.bind`), so they freeze while it is paused (the main
@@ -42,7 +52,9 @@
 ---
 --- Followers: the party's (`settings.followers`, sprites from
 --- `field.follower_sprites`) walk the leader's trail, then NPC followers
---- from fe.follower. Placements whose id is following are not spawned.
+--- from fe.follower. Placements whose id is following are not spawned. A
+--- party change (fe.rpg.party's `changed`, when that module is loaded)
+--- re-reads the leader's sprite and respawns the trail.
 ---
 --- Pickups: `field.give` announces treasure with `field.announce`, a toast
 --- (`ui.toast`) unless `settings.pickup_toasts` is false, then a message.
@@ -50,12 +62,22 @@
 --- Control: the player moves while `field.can_control()`. `field.lock()`
 --- takes a lock (cutscenes, warps, verbs) and returns its release; a lock
 --- taken in a task is released when that task ends at the latest. Touch
---- triggers, encounters and doors only fire while `field.can_trigger()`
---- (no locks, no blocking event).
+--- triggers, encounters, doors and "auto" event pages only fire while
+--- `field.can_trigger()` (no locks, no blocking event). A touch that
+--- happened under a lock fires once the lock lifts if the player still
+--- stands on the entity (within `settings.touch_range`); touches on the
+--- tick a map starts never do, so arriving on a door does not warp back.
+---
+--- Warps: one at a time. `field.warp` cancels a warp another task still
+--- runs (a door's detached warp when a script warps), whose lock and
+--- screen cover are removed by its cleanup.
 ---
 --- Random encounters (fe.encounter, loaded on first use) are on while
 --- `settings.encounters` is true; movement is measured between field
 --- updates, so it does not depend on when the engine moves entities.
+---
+--- Hot reload: `__reload` adopts edited `settings` values the game did not
+--- change at runtime (see fe.tablex.adopt).
 local camera = require("fe.camera")
 local dialogue = require("fe.dialogue")
 local event = require("fe.event")
@@ -80,16 +102,26 @@ local field = {
     run_speed = 5.6,
     interact_range = 1.4,
     counter_range = 2.3,
+    facing_dot = 0.45,      -- how squarely the player must face a target (cosine)
+    touch_range = 0.8,      -- a suppressed touch fires later within this distance
     player_radius = 0.22,
     footstep_sound = "step",
+    footstep_volume = 0.35,
     followers = 0,          -- party members trailing the leader
     follower_spacing = 0.85,
+    follower_speed = 9,     -- followers' mover speed
+    follower_settle = 0.02, -- distance under which a follower stands still
+    trail_step = 0.1,       -- leader movement between trail samples
+    trail_length = 200,     -- trail samples kept
     --- Autosave after map transitions (field.warp): true, false or
     --- fn(map_id, point) -> boolean. The save waits until no event or lock
     --- is active, so it never captures the middle of a script.
     autosave = true,
     encounters = true,      -- random encounters and encounter symbols
     player_sprite = nil,    -- string or function() -> sprite path
+    --- Extra mover fields for the player (`blocked_tags`, `required_tags`,
+    --- `fly`, `jump`...), merged over speed and radius by `field.make_player`.
+    player_mover = nil,
     pickup_toasts = true,   -- announce pickups with toasts instead of messages
     loading_delay = 0.3,    -- seconds of loading before the indicator shows
   },
@@ -103,10 +135,20 @@ local field = {
   hud = signal.new(),           -- draw overlays above the field
   menu_requested = signal.new(),
   --- (item, count, money) when treasure is found; return true when handled.
-  --- The default listener (lowest priority) shows a message.
+  --- The default listener (lowest priority) announces it with
+  --- `field.announce` (a toast by default).
   treasure = signal.new(),
   locks = 0,
 }
+
+--- The file's settings, for `__reload`.
+field.file_defaults = { settings = tablex.deep_copy(field.settings) }
+
+--- Adopt edited settings on hot reload (values the game changed at runtime
+--- are kept).
+function field.__reload(live, fresh)
+  live.file_defaults.settings = tablex.adopt(live.settings, fresh.settings, live.file_defaults.settings)
+end
 
 i18n.defaults({ fe = { field = {
   empty = "It's empty.", found_item = "Found {item}.", found_items = "Found {item} x{count}.",
@@ -114,6 +156,8 @@ i18n.defaults({ fe = { field = {
 } } })
 
 local location = state.section("field", function() return {} end)
+
+require("fe.save").add_meta(function(meta) meta.location = location.map_name end, "fe.field.location")
 
 local function remember_location()
   if not field.player or not field.player:valid() then return end
@@ -220,7 +264,8 @@ function field.reset()
   event.reset()
 end
 
---- No lock and no blocking event: touches, doors and encounters may fire.
+--- No lock and no blocking event: touches, doors, encounters and auto
+--- pages may fire.
 function field.can_trigger()
   return field.locks == 0 and not event.busy()
 end
@@ -230,13 +275,46 @@ function field.can_control()
   return field.can_trigger() and scene.top() == field.scene
 end
 
-local function player_sprite()
+-- Auto pages wait for field locks too (see fe.event).
+event.auto_allowed = function() return field.can_trigger() end
+
+--- The player's sprite path: `settings.player_sprite` (a path or a
+--- function returning one; the RPG kit sets the leader's).
+---@return string?
+function field.player_sprite()
   local s = field.settings.player_sprite
   if type(s) == "function" then return s() end
   return s
 end
 
-local function apply_pages(entity, placement, defaults)
+--- Spawn the player for `field.start` on a loaded map: `point` is the spot
+--- ({position, layer, facing}) and `sprite` the path `field.player_sprite()`
+--- gave. The default is a sprite, a mover at `settings.walk_speed` with
+--- the fields of `settings.player_mover` on top (`blocked_tags = {"water"}`
+--- keeps the party off lakes the vehicle kit crosses) and a non-solid
+--- collider. Replace it to give the player other components.
+---@param world World
+---@param point {position: table, layer?: integer, facing?: table}
+---@param sprite? string
+---@return Entity
+function field.make_player(world, point, sprite)
+  local mover = { speed = field.settings.walk_speed, radius = field.settings.player_radius }
+  for key, value in pairs(field.settings.player_mover or {}) do mover[key] = value end
+  return world:spawn({
+    id = "player", position = point.position, layer = point.layer, facing = point.facing, tags = { "player" },
+    sprite = { animation = sprite, move_clip = "walk", idle_clip = "idle" },
+    mover = mover,
+    collider = { radius = field.settings.player_radius, solid = false },
+  })
+end
+
+--- Attach a placement's event pages (`props.pages`, or a single page from
+--- `props.script` and `props.trigger`) to its entity; `defaults` describe
+--- the entity without an active page (see fe.event.attach).
+---@param entity Entity
+---@param placement table
+---@param defaults table
+function field.apply_pages(entity, placement, defaults)
   local props = placement.props
   local pages = props.pages
   if not pages and props.script then
@@ -246,133 +324,6 @@ local function apply_pages(entity, placement, defaults)
     event.attach(entity, pages, defaults)
   end
 end
-
--------------------------------------------------------------------------------
--- Built-in placement types
-
-field.define("npc", function(world, p)
-  local props = p.props
-  local entity = world:spawn({
-    id = p.id, position = p.position, layer = p.layer, facing = p.facing, tags = { "npc" },
-    sprite = { animation = props.sprite, move_clip = "walk", idle_clip = "idle" },
-    collider = { radius = props.radius or 0.3, solid = props.solid ~= false },
-    mover = { speed = props.speed or 1.6 },
-    props = props,
-  })
-  apply_pages(entity, p, { sprite = props.sprite, solid = props.solid })
-  local d = entity:data()
-  d.routine = props.routine
-  d.home = p.position
-  d.route = props.route
-  return entity
-end, {
-  name = { type = "string", optional = true, doc = "Speaker name" },
-  sprite = { type = "string", doc = "Sprite .anim.json" },
-  script = { type = "string", optional = true, doc = "Event module for a single action page" },
-  pages = { type = { list = "table" }, optional = true, doc = "Event pages" },
-  routine = { type = "string", default = "still", doc = "still, wander, patrol or a field.routine name" },
-  route = { type = { list = "table" }, optional = true, doc = "Patrol points [{x, z}]" },
-  speed = { type = "number", optional = true },
-  solid = { type = "boolean", optional = true },
-}, "A person or creature with event pages.")
-
-field.define("chest", function(world, p)
-  local props = p.props
-  local flag = props.flag or ("chest:" .. world.map_id .. ":" .. p.id)
-  local opened = state.flag(flag)
-  local entity = world:spawn({
-    id = p.id, position = p.position, layer = p.layer, facing = p.facing, tags = { "chest" },
-    sprite = { animation = props.sprite or "@fe/assets/ui/spark.anim.json", clip = opened and "open" or "closed" },
-    collider = { radius = 0.35 }, props = props,
-  })
-  entity:data().interact = function()
-    if state.flag(flag) then
-      dialogue.say(nil, props.empty_text or i18n.t("fe.field.empty"))
-      return
-    end
-    state.set_flag(flag)
-    entity:clip("open")
-    sound.play(props.sound or "chest")
-    field.give(props.item, props.count or 1, props.money)
-  end
-  return entity
-end, {
-  item = { type = "string", optional = true }, count = { type = "integer", default = 1 },
-  money = { type = "integer", optional = true }, sprite = { type = "string", optional = true },
-  flag = { type = "string", optional = true, doc = "Defaults to chest:<map>:<id>" },
-  empty_text = { type = "string", optional = true },
-}, "A treasure chest opened once.")
-
-field.define("door", function(world, p)
-  local props = p.props
-  local entity = world:spawn({
-    id = p.id, position = p.position, layer = p.layer, tags = { "door" },
-    collider = { radius = props.radius or 0.45, solid = false },
-    sprite = props.sprite and { animation = props.sprite } or nil, props = props,
-  })
-  local function go()
-    task.detached("warp", field.warp, props.map, props.point, { transition = props.transition })
-  end
-  if (props.trigger or "touch") == "touch" then
-    entity:data().on_touch = go
-  else
-    entity:data().interact = go
-  end
-  return entity
-end, {
-  map = { type = "string" }, point = { type = "string" },
-  trigger = { type = { enum = { "touch", "action" } }, default = "touch" },
-  transition = { type = "string", optional = true }, sprite = { type = "string", optional = true },
-}, "Moves the player to another map.")
-
-field.define("sign", function(world, p)
-  local entity = world:spawn({ id = p.id, position = p.position, layer = p.layer, collider = { radius = 0.3 },
-    sprite = p.props.sprite and { animation = p.props.sprite } or nil, props = p.props })
-  entity:data().interact = function() dialogue.say(nil, p.props.text) end
-  return entity
-end, { text = { type = "string" }, sprite = { type = "string", optional = true } }, "Shows a message.")
-
-field.define("light", function(world, p)
-  local light = {}
-  for k, v in pairs(p.props) do light[k] = v end
-  light.position = { 0, p.props.height or 0, 0 }
-  return world:spawn({ id = p.id, position = p.position, layer = p.layer, keep_height = true, light = light })
-end, { color = "table", radius = "number", intensity = "number", flicker = { type = "number", optional = true } },
-  "A dynamic light (static lights belong in the map's light list).")
-
-field.define("emitter", function(world, p)
-  return world:spawn({ id = p.id, position = p.position, layer = p.layer, keep_height = true, emitter = p.props })
-end, { sprite = { type = "string", optional = true }, rate = "number" }, "Particles (fire, smoke, sparkles).")
-
-field.define("prop", function(world, p)
-  local props = p.props
-  local entity = world:spawn({
-    id = p.id, position = p.position, layer = p.layer, yaw = props.yaw, scale = props.scale,
-    mesh = { model = props.model, animation = props.animation, loop = props.loop ~= false, playing = props.animation ~= nil },
-    collider = props.solid and { radius = props.radius or 0.45 } or nil, props = props,
-  })
-  apply_pages(entity, p, {})
-  return entity
-end, {
-  model = { type = "string", doc = ".glb file" }, animation = { type = "string", optional = true },
-  yaw = { type = "number", optional = true, doc = "degrees" }, solid = { type = "boolean", optional = true },
-}, "A 3D object (doors, windmills, crates).")
-
-field.define("sound", function(world, p)
-  return world:spawn({ id = p.id, position = p.position, layer = p.layer, audio = p.props })
-end, { sound = "string", radius = { type = "number", default = 8 } }, "Looping positional sound.")
-
-field.define("save_point", function(world, p)
-  local entity = world:spawn({ id = p.id, position = p.position, layer = p.layer, collider = { radius = 0.4 },
-    sprite = { animation = p.props.sprite or "@fe/assets/ui/spark.anim.json", unlit = true }, props = p.props })
-  entity:data().interact = function() field.on_save_point(entity) end
-  return entity
-end, { sprite = { type = "string", optional = true } }, "Opens the save screen.")
-
-field.define("symbol", function(world, p)
-  return require("fe.encounter").symbol(world, { troop = p.props.troop, position = p.position, sprite = p.props.sprite,
-    sight = p.props.sight, speed = p.props.speed })
-end, { troop = "string", sprite = "string", sight = { type = "number", default = 4 } }, "A visible enemy.")
 
 -------------------------------------------------------------------------------
 -- Built-in routines and verbs
@@ -445,12 +396,6 @@ field.treasure:connect(function(item, count, money)
   return true
 end, -1000, "fe.field.treasure")
 
---- Sprites for party followers (the RPG kit replaces this).
----@return string[]
-function field.follower_sprites()
-  return {}
-end
-
 --- A save point was used; default opens the save screen.
 function field.on_save_point()
   require("fe.ui.screens.save").open("save")
@@ -473,16 +418,18 @@ field.scene = setmetatable({}, Scene)
 -- Lists the module keeps across hot reload are cleared in place, never
 -- replaced: the state.changed listener below reads `entities`.
 local entities = {}
-local trail = {}
-local followers = {}
 local zone_lookup = {}
-local live = { last_position = nil, pending_autosave = nil, scripts = nil }
+local live = { last_position = nil, pending_autosave = nil, scripts = nil, warp = nil, settled = false,
+  pending_touches = {} }
 
 local function clear(t)
   for key in pairs(t) do t[key] = nil end
 end
 
-local function spawn_placements(world)
+--- Spawn a world's placements by type (`field.types`), skipping ones that
+--- are following the party; a spawner that raises is reported and skipped.
+---@param world World
+function field.spawn_placements(world)
   clear(entities)
   local following = require("fe.follower")
   for _, p in ipairs(world:placements()) do
@@ -500,38 +447,14 @@ local function spawn_placements(world)
   end
 end
 
-local function spawn_followers(world, position)
-  for _, entity in ipairs(followers) do
-    if entity:valid() then entity:destroy() end
-  end
-  clear(followers)
-  clear(trail)
-  local sprites = {}
-  local party = field.follower_sprites()
-  for i = 1, math.min(field.settings.followers, #party) do sprites[#sprites + 1] = party[i] end
-  for _, entry in ipairs(require("fe.follower").list()) do sprites[#sprites + 1] = entry.sprite end
-  for i, sprite in ipairs(sprites) do
-    followers[i] = world:spawn({ position = position, layer = field.player.layer, tags = { "follower" },
-      sprite = { animation = sprite, move_clip = "walk", idle_clip = "idle" }, mover = { collide = false, speed = 9 } })
-  end
-end
+-- Placement types and followers (see the header).
+require("fe.field.placements").install(field)
+require("fe.field.followers").install(field)
 
---- Respawn the followers behind the player (after the party or the NPC
---- followers change; fe.follower changes do this by themselves).
-function field.refresh_followers()
-  if field.world and field.player and field.player:valid() then
-    spawn_followers(field.world, field.player.position)
-  end
-end
-
---- The field's followers (party, then NPCs), nearest the leader first.
----@return Entity[]
-function field.followers()
-  return followers
-end
-
--- The task the current map's event scripts and interactions run under.
-local function map_scripts()
+--- The task the current map's event scripts and interactions run under
+--- (started when needed).
+---@return Task
+function field.map_scripts()
   if not (live.scripts and live.scripts:running()) then
     live.scripts = task.detached("map scripts", function()
       task.wait_until(function() return false end)
@@ -539,12 +462,13 @@ local function map_scripts()
   end
   return live.scripts
 end
-event.scope = map_scripts
+event.scope = function() return field.map_scripts() end
 
--- Cancel the scripts and interactions of the current map. A script of the
--- map that is calling (an event script may warp and carry on) is moved out
--- first and returned.
-local function stop_map_tasks()
+--- Cancel the scripts and interactions of the current map. A script of the
+--- map that is calling (an event script may warp and carry on) is moved out
+--- first and returned.
+---@return Task?
+function field.stop_map_tasks()
   local scripts = live.scripts
   live.scripts = nil
   if not (scripts and scripts:running()) then return nil end
@@ -564,8 +488,7 @@ end
 ---@param options? {music?: boolean, world?: World}
 function field.start(map_id, point, options)
   options = options or {}
-  require("fe.save").add_meta(function(meta) meta.location = location.map_name end, "fe.field.location")
-  local carried = stop_map_tasks()
+  local carried = field.stop_map_tasks()
   dialogue.clear_bubbles()
   local world = options.world or fe.world.load(field.settings.world_name, map_id)
   field.world = world
@@ -576,17 +499,15 @@ function field.start(map_id, point, options)
     spot = world:points()[point or "start"]
     if not spot then error("map '" .. map_id .. "' has no point '" .. tostring(point) .. "'") end
   end
-  field.player = world:spawn({
-    id = "player", position = spot.position, layer = spot.layer, facing = spot.facing, tags = { "player" },
-    sprite = { animation = player_sprite(), move_clip = "walk", idle_clip = "idle" },
-    mover = { speed = field.settings.walk_speed, radius = field.settings.player_radius },
-    collider = { radius = field.settings.player_radius, solid = false },
-  })
-  spawn_placements(world)
-  spawn_followers(world, field.player.position)
+  field.player = field.make_player(world, spot, field.player_sprite())
+  field.spawn_placements(world)
+  field.spawn_followers(world, field.player.position)
+  require("fe.field.followers").watch_party()
   clear(zone_lookup)
   for _, zone in ipairs(world:zones()) do zone_lookup[zone.id] = zone end
   live.last_position = nil
+  live.settled = false
+  live.pending_touches = {}
   field.rig = camera.rig(world, { follow = field.player })
   location.map = map_id
   location.map_name = world.map_name
@@ -595,12 +516,15 @@ function field.start(map_id, point, options)
   if music and options.music ~= false then sound.music(music) end
   if field.settings.encounters then require("fe.encounter").reset() end
   if not scene.contains(field.scene) then scene.push(field.scene) end
-  if carried then carried:set_parent(map_scripts()) end
+  if carried then carried:set_parent(field.map_scripts()) end
   field.entered:emit(map_id, point)
   return world
 end
 
-local function wants_autosave(map_id, point, options)
+--- Whether a warp to `map_id`/`point` autosaves: `options.autosave`, else
+--- `settings.autosave` (a boolean or a function of map and point).
+---@return boolean
+function field.wants_autosave(map_id, point, options)
   if options.autosave ~= nil then return options.autosave end
   local setting = field.settings.autosave
   if type(setting) == "function" then return setting(map_id, point) == true end
@@ -634,13 +558,16 @@ end
 --- Load a map for `field.start` without stopping the game: the map loads
 --- on a worker (`fe.world.load_async`) while this task waits, showing a
 --- loading indicator after `settings.loading_delay` seconds. Returns the
---- World. Call from a task.
+--- World. Call from a task. If the task is cancelled while waiting, the
+--- load is cancelled (`fe.world.cancel_load`): the engine discards what a
+--- worker is still parsing, keeps what it decoded in its asset cache (as it
+--- keeps every loaded asset) and never creates the world.
 ---@param map_id string
 ---@return World
 function field.load_world(map_id)
   local ticket = fe.world.load_async(field.settings.world_name, map_id)
   local started = task.time()
-  local shown = false
+  local shown, ready = false, false
   task.ensure(function()
     task.wait_until(function()
       if not shown and task.time() - started >= field.settings.loading_delay then
@@ -649,10 +576,22 @@ function field.load_world(map_id)
       end
       return fe.world.load_progress(ticket) >= 1
     end)
+    ready = true
   end, function()
     if shown then scene.remove(loading_view) end
+    if not ready then fe.world.cancel_load(ticket) end
   end)
   return fe.world.finish_load(ticket)
+end
+
+-- Whether the current task is `job` or was started by it.
+local function inside(job)
+  local current = task.current()
+  while current do
+    if current == job then return true end
+    current = current.parent
+  end
+  return false
 end
 
 --- Change maps with a transition, then autosave (see settings.autosave;
@@ -660,13 +599,18 @@ end
 --- meanwhile; if the task is cancelled the lock and the screen cover are
 --- removed. The map loads with `field.load_world` while the screen is
 --- covered. In a skipping task (a skipped cutscene, which keeps the screen
---- covered until it ends) the warp leaves the screen alone.
+--- covered until it ends) the warp leaves the screen alone. A warp another
+--- task still runs is cancelled first: one warp owns the field at a time.
 ---@param options? {transition?: string, duration?: number, autosave?: boolean, music?: boolean}
 function field.warp(map_id, point, options)
   options = options or {}
   local kind = options.transition or "fade"
   local duration = options.duration or 0.35
   local covered = task.skipping()
+  local previous = live.warp
+  if previous and previous:running() and not inside(previous) then previous:cancel() end
+  local me = task.current()
+  live.warp = me
   local unlock = field.lock()
   task.ensure(function()
     if not covered then transition.out(kind, duration) end
@@ -675,8 +619,9 @@ function field.warp(map_id, point, options)
   end, function()
     unlock()
     if not covered then transition.clear() end
+    if live.warp == me then live.warp = nil end
   end)
-  if wants_autosave(map_id, point, options) then field.autosave() end
+  if field.wants_autosave(map_id, point, options) then field.autosave() end
 end
 
 --- Reload the current map from the saved location (after loading a save).
@@ -690,7 +635,10 @@ end
 -------------------------------------------------------------------------------
 -- Interaction
 
-local function verbs_for(entity, input, player)
+--- The verbs of `input` that apply to an entity (their `when`), in
+--- registration order.
+---@return table[]
+function field.verbs_for(entity, input, player)
   local out = {}
   for _, verb in ipairs(field.verbs) do
     if verb.input == input and (not verb.when or verb.when(entity, player)) then out[#out + 1] = verb end
@@ -702,7 +650,8 @@ end
 --- and the verbs that apply to it; nil when there is none. The nearest
 --- entity in reach wins; reach is the verb's range (default
 --- settings.interact_range, or counter_range across a "counter" cell) and,
---- unless the verb sets facing = false, the player must face it.
+--- unless the verb sets facing = false, the player must face it
+--- (`settings.facing_dot`).
 ---@return Entity?, table[]?
 function field.target(input)
   input = input or "confirm"
@@ -720,8 +669,8 @@ function field.target(input)
       if math.abs(q.y - p.y) < 1 and (not best or distance < best_distance) then
         local facing_dot = distance > 0.01 and ((q.x - p.x) * f.x + (q.z - p.z) * f.z) / distance or 1
         local reached = {}
-        for _, verb in ipairs(verbs_for(entity, input, player)) do
-          if distance <= (verb.range or default_range) and (verb.facing == false or facing_dot > 0.45) then
+        for _, verb in ipairs(field.verbs_for(entity, input, player)) do
+          if distance <= (verb.range or default_range) and (verb.facing == false or facing_dot > field.settings.facing_dot) then
             reached[#reached + 1] = verb
           end
         end
@@ -759,7 +708,7 @@ function field.interact(input)
   if not target then return nil end
   field.interacted:emit(target, input)
   local player = field.player
-  local job = map_scripts():spawn("interact:" .. target.id, function()
+  local job = field.map_scripts():spawn("interact:" .. target.id, function()
     task.bind(field.world)
     event.block()
     local verb = verbs[1]
@@ -771,9 +720,15 @@ function field.interact(input)
 end
 
 --- The player touched another entity: doors, touch pages and encounter
---- symbols react (only while `field.can_trigger()`).
+--- symbols react (only while `field.can_trigger()`; otherwise the touch is
+--- kept for `field.retouch`, unless the map just started).
 function field.touch(other)
-  if not field.can_trigger() then return end
+  if not field.can_trigger() then
+    if live.settled and not tablex.contains(live.pending_touches, other) then
+      live.pending_touches[#live.pending_touches + 1] = other
+    end
+    return
+  end
   local d = other:data()
   if d.on_touch then
     d.on_touch(other)
@@ -787,6 +742,28 @@ function field.touch(other)
     local troop = other:props().troop
     other:destroy()
     field.start_encounter(troop, nil)
+  end
+end
+
+--- Fire the touches suppressed under a lock once triggers are allowed
+--- again, for entities the player still stands on (`settings.touch_range`,
+--- same layer).
+function field.retouch()
+  if not field.can_trigger() then return end
+  if not live.settled then
+    live.settled = true
+    return
+  end
+  if #live.pending_touches == 0 then return end
+  local pending = live.pending_touches
+  live.pending_touches = {}
+  local player = field.player
+  for _, other in ipairs(pending) do
+    if not field.can_trigger() then return end
+    if other:valid() and other.layer == player.layer
+        and vec.flat_distance(other.position, player.position) <= field.settings.touch_range then
+      field.touch(other)
+    end
   end
 end
 
@@ -812,7 +789,7 @@ function field.handle_events(world)
       local handler = zone and field.zone_types[zone.type]
       if handler then handler(zone, e.type == "zone_enter", player) end
     elseif e.type == "anim_event" and e.name == "footstep" and e.a == player then
-      sound.play(field.settings.footstep_sound, { volume = 0.35 })
+      sound.play(field.settings.footstep_sound, { volume = field.settings.footstep_volume })
     end
   end
 end
@@ -829,25 +806,6 @@ function field.update_routines(dt)
       if routine and not event.running(entity) and not (d.parallel and d.parallel:running()) then
         routine(entity, d, dt, rng)
       end
-    end
-  end
-end
-
---- Move followers along the leader's trail.
-function field.update_followers()
-  if #followers == 0 then return end
-  local p = field.player.position
-  local last = trail[1]
-  if not last or vec.flat_distance(last, p) > 0.1 then
-    table.insert(trail, 1, { x = p.x, y = p.y, z = p.z, layer = field.player.layer })
-    while #trail > 200 do table.remove(trail) end
-  end
-  local spacing = field.settings.follower_spacing
-  for i, follower in ipairs(followers) do
-    local index = math.min(#trail, math.floor(i * spacing / 0.1) + 1)
-    local spot = trail[index]
-    if spot and vec.flat_distance(spot, follower.position) > 0.02 then
-      follower:move_to(spot, { path = false })
     end
   end
 end
@@ -924,6 +882,7 @@ function Scene:post_update(dt)
   local world, player = field.world, field.player
   if not world or not player or not player:valid() then return end
   field.handle_events(world)
+  field.retouch()
   field.update_followers()
   field.update_encounters(world, player)
   remember_location()
@@ -941,10 +900,6 @@ end
 state.changed:connect(function()
   for _, entity in ipairs(entities) do event.refresh(entity) end
 end, 0, "fe.field.pages")
-
-local follower_signals = require("fe.follower")
-follower_signals.joined:connect(function() field.refresh_followers() end, 0, "fe.field.followers")
-follower_signals.left:connect(function() field.refresh_followers() end, 0, "fe.field.followers")
 
 -- Development: saving the current map in the editor reloads it in place.
 require("fe.game").file_changed:connect(function(path)

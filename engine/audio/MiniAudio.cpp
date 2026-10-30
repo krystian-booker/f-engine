@@ -1,5 +1,6 @@
 #include "engine/audio/MiniAudio.h"
 #include "engine/audio/BusDsp.h"
+#include "engine/audio/PitchShift.h"
 #include "engine/core/Log.h"
 #include "engine/core/Paths.h"
 #define MINIAUDIO_IMPLEMENTATION
@@ -11,6 +12,7 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <tuple>
 #include <vector>
 
 namespace fe {
@@ -44,6 +46,21 @@ void processBus(ma_node* node, const float** in, ma_uint32* inCount, float** out
 }
 
 ma_node_vtable busVtable{processBus, nullptr, 1, 1, MA_NODE_FLAG_CONTINUOUS_PROCESSING};
+
+// A sound's pitch shifter, between the sound and its bus group.
+struct ShiftNode {
+    ma_node_base base;
+    PitchShift* dsp;
+};
+
+void processShift(ma_node* node, const float** in, ma_uint32* inCount, float** out, ma_uint32* outCount) {
+    const auto frames = std::min(*inCount, *outCount);
+    static_cast<ShiftNode*>(node)->dsp->process(in[0], out[0], frames);
+    *inCount = frames;
+    *outCount = frames;
+}
+
+ma_node_vtable shiftVtable{processShift, nullptr, 1, 1, 0};
 } // namespace
 
 struct MiniAudio::Impl {
@@ -56,20 +73,34 @@ struct MiniAudio::Impl {
         double loopStart = 0, loopEnd = 0;
         bool loopPending = false; // loop points wait for an asynchronous load
         bool held = false;        // stopped by pauseSounds
-        // Music waits until buffered: a Group cue starts with all other Group
-        // cues at `cueAt` seconds; Joining starts in step with the main layer.
+        // Music waits until buffered: a Group cue starts with the other Group
+        // cues of its group (the tracks cued in the same tick) at `cueAt`
+        // seconds; Joining starts in step with the main layer.
         Cue cue = Cue::None;
+        std::uint64_t cueGroup = 0;
         double cueAt = 0;
         bool cueSeeked = false, cueAtEnd = false;
         ma_uint64 startTime = 0;
+        std::string cacheKey; // the decoded file this effect plays from the cache, if any
+        std::string bus;      // the bus a voice plays on (voice stealing ranks by it)
         // Positional sounds: `volume` and `pan` are the script's values,
         // combined with the listener's gain and pan when applied.
         std::optional<glm::vec3> position;
         std::string listener;
         float radius = 8, volume = 1, pan = 0;
+        // Pitch kept apart from speed: the shifter sits between the sound and
+        // its bus once a pitch with preserveSpeed asked for it; `shifting` says
+        // whether it is doing anything now (the sound's own pitch is 1 then).
+        std::unique_ptr<PitchShift> shift;
+        std::unique_ptr<ShiftNode> shiftNode;
+        bool shiftReady = false, shifting = false;
+        bool preserveSpeed = false; // what was asked, kept for pitch changes that don't say
         ~Sound() {
             if (initialized) {
-                ma_sound_uninit(&handle);
+                ma_sound_uninit(&handle); // detaches from the shifter first
+            }
+            if (shiftReady) {
+                ma_node_uninit(&shiftNode->base, nullptr);
             }
         }
     };
@@ -95,11 +126,80 @@ struct MiniAudio::Impl {
     std::map<std::string, Layer> layers;
     std::map<int, std::unique_ptr<Sound>> voices;
     std::map<std::string, Listener> listeners;
-    std::set<std::string> cached; // effect files held decoded by the resource manager
+    // Effect files held decoded by the resource manager: their decoded size
+    // (0 until a voice of theirs has loaded) and when they were last played.
+    struct Cached {
+        std::size_t bytes = 0;
+        std::uint64_t lastUse = 0;
+    };
+    std::map<std::string, Cached> cached;
+    std::size_t cacheBudget = std::size_t{64} << 20;
+    std::uint64_t useCounter = 0;
+    double streamThreshold = 10; // seconds; longer effects stream
     std::map<std::string, double> lengths;
     int nextVoice = 1;
+    std::size_t maxVoices = 64;
+    bool warnedVarispeed = false; // preserveSpeed outside the shifter's range, said once
+    // The cue group of tracks cued now; update() moves to the next one each tick.
+    std::uint64_t cueGroup = 1;
+    std::vector<std::uint64_t> startedGroups; // startCued() scratch
+    std::vector<Sound*> cueScratch;
 
     [[nodiscard]] ma_uint64 now() const { return ma_engine_get_time_in_pcm_frames(&engine); }
+
+    [[nodiscard]] std::size_t cacheBytes() const {
+        std::size_t total = 0;
+        for (const auto& entry : cached) {
+            total += entry.second.bytes;
+        }
+        return total;
+    }
+
+    // Whether a voice (playing or fading out) still reads the cached file.
+    [[nodiscard]] bool inUse(const std::string& key) const {
+        for (const auto& entry : voices) {
+            if (entry.second->cacheKey == key) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void unregister(const std::string& key) {
+        ma_resource_manager_unregister_file(ma_engine_get_resource_manager(&engine), key.c_str());
+    }
+
+    // Records the decoded size of files whose voices have loaded, then drops
+    // the least recently played files nobody plays until the cache fits.
+    void enforceBudget() {
+        for (auto& entry : voices) {
+            auto& sound = *entry.second;
+            if (sound.cacheKey.empty()) {
+                continue;
+            }
+            auto& info = cached[sound.cacheKey];
+            if (info.bytes == 0 && loaded(sound)) {
+                ma_uint64 frames = 0;
+                ma_resource_manager_data_source_get_length_in_pcm_frames(source(sound), &frames);
+                info.bytes = static_cast<std::size_t>(frames) * Channels * sizeof(float);
+            }
+        }
+        auto total = cacheBytes();
+        while (total > cacheBudget) {
+            const std::string* oldest = nullptr;
+            for (const auto& entry : cached) {
+                if ((!oldest || entry.second.lastUse < cached.at(*oldest).lastUse) && !inUse(entry.first)) {
+                    oldest = &entry.first;
+                }
+            }
+            if (!oldest) {
+                break; // everything left is playing
+            }
+            total -= cached.at(*oldest).bytes;
+            unregister(*oldest);
+            cached.erase(*oldest);
+        }
+    }
 
     bool openDevice() {
         auto config = ma_device_config_init(ma_device_type_playback);
@@ -193,7 +293,92 @@ struct MiniAudio::Impl {
         }
         sound->initialized = true;
         sound->file = file.string();
+        sound->bus = busName;
         return sound;
+    }
+
+    // Puts a pitch shifter between the sound and its bus (once per sound).
+    bool ensureShifter(Sound& sound) {
+        if (sound.shiftReady) {
+            return true;
+        }
+        auto* target = bus(sound.bus);
+        if (!target) {
+            return false;
+        }
+        sound.shift = std::make_unique<PitchShift>(SampleRate);
+        sound.shiftNode = std::make_unique<ShiftNode>();
+        sound.shiftNode->dsp = sound.shift.get();
+        const ma_uint32 channels[1] = {Channels};
+        auto config = ma_node_config_init();
+        config.vtable = &shiftVtable;
+        config.pInputChannels = channels;
+        config.pOutputChannels = channels;
+        if (ma_node_init(ma_engine_get_node_graph(&engine), &config, nullptr, &sound.shiftNode->base) !=
+            MA_SUCCESS) {
+            sound.shiftNode.reset();
+            sound.shift.reset();
+            return false;
+        }
+        sound.shiftReady = true;
+        ma_node_attach_output_bus(&sound.shiftNode->base, 0, &target->group, 0);
+        ma_node_attach_output_bus(&sound.handle, 0, &sound.shiftNode->base, 0);
+        return true;
+    }
+
+    // Applies a pitch: through the shifter when the speed is to be kept and
+    // the shifter can do it, as varispeed otherwise.
+    void applyPitch(Sound& sound, float pitch, bool preserveSpeed) {
+        const bool shift = preserveSpeed && pitch != 1.0f && PitchShift::supports(pitch) && ensureShifter(sound);
+        if (preserveSpeed && pitch != 1.0f && !PitchShift::supports(pitch) && !warnedVarispeed) {
+            warnedVarispeed = true;
+            log(LogLevel::Warning, "preserve_speed keeps the speed only for pitches 0.5 to 2; " +
+                                       std::to_string(pitch) + " plays as varispeed");
+        }
+        if (sound.shift) {
+            sound.shift->setRatio(shift ? pitch : 1.0f);
+        }
+        sound.shifting = shift;
+        sound.preserveSpeed = preserveSpeed;
+        ma_sound_set_pitch(&sound.handle, shift ? 1.0f : pitch);
+    }
+
+    // Buses in stealing order: effects go first, speech next, music last.
+    static int busRank(const std::string& name) {
+        if (name == "sfx") {
+            return 0;
+        }
+        if (name == "voice") {
+            return 2;
+        }
+        if (name == "music") {
+            return 3;
+        }
+        if (name == "master") {
+            return 4;
+        }
+        return 1; // game-defined buses
+    }
+
+    // Steals voices until at most `limit` remain: the voice stolen is one
+    // already fading out if any, else the oldest non-looping voice on the
+    // lowest-ranked bus, and only when every voice loops the oldest looping
+    // one there.
+    void trimVoices(std::size_t limit) {
+        while (voices.size() > limit) {
+            auto victim = voices.end();
+            auto key = [](const std::pair<const int, std::unique_ptr<Sound>>& entry) {
+                const auto& sound = *entry.second;
+                return std::make_tuple(sound.retireAt ? 0 : 1, ma_sound_is_looping(&sound.handle) ? 1 : 0,
+                                       busRank(sound.bus), entry.first);
+            };
+            for (auto it = voices.begin(); it != voices.end(); ++it) {
+                if (victim == voices.end() || key(*it) < key(*victim)) {
+                    victim = it;
+                }
+            }
+            voices.erase(victim);
+        }
     }
 
     static ma_resource_manager_data_source* source(Sound& sound) {
@@ -266,7 +451,7 @@ struct MiniAudio::Impl {
                                     double fade) {
         auto sound = load(file, MA_SOUND_FLAG_STREAM | MA_SOUND_FLAG_ASYNC, "music");
         ma_sound_set_looping(&sound->handle, options.loop);
-        ma_sound_set_pitch(&sound->handle, options.pitch);
+        applyPitch(*sound, options.pitch, options.preserveSpeed);
         sound->loopStart = options.loopStart;
         sound->loopEnd = options.loopEnd;
         if (options.loopStart > 0 || options.loopEnd > 0) {
@@ -309,16 +494,22 @@ struct MiniAudio::Impl {
     // Where the main track will be at mixer frame `at`, in seconds, wrapped
     // into its loop.
     double mainPositionAt(Sound& main, ma_uint64 at) {
+        // The cursor and the sound's own frame count (frames it has output
+        // since its start) advance in the same node read on the mixer thread,
+        // so a cursor sampled between two equal readings of the count belongs
+        // to it. The engine clock advances only after the whole graph has
+        // been read: a cursor paired with now() could be one mixer period
+        // ahead of it, and a stem scheduled from that pair would start early.
         ma_uint64 cursor = 0, before = 0, after = 0;
         for (int attempt = 0; attempt < 4; ++attempt) {
-            before = now();
+            before = ma_sound_get_time_in_pcm_frames(&main.handle);
             ma_sound_get_cursor_in_pcm_frames(&main.handle, &cursor);
-            after = now();
+            after = ma_sound_get_time_in_pcm_frames(&main.handle);
             if (before == after) {
                 break;
             }
         }
-        const auto origin = std::max(after, main.startTime);
+        const auto origin = main.startTime + after; // the mixer frame the cursor's sample plays at
         double seconds = static_cast<double>(cursor) / rate(main) +
                          (static_cast<double>(at) - static_cast<double>(origin)) / SampleRate *
                              ma_sound_get_pitch(&main.handle);
@@ -338,21 +529,36 @@ struct MiniAudio::Impl {
         sound.cue = Sound::Cue::None;
     }
 
+    // Starts each cue group (the tracks cued in one tick) as soon as every
+    // track of that group is buffered; a slow file cued earlier never holds
+    // back tracks cued later.
     void startCued() {
-        std::vector<Sound*> group;
-        bool ready = true;
+        startedGroups.clear();
         for (auto& [name, layer] : layers) {
-            for (auto& sound : layer.sounds) {
-                if (sound->cue == Sound::Cue::Group && !sound->retireAt) {
-                    group.push_back(sound.get());
-                    ready = buffered(*sound, sound->cueAt) && ready;
+            for (auto& first : layer.sounds) {
+                if (first->cue != Sound::Cue::Group || first->retireAt ||
+                    std::find(startedGroups.begin(), startedGroups.end(), first->cueGroup) !=
+                        startedGroups.end()) {
+                    continue;
                 }
-            }
-        }
-        if (!group.empty() && ready) {
-            const auto at = now() + framesFor(StartLead);
-            for (auto* sound : group) {
-                start(*sound, at);
+                startedGroups.push_back(first->cueGroup);
+                cueScratch.clear();
+                bool ready = true;
+                for (auto& [other, otherLayer] : layers) {
+                    for (auto& sound : otherLayer.sounds) {
+                        if (sound->cue == Sound::Cue::Group && !sound->retireAt &&
+                            sound->cueGroup == first->cueGroup) {
+                            cueScratch.push_back(sound.get());
+                            ready = buffered(*sound, sound->cueAt) && ready;
+                        }
+                    }
+                }
+                if (ready) {
+                    const auto at = now() + framesFor(StartLead);
+                    for (auto* sound : cueScratch) {
+                        start(*sound, at);
+                    }
+                }
             }
         }
         for (auto& [name, layer] : layers) {
@@ -364,6 +570,7 @@ struct MiniAudio::Impl {
             if (!main || main->cue != Sound::Cue::None) {
                 sound->cue = Sound::Cue::Group;
                 sound->cueAt = main ? main->cueAt : 0;
+                sound->cueGroup = main ? main->cueGroup : cueGroup;
                 continue;
             }
             if (main->held || !loaded(*sound)) {
@@ -425,6 +632,9 @@ MiniAudio::MiniAudio(bool openDevice) : impl_(std::make_unique<Impl>()) {
             log(LogLevel::Warning, std::string("Audio bus '") + name + "' unavailable");
         }
     }
+    if (auto* master = p.bus("master")) {
+        master->dsp.setLimiter(true);
+    }
     p.wantDevice = openDevice;
     if (openDevice) {
         p.deviceOpen = p.openDevice();
@@ -442,8 +652,8 @@ MiniAudio::~MiniAudio() {
     p.layers.clear();
     p.releaseBuses();
     if (p.ready) {
-        for (const auto& file : p.cached) {
-            ma_resource_manager_unregister_file(ma_engine_get_resource_manager(&p.engine), file.c_str());
+        for (const auto& entry : p.cached) {
+            p.unregister(entry.first);
         }
         ma_engine_uninit(&p.engine);
     }
@@ -470,11 +680,14 @@ void MiniAudio::playMusic(const std::filesystem::path& file, const MusicOptions&
     settings.volume = std::clamp(options.volume, 0.0f, 4.0f);
     settings.pitch = std::clamp(options.pitch, 0.25f, 4.0f);
     auto sound = p.cueMusic(file, settings, options.fade);
+    sound->cueGroup = p.cueGroup;
     if (const auto* main = p.currentMusic("main"); options.sync && options.layer != "main" && main) {
         if (main->cue == Impl::Sound::Cue::None) {
             sound->cue = Impl::Sound::Cue::Joining;
         } else {
+            // Main is still cued: start on its frame, whichever tick cued it.
             sound->cueAt = main->cueAt;
+            sound->cueGroup = main->cueGroup;
         }
     }
     for (auto& old : layer.sounds) {
@@ -512,7 +725,7 @@ void MiniAudio::setMusicVolume(const std::string& layerName, float volume, doubl
     ma_sound_set_fade_in_pcm_frames(&sound->handle, -1, volume, framesFor(fade));
 }
 
-void MiniAudio::setMusicPitch(const std::string& layerName, float pitch) {
+void MiniAudio::setMusicPitch(const std::string& layerName, float pitch, bool preserveSpeed) {
     checkFinite(pitch, "music pitch");
     pitch = std::clamp(pitch, 0.25f, 4.0f);
     // Synced stems follow the main layer so they stay in step.
@@ -521,8 +734,9 @@ void MiniAudio::setMusicPitch(const std::string& layerName, float pitch) {
             continue;
         }
         layer.options.pitch = pitch;
+        layer.options.preserveSpeed = preserveSpeed;
         for (auto& sound : layer.sounds) {
-            ma_sound_set_pitch(&sound->handle, pitch);
+            impl_->applyPitch(*sound, pitch, preserveSpeed);
         }
     }
 }
@@ -580,23 +794,37 @@ int MiniAudio::playSound(const std::filesystem::path& file, const SoundOptions& 
     if (!p.ready) {
         return -1;
     }
+    // Short effects are decoded once and cached (within the budget); long
+    // ones (voice-over, ambiences) stream, so a minute of speech does not
+    // hold 23 MB of decoded audio.
+    const bool stream = length(file) > p.streamThreshold;
     const auto path = localFile(file).string();
-    if (!p.cached.contains(path) && isFile(file) &&
-        ma_resource_manager_register_file(ma_engine_get_resource_manager(&p.engine), path.c_str(),
-                                          MA_RESOURCE_MANAGER_DATA_SOURCE_FLAG_DECODE |
-                                              MA_RESOURCE_MANAGER_DATA_SOURCE_FLAG_ASYNC) == MA_SUCCESS) {
-        p.cached.insert(path);
+    if (!stream) {
+        const auto found = p.cached.find(path);
+        if (found != p.cached.end()) {
+            found->second.lastUse = ++p.useCounter;
+        } else if (ma_resource_manager_register_file(ma_engine_get_resource_manager(&p.engine), path.c_str(),
+                                                     MA_RESOURCE_MANAGER_DATA_SOURCE_FLAG_DECODE |
+                                                         MA_RESOURCE_MANAGER_DATA_SOURCE_FLAG_ASYNC) ==
+                   MA_SUCCESS) {
+            p.cached[path].lastUse = ++p.useCounter;
+        }
     }
-    auto sound = p.load(file, MA_SOUND_FLAG_DECODE | MA_SOUND_FLAG_ASYNC, options.bus);
+    auto sound = p.load(file, (stream ? MA_SOUND_FLAG_STREAM : MA_SOUND_FLAG_DECODE) | MA_SOUND_FLAG_ASYNC,
+                        options.bus);
+    if (!stream && p.cached.contains(path)) {
+        sound->cacheKey = path;
+    }
     sound->volume = std::clamp(options.volume, 0.0f, 4.0f);
     sound->pan = std::clamp(options.pan, -1.0f, 1.0f);
     sound->position = options.position;
     sound->listener = options.listener;
     sound->radius = options.radius;
     p.place(*sound);
-    ma_sound_set_pitch(&sound->handle, std::clamp(options.pitch, 0.1f, 4.0f));
+    p.applyPitch(*sound, std::clamp(options.pitch, 0.1f, 4.0f), options.preserveSpeed);
     ma_sound_set_looping(&sound->handle, options.loop);
     ma_sound_start(&sound->handle);
+    p.trimVoices(p.maxVoices - 1);
     const int voice = p.nextVoice++;
     p.voices[voice] = std::move(sound);
     return voice;
@@ -623,8 +851,11 @@ void MiniAudio::setSound(int voice, const VoiceChange& change) {
     if (change.position) {
         sound->position = change.position;
     }
-    if (change.pitch) {
-        ma_sound_set_pitch(&sound->handle, std::clamp(*change.pitch, 0.1f, 4.0f));
+    if (change.pitch || change.preserveSpeed) {
+        // The pitch in force: the shifter's ratio while it shifts, else the sound's own.
+        const float current = sound->shifting ? sound->shift->ratio() : ma_sound_get_pitch(&sound->handle);
+        const bool preserve = change.preserveSpeed.value_or(sound->preserveSpeed);
+        impl_->applyPitch(*sound, change.pitch ? std::clamp(*change.pitch, 0.1f, 4.0f) : current, preserve);
     }
     impl_->place(*sound);
 }
@@ -675,7 +906,7 @@ void MiniAudio::setBusVolume(const std::string& name, float volume) {
         return;
     }
     if (auto* bus = p.bus(name)) {
-        bus->volume = std::clamp(volume, 0.0f, 1.0f);
+        bus->volume = std::clamp(volume, 0.0f, 4.0f);
         ma_sound_group_set_volume(&bus->group, bus->volume);
     }
 }
@@ -719,11 +950,18 @@ void MiniAudio::pauseSounds(bool paused) {
         return;
     }
     p.soundsPaused = paused;
+    // A resumed sound starts again a margin ahead with its frame count reset,
+    // so `startTime` plus the frames it has output stays the mixer frame of
+    // its cursor (mainPositionAt relies on it for stems joining later).
+    const auto resumeAt = p.now() + framesFor(StartMargin);
     p.eachSound([&](Impl::Sound& sound) {
         if (paused && ma_node_get_state(&sound.handle) == ma_node_state_started) {
             ma_sound_stop(&sound.handle);
             sound.held = true;
         } else if (!paused && sound.held) {
+            ma_node_set_time(&sound.handle, 0);
+            ma_sound_set_start_time_in_pcm_frames(&sound.handle, resumeAt);
+            sound.startTime = resumeAt;
             ma_sound_start(&sound.handle);
             sound.held = false;
         }
@@ -774,13 +1012,15 @@ void MiniAudio::update(double) {
         std::erase_if(entry.second.sounds, [&](auto& sound) { return p.expired(*sound, time); });
     }
     std::erase_if(p.voices, [&](auto& entry) { return p.expired(*entry.second, time); });
+    p.enforceBudget();
     p.startCued();
+    ++p.cueGroup; // tracks cued from now on form the next group
 }
 
 void MiniAudio::reload(const std::filesystem::path& file) {
     auto& p = *impl_;
     if (p.cached.erase(file.string()) > 0) {
-        ma_resource_manager_unregister_file(ma_engine_get_resource_manager(&p.engine), file.string().c_str());
+        p.unregister(file.string());
     }
     p.lengths.erase(file.string());
     for (auto& entry : p.layers) {
@@ -847,8 +1087,61 @@ Spatial MiniAudio::voiceMix(int voice) const {
                  : Spatial{0, 0};
 }
 
+bool MiniAudio::voiceShifted(int voice) const {
+    const auto* sound = impl_->voice(voice);
+    return sound && sound->shifting;
+}
+
 float MiniAudio::duckGain(const std::string& bus) const {
     const auto found = impl_->buses.find(bus);
     return found == impl_->buses.end() ? 1.0f : found->second->dsp.duckGain();
+}
+
+void MiniAudio::setSoundCacheBudget(std::size_t bytes) {
+    impl_->cacheBudget = bytes;
+    if (impl_->ready) {
+        impl_->enforceBudget();
+    }
+}
+
+std::size_t MiniAudio::soundCacheBudget() const {
+    return impl_->cacheBudget;
+}
+
+std::size_t MiniAudio::soundCacheBytes() const {
+    return impl_->cacheBytes();
+}
+
+bool MiniAudio::soundCached(const std::filesystem::path& file) const {
+    return isFile(file) && impl_->cached.contains(localFile(file).string());
+}
+
+void MiniAudio::setSoundStreamThreshold(double seconds) {
+    checkFinite(seconds, "sound stream threshold");
+    impl_->streamThreshold = std::max(0.0, seconds);
+}
+
+double MiniAudio::soundStreamThreshold() const {
+    return impl_->streamThreshold;
+}
+
+void MiniAudio::setMaxVoices(std::size_t count) {
+    impl_->maxVoices = std::max<std::size_t>(1, count);
+    impl_->trimVoices(impl_->maxVoices);
+}
+
+std::size_t MiniAudio::maxVoices() const {
+    return impl_->maxVoices;
+}
+
+void MiniAudio::setMasterLimiter(bool on) {
+    if (auto* master = impl_->ready ? impl_->bus("master") : nullptr) {
+        master->dsp.setLimiter(on);
+    }
+}
+
+bool MiniAudio::masterLimiter() const {
+    const auto found = impl_->buses.find("master");
+    return found != impl_->buses.end() && found->second->dsp.limiter();
 }
 } // namespace fe

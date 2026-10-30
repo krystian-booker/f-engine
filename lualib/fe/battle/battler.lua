@@ -9,6 +9,7 @@
 local Combatant = require("fe.rpg.combatant")
 local class = require("fe.class")
 local data = require("fe.data")
+local stats = require("fe.rpg.stats")
 local tablex = require("fe.tablex")
 
 ---@class Battler
@@ -184,6 +185,7 @@ function Battler:buff(modifier, turns)
     self.buffs[#self.buffs + 1] = entry
   end
   entry.fresh = self.acting == true
+  self:invalidate()
   return entry
 end
 
@@ -196,11 +198,13 @@ end
 function Battler:clear_buffs(kind)
   local before = #self.buffs
   self.buffs = tablex.filter(self.buffs, function(b) return kind and b.kind ~= kind end)
+  if #self.buffs ~= before then self:invalidate() end
   return before - #self.buffs
 end
 
 --- Count down buff durations at the end of the bearer's turn.
 function Battler:tick_buffs()
+  local before = #self.buffs
   self.buffs = tablex.filter(self.buffs, function(b)
     if b.fresh then
       b.fresh = nil
@@ -209,11 +213,12 @@ function Battler:tick_buffs()
     b.turns = b.turns - 1
     return b.turns > 0
   end)
+  if #self.buffs ~= before then self:invalidate() end
 end
 
 --- Reset battle-only resources (boost points...) to their start value.
 function Battler:reset_battle_resources()
-  for _, def in ipairs(require("fe.rpg.stats").resource_list) do
+  for _, def in ipairs(stats.resource_list) do
     if def.battle_only then
       self:set_resource(def.id, def.start == "max" and self:max_resource(def.id) or def.start)
     end

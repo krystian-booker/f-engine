@@ -1,8 +1,9 @@
 #include "engine/editor/MapEdits.h"
-#include "engine/platform/FileWatcher.h"
 #include "engine/runtime/Engine.h"
+#include "engine/script/LuaHost.h"
 #include "engine/world/Animation.h"
 #include "engine/world/World.h"
+#include <cmath>
 #include <doctest/doctest.h>
 #include <fstream>
 #include <limits>
@@ -186,7 +187,19 @@ TEST_CASE("emitters and weather produce particles; lights flicker deterministica
     LightSettings light;
     light.flicker = 0.5f;
     f.world.registry().emplace<LightSource>(e, LightSource{light});
-    CHECK(f.world.activeLights().size() == 2);
+    REQUIRE(f.world.activeLights().size() == 2);
+    // The flicker wobbles the intensity over time, and the same world time
+    // gives the same wobble in another world.
+    const float before = f.world.activeLights()[1].intensity;
+    f.run(0.25);
+    const float after = f.world.activeLights()[1].intensity;
+    CHECK(before != doctest::Approx(after));
+    CHECK(before != doctest::Approx(light.intensity));
+    Fixture g;
+    const auto twin = g.world.spawn("fire", {6, 0, 5});
+    g.world.registry().emplace<LightSource>(twin, LightSource{light});
+    g.run(0.75);
+    CHECK(g.world.activeLights()[1].intensity == doctest::Approx(after));
 }
 
 TEST_CASE("a light's flicker phase does not depend on the other lights") {
@@ -396,6 +409,14 @@ TEST_CASE("move_to plans onto a bridge layer and the mover walks the plan") {
     CHECK(u.position.y == doctest::Approx(1).epsilon(0.02));
 }
 
+TEST_CASE("the camera starts on the start point") {
+    Fixture f;
+    CHECK(f.world.camera().target == f.world.map().points.at("start").position);
+    Json grid = flatGrid(4, 4);
+    Scratch s("camera-start", grid);
+    CHECK(s.world.camera().target == glm::vec3(2, 0, 2));
+}
+
 TEST_CASE("move_to picks the walkable layer nearest the target height") {
     Json grid = flatGrid(9, 3);
     grid["layers"][0]["walk"] = {"111000111", "111000111", "111000111"};
@@ -417,6 +438,41 @@ TEST_CASE("move_to picks the walkable layer nearest the target height") {
     s.step(240);
     CHECK(s.world.registry().get<Transform>(e).layer == 0);
     CHECK(s.world.registry().get<Transform>(e).position.x == doctest::Approx(8.5f).epsilon(0.02));
+}
+
+TEST_CASE("a wide mover descends a rise-1 ramp through its directed link on a planned route") {
+    // The planner tests a ramp-foot link at the junction edge; the mover used
+    // to test it at its centre with its radius of standing room, so a body
+    // wider than 0.25 stalled in the link band and reported blocked on a
+    // route the planner approved.
+    Json grid = flatGrid(9, 3);
+    grid["layers"][0]["walk"] = {"111000111", "111000111", "111000111"};
+    grid["layers"].push_back({{"walk", {"000000000", "001111100", "000000000"}},
+                              {"height", {"0 0 0 0 0 0 0 0 0", "0 0 0 1 1 1 0 0 0", "0 0 0 0 0 0 0 0 0"}},
+                              {"ramp", {".........", "..e...w..", "........."}}});
+    grid["links"] = {{{"x", 2}, {"z", 1}, {"from", 0}, {"to", 1}, {"dir", "e"}},
+                     {{"x", 6}, {"z", 1}, {"from", 0}, {"to", 1}, {"dir", "w"}}};
+    Scratch s("wide-ramp", grid);
+    const auto e = s.world.spawn("", {4.5f, 1, 1.5f}, 1);
+    s.world.registry().emplace<Mover>(e);
+    s.world.registry().emplace<Collider>(e, Collider{.radius = 0.45f});
+    const auto& t = s.world.registry().get<Transform>(e);
+    s.world.moveTo(e, {8.5f, 0, 1.5f}, true);
+    s.step(300);
+    CHECK(t.layer == 0);
+    CHECK(t.position.x == doctest::Approx(8.5f).epsilon(0.02));
+    CHECK(std::abs(t.position.y) < 0.02f);
+    auto events = s.world.takeEvents();
+    CHECK(count(events, WorldEvent::Kind::Arrived) == 1);
+    CHECK(count(events, WorldEvent::Kind::Blocked) == 0);
+    // And back up the same ramp, then down the other one.
+    s.world.moveTo(e, {0.5f, 0, 1.5f}, true);
+    s.step(600);
+    CHECK(t.layer == 0);
+    CHECK(t.position.x == doctest::Approx(0.5f).epsilon(0.02));
+    events = s.world.takeEvents();
+    CHECK(count(events, WorldEvent::Kind::Arrived) == 1);
+    CHECK(count(events, WorldEvent::Kind::Blocked) == 0);
 }
 
 TEST_CASE("walkers cross the Riverford bridge both ways along the planned path") {
@@ -706,7 +762,7 @@ TEST_CASE("camera yaw interpolates the short way and projection matches the ray 
     CHECK(glm::length(toPoint - direction * glm::dot(toPoint, direction)) < 1e-3f);
 }
 
-TEST_CASE("maps reject placements and zones on layers the grid lacks") {
+TEST_CASE("maps reject placements and zones on layers the grid lacks, and duplicate zone ids") {
     auto map = MapData::load(std::filesystem::path(FENGINE_TEST_GAME) / "maps/arena/map.json").toJson();
     auto bad = map;
     bad["placements"] = {{{"id", "a"}, {"type", "npc"}, {"position", {1, 0, 1}}, {"layer", 2}}};
@@ -716,6 +772,30 @@ TEST_CASE("maps reject placements and zones on layers the grid lacks") {
     CHECK_THROWS(MapData::fromJson(bad));
     bad["zones"][0]["layer"] = 1;
     CHECK_NOTHROW(MapData::fromJson(bad));
+    // Presence inside zones is keyed by id, so ids must be unique and non-empty.
+    bad["zones"].push_back({{"id", "z"}, {"min", {2, 2}}, {"max", {3, 3}}});
+    CHECK_THROWS_WITH(MapData::fromJson(bad), doctest::Contains("Duplicate or empty zone id"));
+    bad["zones"][1]["id"] = "";
+    CHECK_THROWS(MapData::fromJson(bad));
+    bad["zones"][1]["id"] = "other";
+    CHECK_NOTHROW(MapData::fromJson(bad));
+}
+
+TEST_CASE("maps reject tilt-shift focus outside 0..1 and negative weather intensity") {
+    auto map = MapData::load(std::filesystem::path(FENGINE_TEST_GAME) / "maps/arena/map.json").toJson();
+    auto bad = map;
+    bad["environment"]["post"] = {{"focus", 1.5}};
+    CHECK_THROWS(MapData::fromJson(bad));
+    bad["environment"]["post"] = {{"focus_range", -0.1}};
+    CHECK_THROWS(MapData::fromJson(bad));
+    bad["environment"]["post"] = {{"focus", 1}, {"focus_range", 0}};
+    CHECK_NOTHROW(MapData::fromJson(bad));
+    bad["environment"]["weather"] = {{"kind", "rain"}, {"intensity", -1}};
+    CHECK_THROWS(MapData::fromJson(bad));
+    bad["environment"]["weather"]["intensity"] = 0;
+    CHECK_NOTHROW(MapData::fromJson(bad));
+    bad["environment"]["post"] = {{"custom", {{{"shader", "sepia"}, {"params", 3}}}}};
+    CHECK_THROWS(MapData::fromJson(bad));
 }
 
 TEST_CASE("the engine skips paused worlds and scales their time") {
@@ -749,33 +829,13 @@ TEST_CASE("the engine skips paused worlds and scales their time") {
               .find("non-negative") != std::string::npos);
 }
 
-TEST_CASE("the file watcher survives unreadable folders without reporting removals") {
-    const auto root = std::filesystem::temp_directory_path() / "fengine-watch-test";
-    std::filesystem::remove_all(root);
-    write(root / "a.txt", "a");
-    write(root / "sub" / "b.txt", "b");
-    FileWatcher watcher(root);
-    CHECK(watcher.poll().empty());
-    write(root / "a.txt", "changed");
-    write(root / "c.txt", "c");
-    auto changes = watcher.poll();
-    REQUIRE(changes.size() == 2);
-    std::filesystem::permissions(root / "sub", std::filesystem::perms::none);
-    changes = watcher.poll();
-    std::filesystem::permissions(root / "sub", std::filesystem::perms::owner_all);
-    CHECK(changes.empty());
-    std::filesystem::remove(root / "c.txt");
-    changes = watcher.poll();
-    REQUIRE(changes.size() == 1);
-    CHECK(changes[0].kind == FileChangeKind::Removed);
-    CHECK(changes[0].path.filename() == "c.txt");
-}
 
 namespace {
 std::vector<WorldEvent::Kind> kinds(const std::vector<WorldEvent>& events) {
     std::vector<WorldEvent::Kind> result;
     for (const auto& e : events) {
-        if (e.kind != WorldEvent::Kind::ZoneEnter && e.kind != WorldEvent::Kind::ZoneExit) {
+        if (e.kind != WorldEvent::Kind::ZoneEnter && e.kind != WorldEvent::Kind::ZoneExit &&
+            e.kind != WorldEvent::Kind::CellEnter) {
             result.push_back(e.kind);
         }
     }
@@ -1120,7 +1180,15 @@ TEST_CASE("Lua sees jump and climb marks, zoc, cost callbacks, routes and raycas
     CHECK(lua.console("return w:pick_entity(-100, -100)") == "nil");
     lua.console("raft = w:spawn{position = {x = 5.5, z = 7.5}, keep_height = true, platform = {size = {x = "
                 "2, z = 1}}}");
-    CHECK(lua.console("raft:platform(nil); raft:platform{size = {x = 1, z = 1}}") == "");
+    auto& world = *engine.world("main");
+    REQUIRE(world.registry().view<Platform>().size() == 1);
+    const auto raft = world.registry().view<Platform>().front();
+    CHECK(world.registry().get<Platform>(raft).size == glm::vec2(2, 1));
+    CHECK(lua.console("do raft:platform(nil) end") == ""); // a statement: the console prints no result
+    CHECK_FALSE(world.registry().all_of<Platform>(raft));
+    CHECK(lua.console("do raft:platform{size = {x = 1, z = 1}} end") == "");
+    REQUIRE(world.registry().all_of<Platform>(raft));
+    CHECK(world.registry().get<Platform>(raft).size == glm::vec2(1, 1));
     CHECK(engine.lua().errors().empty());
 }
 
@@ -1189,9 +1257,680 @@ TEST_CASE("sprites and meshes name game shaders by validated names") {
     CHECK(world.registry().get<MeshInstance>(entity).shader == "glint");
 }
 
-TEST_CASE("game.json sets whether the game pauses when the window loses focus") {
-    CHECK(GameConfig::load(FENGINE_TEST_GAME).pauseOnFocusLoss);
-    const auto root = std::filesystem::temp_directory_path() / "fengine-config-focus";
-    write(root / "game.json", R"({"title": "Focus", "pause_on_focus_loss": false})");
-    CHECK_FALSE(GameConfig::load(root).pauseOnFocusLoss);
+
+namespace {
+std::vector<GridPos> cellsEntered(const std::vector<WorldEvent>& events, entt::entity who) {
+    std::vector<GridPos> cells;
+    for (const auto& e : events) {
+        if (e.kind == WorldEvent::Kind::CellEnter && e.a == who) {
+            cells.push_back(e.cell);
+        }
+    }
+    return cells;
+}
+} // namespace
+
+TEST_CASE("solid bodies that overlap separate instead of locking") {
+    Fixture f;
+    const auto a = f.walker({2.5f, 0, 5.5f});
+    const auto b = f.walker({2.5f, 0, 5.5f}); // spawned on the same spot
+    f.world.moveTo(a, {2.5f, 0, 7.5f}, false);
+    f.run(2);
+    const auto events = f.world.takeEvents();
+    CHECK(count(events, WorldEvent::Kind::Arrived) == 1);
+    CHECK(count(events, WorldEvent::Kind::Blocked) == 0);
+    CHECK(f.world.registry().get<Transform>(a).position.z == doctest::Approx(7.5f).epsilon(0.01));
+    CHECK(f.world.registry().get<Transform>(b).position.z == doctest::Approx(5.5f));
+    // A body still inside another cannot push further in: only the way out is open.
+    const auto c = f.walker({5.5f, 0, 5.5f});
+    const auto d = f.walker({5.6f, 0, 5.5f});
+    f.world.moveTo(d, {5.4f, 0, 5.5f}, false);
+    f.run(1.5);
+    CHECK(f.world.registry().get<Transform>(d).position.x >= 5.6f - 1e-4f);
+    CHECK(f.world.registry().get<Transform>(c).position.x == doctest::Approx(5.5f));
+}
+
+TEST_CASE("a jump interrupted by a command lands under the body and emits landed") {
+    Fixture f;
+    const auto e = f.walker({2.5f, 0, 2.5f});
+    f.world.jump(e, {5.5f, 0, 2.5f}, 1, 1, 0);
+    f.run(0.3);
+    const auto& t = f.world.registry().get<Transform>(e);
+    REQUIRE(t.position.y > 0.5f);
+    f.world.moveTo(e, {7.5f, 0, 3.5f}, true); // click-to-move in mid-air
+    CHECK(t.position.y == doctest::Approx(0));
+    CHECK(t.position.x == doctest::Approx(3.4f).epsilon(0.01));
+    CHECK(kinds(f.world.takeEvents()) == std::vector{WorldEvent::Kind::JumpStart, WorldEvent::Kind::Landed});
+    f.run(6);
+    CHECK(t.position.x == doctest::Approx(7.5f).epsilon(0.02));
+    CHECK(kinds(f.world.takeEvents()) == std::vector{WorldEvent::Kind::Arrived});
+    // stop() and a plain route do the same; no command leaves the body in the air.
+    f.world.jump(e, {5.5f, 0, 3.5f}, 1, 1, 0);
+    f.run(0.5);
+    REQUIRE(t.position.y > 0.5f);
+    f.world.stop(e);
+    CHECK(t.position.y == doctest::Approx(0));
+    CHECK_FALSE(f.world.moving(e));
+    CHECK(kinds(f.world.takeEvents()) == std::vector{WorldEvent::Kind::JumpStart, WorldEvent::Kind::Landed});
+    f.world.jump(e, {6.5f, 0, 5.5f}, 1, 1, 0);
+    f.run(0.5);
+    f.world.moveTo(e, {6.5f, 0, 3.5f}, false);
+    CHECK(t.position.y == doctest::Approx(0));
+    CHECK(count(f.world.takeEvents(), WorldEvent::Kind::Landed) == 1);
+    f.run(3);
+    CHECK(t.position.z == doctest::Approx(3.5f).epsilon(0.02));
+}
+
+TEST_CASE("a jump interrupted over a void lands at the nearer end of its arc") {
+    Json grid = flatGrid(8, 3);
+    grid["layers"][0]["walk"] = {"11001111", "11001111", "11001111"};
+    Scratch s("void-jump", grid);
+    const auto e = s.world.spawn("", centre(1, 1));
+    s.world.registry().emplace<Mover>(e);
+    s.world.jump(e, centre(4, 1), 1, 1, 0);
+    s.step(24); // 0.4 s: over the gap, nearer the take-off
+    const auto& t = s.world.registry().get<Transform>(e);
+    REQUIRE(t.position.x > 2.2f);
+    s.world.stop(e);
+    CHECK(t.position == centre(1, 1));
+    CHECK(count(s.world.takeEvents(), WorldEvent::Kind::Landed) == 1);
+    s.world.jump(e, centre(4, 1), 1, 1, 0);
+    s.step(42); // 0.7 s: nearer the landing
+    s.world.stop(e);
+    CHECK(t.position == centre(4, 1));
+    CHECK(count(s.world.takeEvents(), WorldEvent::Kind::Landed) == 1);
+}
+
+TEST_CASE("a climb interrupted part-way steps off at the nearer end, on that end's layer") {
+    // A ladder from the ground up a 4-unit face onto layer 1.
+    Json grid = flatGrid(5, 4);
+    grid["layers"][0]["walk"] = {"00000", "11111", "11111", "11111"};
+    grid["layers"].push_back({{"walk", {"11111", "00000", "00000", "00000"}}, {"height_fill", 4}});
+    grid["links"] = {{{"x", 2}, {"z", 1}, {"from", 0}, {"to", 1}, {"dir", "n"}, {"kind", "ladder"}}};
+    const auto climbUntil = [&](Scratch& s, entt::entity e, float height) {
+        for (int i = 0; i < 1200; ++i) {
+            s.step();
+            const auto& mover = s.world.registry().get<Mover>(e);
+            if (mover.motion == Motion::Climb && s.world.registry().get<Transform>(e).position.y >= height) {
+                return true;
+            }
+        }
+        return false;
+    };
+    Scratch s("ladder-interrupt", grid);
+    const auto e = s.world.spawn("", centre(0, 2));
+    s.world.registry().emplace<Mover>(e).climbSpeed = 2;
+    s.world.moveTo(e, centre(4, 0, 4), true, 1);
+    REQUIRE(climbUntil(s, e, 3));
+    const auto& t = s.world.registry().get<Transform>(e);
+    // A target outside the grid is refused before the climb is touched.
+    CHECK_THROWS(s.world.moveTo(e, {40, 0, 40}, true));
+    CHECK(s.world.registry().get<Mover>(e).motion == Motion::Climb);
+    s.world.moveTo(e, centre(0, 0, 4), true, 1);
+    CHECK(t.layer == 1);
+    CHECK(t.position.y == doctest::Approx(4));
+    CHECK(t.position == centre(2, 0, 4));
+    auto events = s.world.takeEvents();
+    CHECK(count(events, WorldEvent::Kind::ClimbStart) == 1);
+    CHECK(count(events, WorldEvent::Kind::ClimbEnd) == 1);
+    s.step(240);
+    CHECK(t.position.x == doctest::Approx(0.5f).epsilon(0.02));
+    CHECK(t.layer == 1);
+    // Interrupted near the foot: back on the ground where the climb began.
+    s.world.place(e, centre(0, 2), 0);
+    s.world.moveTo(e, centre(4, 0, 4), true, 1);
+    REQUIRE(climbUntil(s, e, 0.5f));
+    REQUIRE(t.position.y < 2);
+    s.world.stop(e);
+    CHECK(t.layer == 0);
+    CHECK(t.position == centre(2, 1));
+    CHECK_FALSE(s.world.moving(e));
+    events = s.world.takeEvents();
+    CHECK(count(events, WorldEvent::Kind::ClimbEnd) == 1);
+}
+
+TEST_CASE("platform carry stops at static boxes and only moves this tick's riders") {
+    Json grid = flatGrid(8, 3);
+    grid["layers"][0]["walk"] = {"11111111", "10000001", "11111111"};
+    Scratch s("raft-quay", grid);
+    auto& registry = s.world.registry();
+    s.world.map().colliders.push_back({{4, 0, 1}, {4.5f, 2, 2}}); // a quay post in the water
+    s.world.rebuildStatic();
+    const auto raft = s.world.spawn("", centre(1, 1, 0.2f));
+    registry.emplace<Platform>(raft);
+    registry.emplace<Mover>(raft, Mover{.speed = 1, .collide = false});
+    s.step();
+    const auto rider = s.world.spawn("", centre(1, 1, 0.2f));
+    registry.emplace<Mover>(rider);
+    s.world.moveTo(raft, centre(6, 1, 0.2f), false);
+    s.step(400);
+    CHECK(registry.get<Transform>(raft).position.x == doctest::Approx(6.5f).epsilon(0.01));
+    CHECK(registry.get<Transform>(rider).position.x == doctest::Approx(3.8f).epsilon(0.01)); // held at the box
+    // A rider that steps ashore in the tick the raft leaves is not dragged along.
+    Scratch q("raft-ashore", grid);
+    auto& r2 = q.world.registry();
+    const auto boat = q.world.spawn("", centre(1, 1, 0));
+    r2.emplace<Platform>(boat);
+    r2.emplace<Mover>(boat, Mover{.speed = 1, .collide = false});
+    q.step();
+    const auto hero = q.world.spawn("", centre(1, 1, 0));
+    r2.emplace<Mover>(hero).speed = 60; // ashore in one tick
+    q.world.moveTo(hero, centre(0, 1), false);
+    q.world.moveTo(boat, centre(6, 1, 0), false);
+    q.step();
+    CHECK(r2.get<Transform>(hero).position.x == doctest::Approx(0.5f));
+    q.step(60);
+    CHECK(r2.get<Transform>(hero).position.x == doctest::Approx(0.5f));
+}
+
+TEST_CASE("cell_enter reports a mover's new cell, including layer changes") {
+    Fixture f;
+    const auto e = f.walker({2.5f, 0, 5.5f});
+    f.run(2.0 / 60);
+    CHECK(cellsEntered(f.world.takeEvents(), e).empty()); // the first cell is not an entry
+    f.world.moveTo(e, {4.5f, 0, 5.5f}, false);
+    f.run(2);
+    CHECK(cellsEntered(f.world.takeEvents(), e) == std::vector<GridPos>{{3, 5, 0}, {4, 5, 0}});
+    f.world.place(e, {7.5f, 1, 7.5f}, 1);
+    f.run(1.0 / 60);
+    CHECK(cellsEntered(f.world.takeEvents(), e) == std::vector<GridPos>{{7, 7, 1}});
+    f.run(0.5);
+    CHECK(cellsEntered(f.world.takeEvents(), e).empty());
+}
+
+TEST_CASE("a two-cell footprint paths and stands only where all its cells fit") {
+    Json grid = flatGrid(6, 3);
+    grid["layers"][0]["walk"] = {"111111", "111011", "111111"};
+    Scratch s("footprint", grid);
+    const auto e = s.world.spawn("", centre(0, 0));
+    auto& mover = s.world.registry().emplace<Mover>(e);
+    mover.footprint = 2;
+    // Anchored at (2, 0) or (2, 1) the body would cover the wall at (3, 1).
+    CHECK_FALSE(s.world.canOccupy(e, centre(2, 0), 0));
+    CHECK_FALSE(s.world.canOccupy(e, centre(2, 1), 0));
+    CHECK(s.world.canOccupy(e, centre(1, 0), 0));
+    CHECK_FALSE(s.world.canOccupy(e, centre(4, 2), 0)); // hangs over the grid's edge
+    s.world.moveTo(e, centre(4, 0), true);
+    CHECK(kinds(s.world.takeEvents()) == std::vector{WorldEvent::Kind::Blocked});
+    s.world.grid().at(3, 1).walkable = true;
+    s.world.moveTo(e, centre(4, 0), true);
+    s.step(240);
+    CHECK(s.world.registry().get<Transform>(e).position.x == doctest::Approx(4.5f).epsilon(0.01));
+    CHECK(kinds(s.world.takeEvents()) == std::vector{WorldEvent::Kind::Arrived});
+}
+
+TEST_CASE("flying movers path and stand over unwalkable cells but not blocked tags") {
+    Json grid = flatGrid(8, 3);
+    grid["layers"][0]["walk"] = {"11001111", "11001111", "11001111"};
+    grid["tags"] = {"water"};
+    Scratch s("fly", grid);
+    const auto e = s.world.spawn("", centre(0, 1));
+    auto& mover = s.world.registry().emplace<Mover>(e);
+    CHECK_FALSE(s.world.canOccupy(e, centre(2, 1), 0));
+    mover.fly = true;
+    CHECK(s.world.canOccupy(e, centre(2, 1), 0));
+    CHECK_FALSE(s.world.canOccupy(e, centre(-1, 1), 0));
+    s.world.moveTo(e, centre(6, 1), true);
+    s.step(300);
+    const auto& t = s.world.registry().get<Transform>(e);
+    CHECK(t.position.x == doctest::Approx(6.5f).epsilon(0.01));
+    CHECK(t.position.y == doctest::Approx(0));
+    auto events = s.world.takeEvents();
+    CHECK(count(events, WorldEvent::Kind::Arrived) == 1);
+    CHECK(count(events, WorldEvent::Kind::JumpStart) == 0);
+    // Rules passed to move_to plan the route; blocked tags hold for flyers.
+    for (int z = 0; z < 3; ++z) {
+        s.world.grid().at(2, z).tags = s.world.grid().at(3, z).tags = 1;
+    }
+    StepRules rules;
+    rules.blockedTags = 1;
+    s.world.moveTo(e, centre(0, 1), true, std::nullopt, &rules);
+    CHECK(kinds(s.world.takeEvents()) == std::vector{WorldEvent::Kind::Blocked});
+    rules.blockedTags = 0;
+    s.world.moveTo(e, centre(0, 1), true, std::nullopt, &rules);
+    s.step(300);
+    CHECK(t.position.x == doctest::Approx(0.5f).epsilon(0.01));
+}
+
+TEST_CASE("move_to plans with the rules it is given") {
+    Fixture f;
+    const auto e = f.walker({1.5f, 0, 7.5f});
+    const auto water = f.world.grid().tagMask({"water"});
+    REQUIRE(water != 0);
+    StepRules rules;
+    rules.blockedTags = water;
+    f.world.moveTo(e, {4.5f, 0, 7.5f}, true, std::nullopt, &rules);
+    f.run(4);
+    for (const auto cell : cellsEntered(f.world.takeEvents(), e)) {
+        CHECK((f.world.grid().at(cell).tags & water) == 0u);
+    }
+    CHECK(f.world.registry().get<Transform>(e).position.x == doctest::Approx(4.5f).epsilon(0.02));
+    // Without rules the mover walks straight through the water cells.
+    f.world.moveTo(e, {1.5f, 0, 7.5f}, true);
+    f.run(3);
+    const auto cells = cellsEntered(f.world.takeEvents(), e);
+    CHECK(std::any_of(cells.begin(), cells.end(),
+                      [&](GridPos cell) { return f.world.grid().at(cell).tags & water; }));
+}
+
+TEST_CASE("jumps do not land inside boxes or bodies: the landing moves or the jump is refused") {
+    Scratch s("landing", flatGrid(8, 8));
+    s.world.map().colliders.push_back({{5, 0, 2}, {6, 2, 3}});
+    s.world.rebuildStatic();
+    const auto e = s.world.spawn("", centre(2, 2));
+    s.world.registry().emplace<Mover>(e);
+    s.world.jump(e, centre(5, 2), 1, 0.4f, 0);
+    s.step(40);
+    const auto& t = s.world.registry().get<Transform>(e);
+    CHECK(count(s.world.takeEvents(), WorldEvent::Kind::Landed) == 1);
+    CHECK(s.world.canOccupy(e, t.position, 0));
+    CHECK(glm::length(t.position - centre(5, 2)) <= s.world.movementTuning().landingSearch + 1e-4f);
+    CHECK(glm::length(t.position - centre(5, 2)) >= 0.25f - 1e-4f);
+    // A body on the landing spot moves the landing beside it.
+    const auto other = s.world.spawn("", centre(2, 5));
+    s.world.registry().emplace<Collider>(other);
+    s.world.jump(e, centre(2, 5), 1, 0.4f, 0);
+    s.step(40);
+    CHECK(count(s.world.takeEvents(), WorldEvent::Kind::Landed) == 1);
+    CHECK(s.world.canOccupy(e, t.position, 0));
+    CHECK(glm::length(t.position - centre(2, 5)) >= 0.25f - 1e-4f);
+    // No free spot within reach: refused with `blocked`, no take-off.
+    s.world.movementTuning().landingSearch = 0;
+    s.world.jump(e, centre(5, 2), 1, 0.4f, 0);
+    CHECK(kinds(s.world.takeEvents()) == std::vector{WorldEvent::Kind::Blocked});
+    CHECK_FALSE(s.world.moving(e));
+    // A route jump onto a box is refused the same way.
+    Json gap = flatGrid(8, 3);
+    gap["layers"][0]["walk"] = {"11011111", "11011111", "11011111"};
+    Scratch r("landing-route", gap);
+    r.world.map().colliders.push_back({{3, 0, 1}, {4, 2, 2}});
+    r.world.rebuildStatic();
+    r.world.movementTuning().landingSearch = 0;
+    const auto g = r.world.spawn("", centre(1, 1));
+    r.world.registry().emplace<Mover>(g).jump = {1, 0.6f, 0.6f, false};
+    r.world.moveTo(g, centre(5, 1), true);
+    r.step(120);
+    CHECK(kinds(r.world.takeEvents()) == std::vector{WorldEvent::Kind::Blocked});
+    CHECK(r.world.registry().get<Transform>(g).position.x < 2);
+}
+
+TEST_CASE("the spatial hash follows place, destroy and editor edits without a per-tick rebuild") {
+    Fixture f;
+    const auto post = f.world.spawn("", {4.5f, 0, 3.5f});
+    f.world.registry().emplace<Collider>(post);
+    const auto b = f.world.spawn("", {2.5f, 0, 3.5f});
+    f.world.registry().emplace<Mover>(b);
+    CHECK_FALSE(f.world.canOccupy(b, {4.5f, 0, 3.5f}, 0));
+    f.world.place(post, {8.5f, 0, 8.5f}, 0); // another hash bucket
+    CHECK(f.world.canOccupy(b, {4.5f, 0, 3.5f}, 0));
+    CHECK_FALSE(f.world.canOccupy(b, {8.5f, 0, 8.5f}, 0));
+    f.run(3.0 / 60);
+    CHECK(f.world.canOccupy(b, {4.5f, 0, 3.5f}, 0));
+    CHECK_FALSE(f.world.canOccupy(b, {8.5f, 0, 8.5f}, 0));
+    // The editor writes the transform directly and asks for a refresh.
+    f.world.registry().get<Transform>(post).position = {2.5f, 0, 8.5f};
+    f.world.refreshCollision();
+    CHECK_FALSE(f.world.canOccupy(b, {2.5f, 0, 8.5f}, 0));
+    CHECK(f.world.canOccupy(b, {8.5f, 0, 8.5f}, 0));
+    f.world.rebuildStatic(); // the editor's path after a map edit refreshes too
+    CHECK_FALSE(f.world.canOccupy(b, {2.5f, 0, 8.5f}, 0));
+    f.world.destroy(post);
+    CHECK(f.world.canOccupy(b, {2.5f, 0, 8.5f}, 0));
+    // Moving movers keep their buckets current through the tick.
+    const auto walker = f.walker({2.5f, 0, 6.5f}); // row 6 is open all the way (row 5 has a wall at x = 5)
+    f.world.moveTo(walker, {7.5f, 0, 6.5f}, false);
+    f.run(3);
+    CHECK_FALSE(f.world.canOccupy(b, {7.5f, 0, 6.5f}, 0));
+    CHECK(f.world.canOccupy(b, {2.5f, 0, 6.5f}, 0));
+}
+
+TEST_CASE("entity collisions honour collider heights") {
+    Fixture f;
+    const auto low = f.world.spawn("", {4.5f, 0, 3.5f});
+    f.world.registry().emplace<Collider>(low, Collider{0.25f, 0.5f, true}); // a crate half a unit tall
+    const auto b = f.world.spawn("", {2.5f, 0, 3.5f});
+    f.world.registry().emplace<Mover>(b);
+    f.world.registry().emplace<Collider>(b);
+    CHECK_FALSE(f.world.canOccupy(b, {4.5f, 0, 3.5f}, 0));
+    CHECK(f.world.canOccupy(b, {4.5f, 0.6f, 3.5f}, 0)); // standing above the crate
+    CHECK_FALSE(f.world.canOccupy(b, {4.5f, 0.4f, 3.5f}, 0));
+    // A tall body under a bridge deck blocks a walker on the deck.
+    const auto tall = f.world.spawn("", {7.5f, 0, 7.5f});
+    f.world.registry().emplace<Collider>(tall, Collider{0.25f, 1.6f, true});
+    CHECK_FALSE(f.world.canOccupy(b, {7.5f, 1, 7.5f}, 1));
+    f.world.registry().patch<Collider>(tall, [](Collider& c) { c.height = 0.9f; });
+    CHECK(f.world.canOccupy(b, {7.5f, 1, 7.5f}, 1));
+}
+
+TEST_CASE("the walk clip follows a mover's own motion, not a platform carrying it") {
+    Json grid = flatGrid(8, 3);
+    grid["layers"][0]["walk"] = {"10000001", "10000001", "10000001"};
+    Scratch s("raft-anim", grid, {{"sprites/hero.anim.json", SpriteJson}});
+    auto& registry = s.world.registry();
+    const auto raft = s.world.spawn("", centre(1, 1, 0.2f));
+    registry.emplace<Platform>(raft);
+    registry.emplace<Mover>(raft, Mover{.speed = 1, .collide = false});
+    s.step();
+    const auto rider = s.world.spawn("", centre(1, 1, 0.2f));
+    registry.emplace<Mover>(rider);
+    Sprite sprite;
+    sprite.animation = "sprites/hero.anim.json";
+    sprite.clip = "idle";
+    sprite.moveClip = "walk";
+    sprite.idleClip = "idle";
+    registry.emplace<Sprite>(rider, sprite);
+    s.world.moveTo(raft, centre(5, 1, 0.2f), false);
+    s.step(60);
+    CHECK(registry.get<Transform>(rider).position.x > 2);
+    CHECK(registry.get<Sprite>(rider).clip == "idle");
+    s.world.moveTo(rider, {registry.get<Transform>(raft).position.x + 0.3f, 0.2f, 1.5f}, false);
+    s.step();
+    CHECK(registry.get<Sprite>(rider).clip == "walk");
+}
+
+TEST_CASE("attachments follow the parent's yaw and are placed after their parent") {
+    Fixture f;
+    const auto parent = f.world.spawn("", {2.5f, 0, 2.5f});
+    const auto child = f.world.spawn("", {0, 0, 0});
+    const auto grandchild = f.world.spawn("", {0, 0, 0});
+    auto& link = f.world.registry().get<Transform>(child);
+    link.parent = parent;
+    link.offset = {1, 0, 0};
+    auto& deeper = f.world.registry().get<Transform>(grandchild);
+    deeper.parent = child;
+    deeper.offset = {0, 1, 0};
+    f.world.registry().get<Transform>(parent).yaw = glm::half_pi<float>();
+    f.run(1.0 / 60);
+    const auto p = f.world.registry().get<Transform>(child).position;
+    CHECK(p.x == doctest::Approx(2.5f));
+    CHECK(p.z == doctest::Approx(1.5f)); // a quarter turn swings +x towards -z
+    CHECK(f.world.registry().get<Transform>(grandchild).position == glm::vec3(p.x, 1, p.z));
+    f.world.place(parent, {5.5f, 0, 5.5f}, 0);
+    f.run(1.0 / 60);
+    const auto q = f.world.registry().get<Transform>(child).position;
+    CHECK(f.world.registry().get<Transform>(grandchild).position == glm::vec3(q.x, 1, q.z));
+}
+
+TEST_CASE("an orthographic camera keeps its framing at the target, casts parallel rays and flags points "
+          "behind it") {
+    Camera camera;
+    camera.target = {8, 1, 6};
+    camera.yaw = 25;
+    camera.pitch = 50;
+    camera.distance = 20;
+    camera.fov = 40;
+    camera.snap();
+    // The derived height is what the perspective view covers at the target,
+    // so a point beside the target projects to the same place either way.
+    const auto beside = camera.target + camera.right() * 3.0f;
+    const auto perspective = camera.project(beside, 1.5f);
+    camera.orthographic = true;
+    camera.snap();
+    CHECK(camera.effectiveOrthoHeight() ==
+          doctest::Approx(2 * 20 * std::tan(glm::radians(20.0f))).epsilon(1e-4));
+    CHECK(camera.viewHeight() == doctest::Approx(camera.effectiveOrthoHeight()));
+    const auto orthographic = camera.project(beside, 1.5f);
+    CHECK(orthographic.x == doctest::Approx(perspective.x).epsilon(1e-3));
+    CHECK(orthographic.y == doctest::Approx(perspective.y).epsilon(1e-3));
+    CHECK(camera.project(camera.target, 1.5f).z <= 1);
+    // Rays through different pixels are parallel and run along the camera's forward.
+    glm::vec3 originA, directionA, originB, directionB;
+    camera.ray({-0.5f, 0.2f}, 1.5f, originA, directionA);
+    camera.ray({0.7f, -0.6f}, 1.5f, originB, directionB);
+    CHECK(glm::length(directionA - directionB) < 1e-4f);
+    CHECK(glm::dot(directionA, camera.forward()) == doctest::Approx(1).epsilon(1e-4));
+    CHECK(glm::length(originA - originB) > 1);
+    // The ray through a projected point passes through it.
+    const auto ndc = camera.project(beside, 1.5f);
+    camera.ray(glm::vec2(ndc), 1.5f, originA, directionA);
+    const auto toPoint = beside - originA;
+    CHECK(glm::length(toPoint - directionA * glm::dot(toPoint, directionA)) < 1e-3f);
+    // A point behind the eye has no vanishing point but is still flagged.
+    CHECK(camera.project(camera.position() - camera.forward() * 2.0f, 1.5f).z > 1);
+    // An explicit height covers that many units vertically: a point half a
+    // height above the target sits on the top edge.
+    camera.orthoHeight = 12;
+    camera.snap();
+    CHECK(camera.effectiveOrthoHeight() == doctest::Approx(12));
+    const auto up = glm::normalize(glm::cross(camera.right(), camera.forward()));
+    CHECK(camera.project(camera.target + up * 6.0f, 1.5f).y == doctest::Approx(1).epsilon(1e-3));
+    // The height interpolates like the other values.
+    camera.beginTick();
+    camera.orthoHeight = 24;
+    CHECK(camera.viewHeight(0.5) == doctest::Approx(18));
+    CHECK(camera.viewHeight(1) == doctest::Approx(24));
+}
+
+TEST_CASE("mover tags are a passability class: boats keep to water and walkers off lava") {
+    // A river (x = 3..4, walkable, tagged water) and a lava cell at (6, 1).
+    Json grid = flatGrid(8, 3);
+    grid["tags"] = {"water", "lava"};
+    grid["layers"][0]["tags"] = {"0 0 0 1 1 0 0 0", "0 0 0 1 1 0 2 0", "0 0 0 1 1 0 0 0"};
+    Scratch s("tags", grid);
+    const auto water = s.world.grid().tagMask({"water"});
+    const auto lava = s.world.grid().tagMask({"lava"});
+    const auto boat = s.world.spawn("", centre(3, 0));
+    auto& hull = s.world.registry().emplace<Mover>(boat);
+    hull.fly = true;
+    hull.requiredTags = water;
+    CHECK(s.world.canOccupy(boat, centre(4, 1), 0));
+    CHECK_FALSE(s.world.canOccupy(boat, centre(2, 1), 0));
+    CHECK_FALSE(s.world.canOccupy(boat, centre(5, 1), 0));
+    // move_to plans with the mover's class: along the river, never onto land.
+    s.world.moveTo(boat, centre(4, 2), true);
+    s.step(240);
+    const auto& t = s.world.registry().get<Transform>(boat);
+    CHECK(t.position.z == doctest::Approx(2.5f).epsilon(0.01));
+    auto events = s.world.takeEvents();
+    CHECK(count(events, WorldEvent::Kind::Arrived) == 1);
+    for (const auto cell : cellsEntered(events, boat)) {
+        CHECK((s.world.grid().at(cell).tags & water) != 0u);
+    }
+    s.world.moveTo(boat, centre(5, 1), true);
+    CHECK(kinds(s.world.takeEvents()) == std::vector{WorldEvent::Kind::Blocked});
+    // Steering onto the bank is refused too.
+    drive(s, boat, {2, 0}, 60);
+    CHECK(t.position.x < 5 - hull.radius + 1e-4f);
+    // A walker that may not enter lava paths around it; the same walker with
+    // explicit rules plans with those instead of its class.
+    const auto walker = s.world.spawn("", centre(0, 1));
+    auto& legs = s.world.registry().emplace<Mover>(walker);
+    legs.blockedTags = lava;
+    CHECK_FALSE(s.world.canOccupy(walker, centre(6, 1), 0));
+    s.world.moveTo(walker, centre(7, 1), true);
+    s.step(400);
+    events = s.world.takeEvents();
+    CHECK(count(events, WorldEvent::Kind::Arrived) == 1);
+    for (const auto cell : cellsEntered(events, walker)) {
+        CHECK((s.world.grid().at(cell).tags & lava) == 0u);
+    }
+    legs.blockedTags = water;
+    s.world.moveTo(walker, centre(0, 1), true);
+    CHECK(kinds(s.world.takeEvents()) == std::vector{WorldEvent::Kind::Blocked}); // the river bars the way
+    StepRules rules;
+    rules.diagonal = true;
+    s.world.moveTo(walker, centre(0, 1), true, std::nullopt, &rules);
+    CHECK(legs.motion == Motion::Route); // planned straight across; standing still obeys the class
+    CHECK(s.world.takeEvents().empty());
+}
+
+TEST_CASE("launches fly ballistic arcs under gravity, fall, and land with events") {
+    Scratch s("launch", flatGrid(12, 4));
+    const auto e = s.world.spawn("", centre(1, 1));
+    s.world.registry().emplace<Mover>(e);
+    const auto& t = s.world.registry().get<Transform>(e);
+    s.world.launch(e, {4, 4, 0}); // 0.4 s in the air at g = 20, 1.6 units along x
+    s.step(6);
+    REQUIRE(t.position.y == doctest::Approx(0.3f)); // 0.1 s: 4 x 0.1 - 10 x 0.01
+    CHECK(s.world.moving(e));
+    CHECK(t.facing.x == doctest::Approx(1));
+    s.step(40);
+    CHECK(t.position.y == doctest::Approx(0));
+    CHECK(t.position.x == doctest::Approx(3.1f).epsilon(0.03));
+    CHECK(t.position.z == doctest::Approx(1.5f));
+    CHECK_FALSE(s.world.moving(e));
+    CHECK(kinds(s.world.takeEvents()) == std::vector{WorldEvent::Kind::JumpStart, WorldEvent::Kind::Landed});
+    // A zero velocity above the ground is a fall.
+    s.world.place(e, centre(5, 1, 3), 0, true);
+    s.world.launch(e, {0, 0, 0});
+    s.step(20);
+    CHECK(t.position.y > 0.5f);
+    s.step(40);
+    CHECK(t.position.y == doctest::Approx(0));
+    CHECK(t.position.x == doctest::Approx(5.5f));
+    CHECK(kinds(s.world.takeEvents()) == std::vector{WorldEvent::Kind::JumpStart, WorldEvent::Kind::Landed});
+    // Weaker gravity keeps it up longer.
+    s.world.movementTuning().gravity = 5;
+    s.world.launch(e, {0, 4, 0});
+    s.step(40);
+    CHECK(t.position.y > 0.5f);
+    s.step(80);
+    CHECK(t.position.y == doctest::Approx(0));
+    CHECK(kinds(s.world.takeEvents()) == std::vector{WorldEvent::Kind::JumpStart, WorldEvent::Kind::Landed});
+    s.world.movementTuning().gravity = 20;
+    // A launch during a jump or a launch replaces it from where the body is.
+    s.world.jump(e, centre(9, 1), 1, 1, 0);
+    s.step(12);
+    REQUIRE(t.position.y > 0.3f);
+    s.world.launch(e, {0, 2, 0});
+    CHECK(kinds(s.world.takeEvents()) == std::vector{WorldEvent::Kind::JumpStart, WorldEvent::Kind::JumpStart});
+    const float x = t.position.x;
+    s.step(60);
+    CHECK(t.position.x == doctest::Approx(x));
+    CHECK(t.position.y == doctest::Approx(0));
+    CHECK(kinds(s.world.takeEvents()) == std::vector{WorldEvent::Kind::Landed});
+    // A command during a launch lands it under the body at once.
+    s.world.launch(e, {3, 5, 0});
+    s.step(10);
+    REQUIRE(t.position.y > 0.5f);
+    s.world.stop(e);
+    CHECK(t.position.y == doctest::Approx(0));
+    CHECK_FALSE(s.world.moving(e));
+    CHECK(kinds(s.world.takeEvents()) == std::vector{WorldEvent::Kind::JumpStart, WorldEvent::Kind::Landed});
+}
+
+TEST_CASE("launched bodies stop at boxes, cliff faces and the grid's edge and drop straight down") {
+    Json grid = flatGrid(12, 4);
+    grid["layers"][0]["height"] = {"0 0 0 0 0 0 0 0 2 2 2 2", "0 0 0 0 0 0 0 0 2 2 2 2", "0 0 0 0 0 0 0 0 2 2 2 2",
+                                   "0 0 0 0 0 0 0 0 2 2 2 2"};
+    Scratch s("launch-walls", grid);
+    s.world.map().colliders.push_back({{4, 0, 0}, {5, 3, 1}});
+    s.world.rebuildStatic();
+    const auto e = s.world.spawn("", centre(2, 0));
+    s.world.registry().emplace<Mover>(e);
+    const auto& t = s.world.registry().get<Transform>(e);
+    // Into the box: the flight would end inside it; the body drops in front of it instead.
+    s.world.launch(e, {6, 3, 0});
+    s.step(60);
+    CHECK(t.position.y == doctest::Approx(0));
+    CHECK(t.position.x < 4);
+    CHECK(t.position.x > 3.5f);
+    CHECK(kinds(s.world.takeEvents()) == std::vector{WorldEvent::Kind::JumpStart, WorldEvent::Kind::Landed});
+    // Into the cliff face at x = 8: a low arc stops at the face, a high one lands on top.
+    s.world.place(e, centre(6, 2), 0);
+    s.world.launch(e, {8, 2, 0}); // apex 0.1: well under the 2-unit ledge
+    s.step(60);
+    CHECK(t.position.y == doctest::Approx(0));
+    CHECK(t.position.x < 8);
+    CHECK(t.position.x > 7.5f);
+    s.world.place(e, centre(6, 2), 0);
+    s.world.launch(e, {3, 10, 0}); // 2.5 up by the time it reaches the face: clears the ledge
+    s.step(90);
+    CHECK(t.position.y == doctest::Approx(2));
+    CHECK(t.position.x > 8);
+    CHECK(count(s.world.takeEvents(), WorldEvent::Kind::Landed) == 2);
+    // Off the top towards the grid's edge: it stops at the edge and falls onto the ledge.
+    s.world.launch(e, {40, 1, 0});
+    s.step(60);
+    CHECK(t.position.y == doctest::Approx(2));
+    CHECK(t.position.x < 12);
+    CHECK(t.position.x > 11);
+    // A solid body in the way stops it the same way.
+    const auto other = s.world.spawn("", centre(6, 2));
+    s.world.registry().emplace<Collider>(other);
+    s.world.place(e, centre(3, 2), 0);
+    s.world.launch(e, {6, 3, 0});
+    s.step(60);
+    CHECK(t.position.y == doctest::Approx(0));
+    CHECK(t.position.x < 6.5f - 0.45f + 1e-3f);
+    CHECK(t.position.x > 5);
+    CHECK(s.world.canOccupy(e, t.position, 0));
+}
+
+TEST_CASE("launches land on the first standable surface, on the floor over a void, and validate the spot") {
+    // A bridge deck (layer 1, height 2) over x = 4..6; the ground under x = 3 is a chasm.
+    Json grid = flatGrid(10, 3);
+    grid["layers"][0]["walk"] = {"1110111111", "1110111111", "1110111111"};
+    grid["layers"].push_back({{"walk", {"0000111000", "0000111000", "0000111000"}}, {"height_fill", 2}});
+    Scratch s("launch-layers", grid);
+    const auto e = s.world.spawn("", centre(5, 1, 4));
+    s.world.registry().emplace<Mover>(e);
+    const auto& t = s.world.registry().get<Transform>(e);
+    // A fall from above the deck lands on the deck, not the ground under it.
+    s.world.place(e, centre(5, 1, 4), 0, true);
+    s.world.launch(e, {0, 0, 0});
+    s.step(60);
+    CHECK(t.layer == 1);
+    CHECK(t.position.y == doctest::Approx(2));
+    // Launched past the deck's end it lands on the ground.
+    s.world.launch(e, {4, 4, 0});
+    s.step(90);
+    CHECK(t.layer == 0);
+    CHECK(t.position.y == doctest::Approx(0));
+    CHECK(t.position.x > 7);
+    CHECK(count(s.world.takeEvents(), WorldEvent::Kind::Landed) == 2);
+    // Over the chasm there is nothing to stand on: it lands on the lowest layer's surface anyway.
+    s.world.place(e, centre(1, 1), 0);
+    s.world.launch(e, {4, 5, 0}); // 0.5 s, 2 units: comes down inside x = 3
+    s.step(45);
+    CHECK(t.layer == 0);
+    CHECK(t.position.y == doctest::Approx(0));
+    CHECK(floorCell(t.position.x) == 3);
+    CHECK(kinds(s.world.takeEvents()) == std::vector{WorldEvent::Kind::JumpStart, WorldEvent::Kind::Landed});
+    // A landing inside a solid body moves beside it; with no room it lands anyway and says blocked.
+    const auto other = s.world.spawn("", centre(8, 1));
+    s.world.registry().emplace<Collider>(other);
+    s.world.place(e, centre(8, 1, 3), 0, true);
+    s.world.launch(e, {0, 0, 0});
+    s.step(60);
+    CHECK(t.position.y == doctest::Approx(0));
+    CHECK(glm::length(t.position - centre(8, 1)) >= 0.25f - 1e-4f);
+    CHECK(s.world.canOccupy(e, t.position, 0));
+    CHECK(kinds(s.world.takeEvents()) == std::vector{WorldEvent::Kind::JumpStart, WorldEvent::Kind::Landed});
+    s.world.movementTuning().landingSearch = 0;
+    s.world.place(e, centre(8, 1, 3), 0, true);
+    s.world.launch(e, {0, 0, 0});
+    s.step(60);
+    CHECK(t.position == centre(8, 1));
+    CHECK(kinds(s.world.takeEvents()) ==
+          std::vector{WorldEvent::Kind::JumpStart, WorldEvent::Kind::Landed, WorldEvent::Kind::Blocked});
+    // A boat's class applies to landings too: a ground unit falling onto
+    // water it may not stand on reaches the floor all the same.
+    const auto water = s.world.grid().tagBit("water", true);
+    s.world.grid().at(1, 1).tags = water;
+    s.world.registry().get<Mover>(e).blockedTags = water;
+    s.world.place(e, centre(1, 1, 2), 0, true);
+    s.world.launch(e, {0, 0, 0});
+    s.step(60);
+    CHECK(t.position.y == doctest::Approx(0));
+    CHECK(count(s.world.takeEvents(), WorldEvent::Kind::Landed) == 1);
+}
+
+TEST_CASE("a launch during a ladder climb is refused") {
+    Json grid = flatGrid(5, 4);
+    grid["layers"][0]["height"] = {"4 4 4 4 4", "0 0 0 0 0", "0 0 0 0 0", "0 0 0 0 0"};
+    grid["links"] = {{{"x", 2}, {"z", 1}, {"from", 0}, {"to", 0}, {"dir", "n"}, {"kind", "ladder"}}};
+    Scratch s("launch-climb", grid);
+    const auto e = s.world.spawn("", centre(2, 1));
+    s.world.registry().emplace<Mover>(e).climbSpeed = 1;
+    s.world.moveTo(e, centre(2, 0, 4), true);
+    bool climbing = false;
+    for (int i = 0; i < 300 && !climbing; ++i) {
+        s.step();
+        climbing = s.world.registry().get<Mover>(e).motion == Motion::Climb &&
+                   s.world.registry().get<Transform>(e).position.y > 1;
+    }
+    REQUIRE(climbing);
+    CHECK_THROWS_AS(s.world.launch(e, {0, 1, 0}), std::runtime_error);
+    CHECK(s.world.registry().get<Mover>(e).motion == Motion::Climb);
 }

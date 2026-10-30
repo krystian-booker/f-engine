@@ -27,13 +27,16 @@ using Clock = std::chrono::steady_clock;
 // sources when running from the build tree (rebuilt in the background).
 class Reloader {
 public:
+    // Each watcher stats a bounded number of entries per poll, so a large game
+    // folder costs a slice of each poll rather than a stall every quarter second.
+    static constexpr std::size_t EntriesPerPoll = 512;
     Reloader(const RuntimeOptions& options, const std::filesystem::path& shaderRoot)
-        : game_(std::filesystem::weakly_canonical(options.game)), library_(options.lualib),
-          shaders_(shaderRoot) {
+        : game_(std::filesystem::weakly_canonical(options.game), EntriesPerPoll),
+          library_(options.lualib, EntriesPerPoll), shaders_(shaderRoot, EntriesPerPoll) {
 #ifdef FENGINE_SHADER_SOURCE_DIR
         std::error_code ec;
         if (std::filesystem::equivalent(shaderRoot, FENGINE_SHADER_DIR, ec)) {
-            sources_.emplace(FENGINE_SHADER_SOURCE_DIR);
+            sources_.emplace(FENGINE_SHADER_SOURCE_DIR, EntriesPerPoll);
         }
 #endif
     }
@@ -181,6 +184,23 @@ std::optional<ReplayHarness> loadReplay(const RuntimeOptions& options) {
     return ReplayHarness(options.replay);
 }
 
+// Waits `seconds` before the next frame: sleeps until shortly before the
+// deadline, then spins, since a timer sleep alone overshoots by a millisecond
+// or more.
+void pace(double seconds) {
+    if (seconds <= 0) {
+        return;
+    }
+    const auto deadline = Clock::now() + std::chrono::duration_cast<Clock::duration>(
+                                             std::chrono::duration<double>(seconds));
+    constexpr double SpinSeconds = 0.0015;
+    if (seconds > SpinSeconds) {
+        SDL_DelayNS(static_cast<Uint64>((seconds - SpinSeconds) * 1e9));
+    }
+    while (Clock::now() < deadline) {
+    }
+}
+
 // Replays and recordings are deterministic: a fixed seed unless one is given.
 std::optional<std::uint64_t> sessionSeed(const RuntimeOptions& options,
                                          const std::optional<ReplayHarness>& replay) {
@@ -196,12 +216,21 @@ std::optional<std::uint64_t> sessionSeed(const RuntimeOptions& options,
     return std::nullopt;
 }
 
+// The back buffer the game asks for: HDR from --hdr or game.json, presented
+// with the frame's white at the configured paper white.
+OutputColor outputRequest(const RuntimeOptions& options, const GameConfig& config) {
+    OutputColor output;
+    output.encoding = options.hdr || config.hdrOutput ? OutputEncoding::ScRgb : OutputEncoding::Srgb;
+    output.paperWhite = config.hdrPaperWhite;
+    return output;
+}
+
 // One run of a game in a window: owns every subsystem and splits a frame
 // into event handling, fixed-step ticks, rendering and app requests.
 class Session {
 public:
     Session(const RuntimeOptions& options, const GameConfig& config)
-        : options_(options), window_(config), renderer_(window_, options.shaders),
+        : options_(options), window_(config), renderer_(window_, options.shaders, outputRequest(options, config)),
           replay_(loadReplay(options)), engine_(engineOptions(), config),
           frame_(renderer_, engine_.assets(), config.pixelsPerUnit), input_(engine_.input())
 #if FENGINE_DEV
@@ -222,7 +251,9 @@ public:
         auto& display = engine_.display();
         display.monitors = Window::monitors();
         window_.describe(display);
+        display.hdr = renderer_.output().encoding != OutputEncoding::Srgb;
         refresh_ = window_.refreshRate();
+        cap_.setMaxFps(options.maxFps.value_or(config.maxFps));
     }
 
     int run() {
@@ -233,6 +264,13 @@ public:
         auto previous = Clock::now();
         while (running_) {
             pumpEvents();
+            // The frame cap applies while vsync is off; replays run as fast as
+            // they can unless paced in real time.
+            if (engine_.display().vsync == VsyncMode::Off && !(replay_ && !options_.realtime)) {
+                pace(cap_.wait(std::chrono::duration<double>(Clock::now().time_since_epoch()).count()));
+            } else {
+                cap_.reset();
+            }
             const auto now = Clock::now();
             const double frameSeconds = std::chrono::duration<double>(now - previous).count();
             previous = now;
@@ -293,6 +331,22 @@ private:
             }
             if (event.type >= SDL_EVENT_DISPLAY_FIRST && event.type <= SDL_EVENT_DISPLAY_LAST) {
                 monitorsChanged_ = true;
+                displayChanged_ = true;
+            }
+            switch (event.type) {
+            case SDL_EVENT_WINDOW_RESIZED:
+            case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+            case SDL_EVENT_WINDOW_MOVED:
+            case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+            case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+            case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+            case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
+            case SDL_EVENT_WINDOW_MAXIMIZED:
+            case SDL_EVENT_WINDOW_RESTORED:
+                displayChanged_ = true;
+                break;
+            default:
+                break;
             }
 #if FENGINE_DEV
             if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
@@ -310,13 +364,18 @@ private:
             }
         }
         readViewport();
-        auto& display = engine_.display();
-        if (monitorsChanged_) {
-            monitorsChanged_ = false;
-            display.monitors = Window::monitors();
+        // The window and monitors are asked only after an event says they
+        // changed, not every frame.
+        if (displayChanged_) {
+            displayChanged_ = false;
+            auto& display = engine_.display();
+            if (monitorsChanged_) {
+                monitorsChanged_ = false;
+                display.monitors = Window::monitors();
+            }
+            window_.describe(display);
+            refresh_ = window_.refreshRate();
         }
-        window_.describe(display);
-        refresh_ = window_.refreshRate();
     }
 
     // Background windows don't advance the game; replays always run.
@@ -371,7 +430,7 @@ private:
         ++ticks_;
     }
 
-    void render([[maybe_unused]] double frameMilliseconds) {
+    void render(double frameMilliseconds) {
         if (!renderer_.beginFrame()) {
             SDL_Delay(16); // minimised
             return;
@@ -384,6 +443,8 @@ private:
         requests.sceneCaptures.clear();
         frame_.render(engine_.drawList(), engine_.canvas(), engine_.screen(), viewport_, step_.alpha(),
                       engine_.gameTime(), engine_.ticks());
+        engine_.stats().frame = frameMilliseconds;
+        engine_.stats().drawCalls = frame_.drawCalls();
 #if FENGINE_DEV
         editor_.drawErrors();
         editor_.draw(frameMilliseconds, frame_.drawCalls());
@@ -466,8 +527,9 @@ private:
 #endif
     FixedStep step_;
     AdaptiveVsync adaptive_;
+    FrameCap cap_;
     float refresh_ = 60;
-    bool monitorsChanged_ = false;
+    bool monitorsChanged_ = false, displayChanged_ = false;
     glm::ivec2 viewport_{1};
     std::uint64_t frames_ = 0, ticks_ = 0;
     bool running_ = true, wasSuspended_ = false;

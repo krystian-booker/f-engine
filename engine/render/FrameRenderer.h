@@ -34,6 +34,14 @@ public:
     // After bgfx::frame(): writes the scene captures whose read-back finished.
     void finishFrame(std::uint32_t frame);
     [[nodiscard]] std::uint32_t drawCalls() const { return calls_; }
+    // Per-draw parameters (u_params) of an entity's game sprite or mesh
+    // shader; see WorldRenderer::setShaderParams. What a script's
+    // `entity:shader_params{...}` should reach.
+    void setShaderParams(const World& world, entt::entity entity, const ShaderParams& params) {
+        worlds_.setShaderParams(world, entity, params);
+    }
+    void clearShaderParams(const World& world, entt::entity entity) { worlds_.clearShaderParams(world, entity); }
+    void clearShaderParams(const World& world) { worlds_.clearShaderParams(world); }
 
 private:
     struct NamedTarget {

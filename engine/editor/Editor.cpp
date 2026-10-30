@@ -2,11 +2,14 @@
 #include "engine/core/Paths.h"
 #include "engine/editor/EditorWidgets.h"
 #include "engine/runtime/Engine.h"
+#include "engine/script/LuaHost.h"
+#include "engine/world/World.h"
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <imgui_stdlib.h>
 
 namespace fe {
+using namespace editorui;
 
 Editor::Editor(Engine& engine) : engine_(engine) {
 }
@@ -41,15 +44,15 @@ bool Editor::capturesInput() const {
     return io.WantCaptureKeyboard || io.WantCaptureMouse;
 }
 
-World* Editor::world() {
-    if (const auto w = engine_.world(worldName_)) {
-        return w.get();
+std::shared_ptr<World> Editor::world() {
+    if (auto w = engine_.world(worldName_)) {
+        return w;
     }
-    const auto focus = engine_.focusWorld();
+    auto focus = engine_.focusWorld();
     if (focus) {
         worldName_ = focus->name();
     }
-    return focus.get();
+    return focus;
 }
 
 sol::object Editor::devtool(const char* name) {
@@ -91,8 +94,8 @@ void Editor::refreshSchemas() {
 }
 
 std::string Editor::defaultType(const char* group) const {
-    const auto types = schemas_.value(group, Json::object());
-    const auto preferred = schemas_.value("defaults", Json::object()).value(group, std::string{});
+    const auto types = jsonObject(schemas_, group);
+    const auto preferred = jsonString(jsonObject(schemas_, "defaults"), group, {});
     if (!preferred.empty()) {
         return preferred;
     }
@@ -168,55 +171,71 @@ bool Editor::editProps(const Json* schema, Json& props) {
         return editJson("Props", props);
     }
     const auto& fields = *schema;
+    if (!props.is_object()) {
+        return editJson("Props", props);
+    }
     bool changed = false;
     for (const auto& [name, spec] : fields.items()) {
-        const auto type = spec.value("type", std::string("any"));
-        const auto label = name + (spec.value("optional", false) ? "" : " *");
+        if (!spec.is_object()) {
+            continue;
+        }
+        const auto type = jsonString(spec, "type", "any");
+        const bool optional = jsonBool(spec, "optional", false);
+        const auto label = name + (optional ? "" : " *");
+        // A value whose type does not match its schema (a number where the
+        // schema says string, an edited file) is shown in the JSON editor
+        // instead of aborting the form: json.value() would throw on it.
+        const Json* current = props.contains(name) ? &props.at(name) : nullptr;
+        const auto typed = [&](bool (Json::*check)() const) { return !current || (*current.*check)(); };
         ImGui::PushID(name.c_str());
-        if (type == "string" || type == "ref") {
-            std::string value = props.value(name, std::string{});
-            const auto hint =
-                type == "ref" ? label + " (" + spec.value("table", std::string{}) + " id)" : label;
+        if ((type == "string" || type == "ref") && typed(&Json::is_string)) {
+            std::string value = current ? current->get<std::string>() : std::string{};
+            const auto hint = type == "ref" ? label + " (" + jsonString(spec, "table", {}) + " id)" : label;
             if (ImGui::InputText(hint.c_str(), &value)) {
                 props[name] = value;
                 changed = true;
             }
-        } else if (type == "number" || type == "integer") {
-            double value = props.value(name, spec.value("default", 0.0));
+        } else if ((type == "number" || type == "integer") && typed(&Json::is_number)) {
+            double value = current ? current->get<double>() : jsonNumber(spec, "default", 0.0);
             if (ImGui::InputDouble(label.c_str(), &value)) {
                 props[name] = type == "integer" ? Json(static_cast<long long>(value)) : Json(value);
                 changed = true;
             }
-        } else if (type == "boolean") {
-            bool value = props.value(name, spec.value("default", false));
+        } else if (type == "boolean" && typed(&Json::is_boolean)) {
+            bool value = current ? current->get<bool>() : jsonBool(spec, "default", false);
             if (ImGui::Checkbox(label.c_str(), &value)) {
                 props[name] = value;
                 changed = true;
             }
-        } else if (type == "enum") {
-            const auto options = spec.value("options", std::vector<std::string>{});
-            const std::string value = props.value(name, spec.value("default", std::string{}));
+        } else if (type == "enum" && typed(&Json::is_string)) {
+            const std::string value = current ? current->get<std::string>() : jsonString(spec, "default", {});
             if (ImGui::BeginCombo(label.c_str(), value.c_str())) {
-                for (const auto& option : options) {
-                    if (ImGui::Selectable(option.c_str(), option == value)) {
-                        props[name] = option;
-                        changed = true;
+                if (const auto options = spec.find("options"); options != spec.end() && options->is_array()) {
+                    for (const auto& option : *options) {
+                        if (!option.is_string()) {
+                            continue;
+                        }
+                        const auto text = option.get<std::string>();
+                        if (ImGui::Selectable(text.c_str(), text == value)) {
+                            props[name] = text;
+                            changed = true;
+                        }
                     }
                 }
                 ImGui::EndCombo();
             }
         } else {
-            Json value = props.value(name, Json());
+            Json value = current ? *current : Json();
             ImGui::TextUnformatted(label.c_str());
             if (editJson("##json", value, 80)) {
                 props[name] = value;
                 changed = true;
             }
         }
-        if (spec.contains("doc") && ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s", spec.at("doc").get<std::string>().c_str());
+        if (const auto doc = spec.find("doc"); doc != spec.end() && doc->is_string() && ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", doc->get<std::string>().c_str());
         }
-        if (spec.value("optional", false) && props.contains(name)) {
+        if (optional && props.contains(name)) {
             ImGui::SameLine();
             if (ImGui::SmallButton("x")) {
                 props.erase(name);
@@ -258,12 +277,15 @@ void Editor::draw(double frameMilliseconds, std::uint32_t drawCalls) {
     if (!open_) {
         return;
     }
-    if (!ImGui::IsAnyItemActive() && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+    if (gesture_ && !ImGui::IsAnyItemActive() && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
         gesture_ = false;
+        // The stroke or drag is over: record the map it left, once.
+        if (const auto w = world()) {
+            history_.settle(*w);
+        }
     }
     // Games register tables and types while starting; look again until they have.
-    if (schemas_.value("tables", Json::array()).empty() &&
-        Clock::now() - schemasFetched_ > std::chrono::seconds(2)) {
+    if (jsonArray(schemas_, "tables").empty() && Clock::now() - schemasFetched_ > std::chrono::seconds(2)) {
         refreshSchemas();
     }
     const bool cursorWas = cursorShown_;
@@ -316,7 +338,7 @@ void Editor::draw(double frameMilliseconds, std::uint32_t drawCalls) {
         status_ = std::string("Editor error: ") + error.what();
     }
     if (cursorWas && !cursorShown_) {
-        if (auto* w = world()) {
+        if (const auto w = world()) {
             w->cursor().visible = false;
         }
     }

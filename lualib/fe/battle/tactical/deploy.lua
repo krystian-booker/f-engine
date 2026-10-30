@@ -9,6 +9,7 @@
 local grid = require("fe.battle.tactical.grid")
 local i18n = require("fe.i18n")
 local party = require("fe.rpg.party")
+local rules = require("fe.battle.tactical.rules")
 local config = require("fe.battle.tactical.settings")
 local tablex = require("fe.tablex")
 local ui = require("fe.ui")
@@ -36,9 +37,7 @@ end
 
 --- Put an actor on a deploy cell.
 function deploy.add(battle, p, actor, cell)
-  local b = battle:add({ actor = actor, side = "party", cell = cell, facing = { x = 0, z = -1 } })
-  b.unit_id = actor.id
-  grid.place(battle, b, cell)
+  local b = rules.add_unit(battle, { actor = actor, side = "party", cell = cell, facing = { x = 0, z = -1 }, id = actor.id })
   if p and p.scene then p:spawn(b) end
   return b
 end

@@ -29,6 +29,38 @@ function tablex.merge(target, source)
   return target
 end
 
+--- Whether two values are equal, comparing tables by content.
+function tablex.deep_equal(a, b)
+  if a == b then return true end
+  if type(a) ~= "table" or type(b) ~= "table" then return false end
+  for k, v in pairs(a) do
+    if not tablex.deep_equal(v, b[k]) then return false end
+  end
+  for k in pairs(b) do
+    if a[k] == nil then return false end
+  end
+  return true
+end
+
+--- Hot reload helper for settings tables: copy into `live` every value of
+--- `fresh` (the edited file's) that the game did not change at runtime,
+--- that is whose live value still equals `baseline` (the file's value when
+--- it was last loaded); values the game changed are kept. Nested plain
+--- tables are compared whole. Returns a deep copy of `fresh` to keep as the
+--- next baseline. With no baseline every value is adopted.
+---@param live table
+---@param fresh table
+---@param baseline? table
+---@return table
+function tablex.adopt(live, fresh, baseline)
+  for key, value in pairs(fresh) do
+    if type(value) ~= "function" and (baseline == nil or tablex.deep_equal(live[key], baseline[key])) then
+      live[key] = tablex.deep_copy(value)
+    end
+  end
+  return tablex.deep_copy(fresh)
+end
+
 --- The keys of `t`, sorted by `tostring`. Meant for string keys: object
 --- keys (tables, userdata, functions) sort by address, which changes
 --- between runs.

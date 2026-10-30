@@ -1,13 +1,19 @@
 // Shared by the post-processing passes.
 // u_dof[0] near, far, focus distance, aperture
-// u_dof[1] tilt-shift line, tilt-shift range, mode (0 depth, 1 tilt, 2 both), homogeneous depth (0/1)
+// u_dof[1] tilt-shift line, tilt-shift range, mode (0 depth, 1 tilt, 2 both),
+//          depth flags: homogeneous depth (0/1) plus 2 for an orthographic camera
 // u_dof[2] texel w, h of the pass input, widest blur (pixels of the pass), texture origin bottom-left (0/1)
 uniform vec4 u_dof[3];
 
 float linearDepth(float device) {
     float n = u_dof[0].x;
     float f = u_dof[0].y;
-    if (u_dof[1].w > 0.5) {
+    float flags = u_dof[1].w;
+    if (flags > 1.5) {
+        // Orthographic: window depth is already linear between the planes.
+        return n + device * (f - n);
+    }
+    if (flags > 0.5) {
         float ndc = device * 2.0 - 1.0;
         return 2.0 * n * f / max(f + n - ndc * (f - n), 0.0001);
     }

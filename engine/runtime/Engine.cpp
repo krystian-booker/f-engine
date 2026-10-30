@@ -1,12 +1,38 @@
 #include "engine/runtime/Engine.h"
 #include "engine/core/Log.h"
 #include "engine/core/Paths.h"
+#include "engine/runtime/EmitterAudio.h"
+#include "engine/runtime/WorldLoader.h"
+#include "engine/script/Binder.h"
+#include "engine/script/LuaHost.h"
+#include "engine/world/World.h"
 #include <algorithm>
 #include <chrono>
-#include <set>
+#include <cmath>
 #include <stdexcept>
 
 namespace fe {
+// The engine's references into the Lua state, kept out of Engine.h so that
+// its consumers do not compile sol2.
+struct Engine::Script {
+    std::shared_ptr<lua_State*> state; // null once the Lua state is closed
+    sol::object main;                  // the entry module, once start() loaded it
+    // Calls an optional function of the entry module; false on script error.
+    template<class... Args> bool call(LuaHost& lua, const char* name, Args&&... args) {
+        if (!main.valid() || main.get_type() != sol::type::table) {
+            return true;
+        }
+        sol::object function;
+        try {
+            function = field(main.as<sol::table>(), name);
+        } catch (const std::exception& error) {
+            lua.report(std::string("Reading main.") + name + ": " + error.what());
+            return false;
+        }
+        return function.get_type() != sol::type::function || lua.call(function, std::forward<Args>(args)...);
+    }
+};
+
 Engine::Engine(EngineOptions options) : Engine(std::move(options), std::nullopt) {
 }
 
@@ -15,17 +41,24 @@ Engine::Engine(EngineOptions&& options, std::optional<GameConfig> config)
       development_(options.development), testHooks_(options.testHooks),
       seed_(options.seed.value_or(
           static_cast<std::uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count()))),
-      assets_(std::make_unique<AssetCache>(options.gameRoot, options.libraryRoot, options.userData)),
+      assets_(std::make_unique<AssetCache>(options.gameRoot, options.libraryRoot, options.userData,
+                                           options.assetBudget)),
       text_(std::make_unique<TextSystem>(*assets_)),
       canvas_(std::make_unique<Canvas>(*text_, config_.virtualWidth, config_.virtualHeight)),
       audio_(options.audio ? std::move(options.audio) : std::make_unique<NullAudio>()),
-      saves_(options.userData),
+      saves_(options.userData, std::move(options.saveBackend)),
       platform_(options.platform ? std::move(options.platform)
                                  : std::make_unique<LocalPlatformServices>(
                                        options.userData.empty() ? std::filesystem::path()
                                                                 : options.userData / "platform.json")),
       locale_(options.locale.empty() ? "en-US" : options.locale),
-      lua_(std::make_unique<LuaHost>(options.gameRoot, options.libraryRoot, options.development)) {
+      loader_(std::make_unique<WorldLoader>(*assets_)), emitters_(std::make_unique<EmitterAudio>()),
+      docs_(std::make_unique<BindingDocs>()),
+      lua_(std::make_unique<LuaHost>(options.gameRoot, options.libraryRoot, options.development)),
+      script_(std::make_unique<Script>()), ownsLogSink_(static_cast<bool>(options.logSink)) {
+    if (ownsLogSink_) {
+        setLogSink(std::move(options.logSink));
+    }
     if (!isFolder(options.libraryRoot)) {
         throw std::runtime_error("Lua library folder not found: " + options.libraryRoot.string());
     }
@@ -34,7 +67,7 @@ Engine::Engine(EngineOptions&& options, std::optional<GameConfig> config)
     display_.height = config_.windowHeight;
     const DisplayMode window{config_.windowWidth, config_.windowHeight, 60};
     display_.monitors.push_back({"Display", window, {window}});
-    scriptState_ = std::make_shared<lua_State*>(lua_->lua().lua_state());
+    script_->state = std::make_shared<lua_State*>(lua_->lua().lua_state());
     bind();
 }
 
@@ -45,27 +78,20 @@ Engine::~Engine() {
     lua_->beginShutdown();
     // Release every reference into the Lua state while it is alive: worlds
     // unreference their entities' data tables, the resolver holds a function.
-    main_ = sol::object();
+    script_->main = sol::object();
     drawList_.clear();
     worlds_.clear();
     text_->setResolver({});
     // Close the state while the rest of the engine is still whole.
-    *scriptState_ = nullptr;
+    *script_->state = nullptr;
     lua_->close();
+    if (ownsLogSink_) {
+        setLogSink({});
+    }
 }
 
-template<class... Args> bool Engine::callMain(const char* name, Args&&... args) {
-    if (!main_.valid() || main_.get_type() != sol::type::table) {
-        return true;
-    }
-    sol::object function;
-    try {
-        function = field(main_.as<sol::table>(), name);
-    } catch (const std::exception& error) {
-        lua_->report(std::string("Reading main.") + name + ": " + error.what());
-        return false;
-    }
-    return function.get_type() != sol::type::function || lua_->call(function, std::forward<Args>(args)...);
+bool Engine::hasMain() const {
+    return script_->main.valid() && script_->main.get_type() == sol::type::table;
 }
 
 void Engine::bind() {
@@ -85,32 +111,31 @@ void Engine::bind() {
 bool Engine::start() {
     lua_->beginFrame();
     try {
-        main_ = lua_->require(config_.entry);
+        script_->main = lua_->require(config_.entry);
     } catch (const std::exception& error) {
         lua_->report(std::string("Cannot load entry module '") + config_.entry + "':\n" + error.what());
         return false;
     }
-    if (main_.get_type() != sol::type::table) {
+    if (script_->main.get_type() != sol::type::table) {
+        script_->main = sol::object();
         lua_->report("The entry module must return a table with init/update/draw functions");
         return false;
     }
-    return callMain("init");
+    return script_->call(*lua_, "init");
 }
 
 void Engine::tick(double dt) {
     ++ticks_;
     time_ += dt;
     assets_->collect();
-    for (auto& [ticket, load] : loads_) {
-        advance(load);
-    }
+    loader_->advanceAll();
     input_.tick(dt);
     for (const auto& entry : worlds_) {
         entry.second->beginTick();
     }
     lua_->beginFrame();
     const auto start = std::chrono::steady_clock::now();
-    callMain("update", dt);
+    script_->call(*lua_, "update", dt);
     stats_.luaUpdate =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     // Copy: scripts may load or unload worlds during the tick.
@@ -121,8 +146,8 @@ void Engine::tick(double dt) {
             world.tick(dt * world.timeScale);
         }
     }
-    callMain("post_update", dt);
-    updateAudioEmitters();
+    script_->call(*lua_, "post_update", dt);
+    emitters_->update(*audio_, drawList_, lua_->gameRoot());
     audio_->update(dt);
     try {
         platform_->update();
@@ -158,7 +183,7 @@ void Engine::draw(double alpha) {
     drawList_.clear();
     lua_->beginFrame();
     const auto start = std::chrono::steady_clock::now();
-    callMain("draw", alpha);
+    script_->call(*lua_, "draw", alpha);
     stats_.luaDraw =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     // The editor follows the last world drawn full screen.
@@ -181,6 +206,12 @@ std::filesystem::path Engine::resolveMap(const std::string& mapId) const {
 
 void Engine::setViewport(int width, int height) {
     viewport_ = {std::max(1, width), std::max(1, height)};
+    if (config_.canvasFit == CanvasFit::Expand) {
+        const double aspect = static_cast<double>(viewport_.x) / static_cast<double>(viewport_.y);
+        // Rounded down, so the integer presentation scale of the height still fits the width.
+        const int expanded = static_cast<int>(std::floor(config_.virtualHeight * aspect));
+        canvas_->resize(std::clamp(expanded, config_.virtualWidth, 16384), config_.virtualHeight);
+    }
 }
 
 std::shared_ptr<World> Engine::loadWorld(const std::string& name, const std::string& mapId) {
@@ -194,118 +225,20 @@ int Engine::loadWorldAsync(const std::string& name, const std::string& mapId) {
     if (name.empty()) {
         throw std::runtime_error("Worlds need a name");
     }
-    PendingWorld load;
-    load.name = name;
-    load.mapId = mapId;
-    load.parse = std::async(std::launch::async, [file = resolveMap(mapId)] { return MapData::load(file); });
-    const int ticket = nextLoad_++;
-    loads_.emplace(ticket, std::move(load));
-    return ticket;
-}
-
-// Parsing, then the map's models, images and sprite animations, then the
-// atlases those animations name.
-void Engine::advance(PendingWorld& load) {
-    using Stage = PendingWorld::Stage;
-    if (load.stage == Stage::Parsing) {
-        if (load.parse.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
-            return;
-        }
-        try {
-            load.map = load.parse.get();
-        } catch (const std::exception& error) {
-            load.error = error.what();
-            load.stage = Stage::Failed;
-            return;
-        }
-        const auto& environment = load.map->environment;
-        std::set<std::string> paths{"maps/" + load.map->id + "/" + load.map->geometry};
-        std::set<std::string> sprites;
-        for (const auto& path :
-             {environment.sky.panorama, environment.post.lut, environment.post.lutBlendTarget}) {
-            if (!path.empty()) {
-                paths.insert(path);
-            }
-        }
-        for (const auto& backdrop : environment.sky.backdrops) {
-            if (!backdrop.image.empty()) {
-                paths.insert(backdrop.image);
-            }
-        }
-        for (const auto& emitter : load.map->emitters) {
-            if (!emitter.settings.sprite.empty()) {
-                sprites.insert(emitter.settings.sprite);
-            }
-        }
-        if (!environment.weather.sprite.empty()) {
-            sprites.insert(environment.weather.sprite);
-        }
-        paths.insert(sprites.begin(), sprites.end());
-        load.sprites.assign(sprites.begin(), sprites.end());
-        load.assetCount = paths.size();
-        load.ticket = assets_->preload({paths.begin(), paths.end()});
-        load.stage = Stage::Assets;
-    }
-    if (load.stage == Stage::Assets) {
-        if (assets_->progress(load.ticket) < 1) {
-            return;
-        }
-        std::vector<std::string> atlases;
-        for (const auto& path : load.sprites) {
-            if (const auto sprite = assets_->trySprite(path)) {
-                atlases.push_back(
-                    (std::filesystem::path(path).parent_path() / sprite->atlas).generic_string());
-            }
-        }
-        load.ticket = assets_->preload(atlases);
-        load.stage = Stage::Atlases;
-    }
-    if (load.stage == Stage::Atlases && assets_->progress(load.ticket) >= 1) {
-        load.stage = Stage::Ready;
-    }
+    return loader_->begin(name, mapId, resolveMap(mapId));
 }
 
 float Engine::loadProgress(int ticket) {
-    using Stage = PendingWorld::Stage;
-    const auto found = loads_.find(ticket);
-    if (found == loads_.end()) {
-        throw std::runtime_error("Unknown world load ticket " + std::to_string(ticket));
-    }
-    auto& load = found->second;
-    advance(load);
-    const auto total = static_cast<float>(1 + load.assetCount + load.sprites.size());
-    switch (load.stage) {
-    case Stage::Parsing:
-        return 0;
-    case Stage::Assets:
-        return (1 + assets_->progress(load.ticket) * static_cast<float>(load.assetCount)) / total;
-    case Stage::Atlases:
-        return (1 + static_cast<float>(load.assetCount) +
-                assets_->progress(load.ticket) * static_cast<float>(load.sprites.size())) /
-               total;
-    case Stage::Ready:
-    case Stage::Failed:
-        break;
-    }
-    return 1;
+    return loader_->progress(ticket);
 }
 
 std::shared_ptr<World> Engine::finishLoad(int ticket) {
-    const auto found = loads_.find(ticket);
-    if (found == loads_.end()) {
-        throw std::runtime_error("Unknown world load ticket " + std::to_string(ticket));
-    }
-    auto load = std::move(found->second);
-    loads_.erase(found);
-    if (load.stage == PendingWorld::Stage::Parsing) {
-        load.parse.wait();
-        advance(load);
-    }
-    if (load.stage == PendingWorld::Stage::Failed) {
-        throw std::runtime_error(load.error);
-    }
-    assets_->collect();
-    return addWorld(load.name, load.mapId, std::move(*load.map));
+    auto finished = loader_->finish(ticket);
+    return addWorld(finished.name, finished.mapId, std::move(finished.map));
+}
+
+void Engine::cancelLoad(int ticket) {
+    loader_->cancel(ticket);
 }
 
 std::shared_ptr<World> Engine::addWorld(const std::string& name, const std::string& mapId, MapData map) {
@@ -315,7 +248,7 @@ std::shared_ptr<World> Engine::addWorld(const std::string& name, const std::stri
     auto world = std::make_shared<World>(name, std::move(map), *assets_, nextSeed());
     // The hook may outlive the Lua state (a world something else still holds
     // when the engine shuts down); the shared cell is cleared when it closes.
-    world->setDestroyHook([raw = world.get(), state = scriptState_](entt::entity entity) {
+    world->setDestroyHook([raw = world.get(), state = script_->state](entt::entity entity) {
         auto& ref = raw->registry().get<ScriptRef>(entity);
         if (ref.reference != LUA_NOREF && *state) {
             luaL_unref(*state, LUA_REGISTRYINDEX, ref.reference);
@@ -334,6 +267,82 @@ std::shared_ptr<World> Engine::world(const std::string& name) const {
 void Engine::unloadWorld(const std::string& name) {
     worlds_.erase(name);
     std::erase_if(drawList_, [&](const auto& draw) { return draw.world->name() == name; });
+    releaseUnusedAssets();
+}
+
+std::set<std::string> Engine::referencedAssets() const {
+    std::set<std::string> paths, sprites;
+    for (const auto& [name, world] : worlds_) {
+        paths.insert(world->geometryPath());
+        const auto& environment = world->map().environment;
+        for (const auto& path :
+             {environment.sky.panorama, environment.post.lut, environment.post.lutBlendTarget}) {
+            if (!path.empty()) {
+                paths.insert(path);
+            }
+        }
+        for (const auto& backdrop : environment.sky.backdrops) {
+            if (!backdrop.image.empty()) {
+                paths.insert(backdrop.image);
+            }
+        }
+        if (!environment.weather.sprite.empty()) {
+            sprites.insert(environment.weather.sprite);
+        }
+        for (const auto& emitter : world->map().emitters) {
+            if (!emitter.settings.sprite.empty()) {
+                sprites.insert(emitter.settings.sprite);
+            }
+        }
+        const auto& registry = world->registry();
+        for (const auto entity : registry.view<Sprite>()) {
+            const auto& sprite = registry.get<Sprite>(entity);
+            if (!sprite.animation.empty()) {
+                sprites.insert(sprite.animation);
+            }
+            if (!sprite.palette.empty()) {
+                paths.insert(sprite.palette);
+            }
+        }
+        for (const auto entity : registry.view<Emitter>()) {
+            const auto& emitter = registry.get<Emitter>(entity);
+            if (!emitter.settings.sprite.empty()) {
+                sprites.insert(emitter.settings.sprite);
+            }
+        }
+        for (const auto entity : registry.view<MeshInstance>()) {
+            const auto& mesh = registry.get<MeshInstance>(entity);
+            if (!mesh.model.empty()) {
+                paths.insert(mesh.model);
+            }
+        }
+    }
+    for (const auto& path : sprites) {
+        paths.insert(path);
+        if (!assets_->loaded(path)) {
+            continue;
+        }
+        const auto animation = assets_->trySprite(path);
+        if (!animation) {
+            continue;
+        }
+        const auto folder = std::filesystem::path(path).parent_path();
+        for (const auto* image : {&animation->atlas, &animation->normal, &animation->emissive}) {
+            if (!image->empty()) {
+                paths.insert((folder / *image).generic_string());
+            }
+        }
+    }
+    return paths;
+}
+
+std::size_t Engine::releaseUnusedAssets() {
+    const auto evicted = assets_->releaseUnused(referencedAssets());
+    if (evicted > 0) {
+        log(LogLevel::Debug, "Evicted " + std::to_string(evicted) + " cached asset(s); " +
+                                 std::to_string(assets_->cachedBytes() >> 20) + " MiB remain cached");
+    }
+    return evicted;
 }
 
 std::shared_ptr<World> Engine::focusWorld() const {
@@ -352,79 +361,12 @@ void Engine::reload(const std::filesystem::path& file) {
     audio_->reload(file);
     const auto relative = relativeTo(lua_->gameRoot(), file);
     if (!relative.empty()) {
-        callMain("file_changed", relative);
+        script_->call(*lua_, "file_changed", relative);
     }
-}
-
-// Looping positional sounds play for the worlds drawn last frame, each heard
-// from its own camera. Voices of entities that were destroyed, lost their
-// emitter, or whose world was unloaded or not drawn are stopped. Each drawn
-// world's camera is also published as the listener for positional one-shots.
-void Engine::updateAudioEmitters() {
-    if (!audio_->available()) {
-        return;
-    }
-    std::set<int> heard;
-    std::set<const World*> visited;
-    std::map<std::string, Listener> listeners;
-    for (const auto& draw : drawList_) {
-        const auto& world = draw.world;
-        if (!visited.insert(world.get()).second) {
-            continue;
-        }
-        const Listener listener{world->camera().target, world->camera().right()};
-        listeners.emplace(world->name(), listener);
-        auto& registry = world->registry();
-        for (const auto entity : registry.view<Transform, AudioEmitter>()) {
-            auto& emitter = registry.get<AudioEmitter>(entity);
-            if (emitter.sound.empty()) {
-                continue;
-            }
-            const auto& position = registry.get<Transform>(entity).position;
-            const auto spatial = spatialize(listener, position, emitter.radius);
-            const float gain = emitter.volume * spatial.gain;
-            const float pan = spatial.pan;
-            if (emitter.voice < 0 && gain > 0) {
-                SoundOptions options;
-                options.loop = true;
-                options.volume = gain;
-                options.pan = pan;
-                try {
-                    emitter.voice =
-                        audio_->playSound(resolveInside(lua_->gameRoot(), emitter.sound), options);
-                } catch (const std::exception& error) {
-                    log(LogLevel::Error,
-                        "Positional sound '" + emitter.sound + "' disabled: " + error.what());
-                    emitter.sound.clear();
-                }
-            } else if (emitter.voice >= 0) {
-                audio_->setSound(emitter.voice, {.volume = gain, .pan = pan});
-            }
-            if (emitter.voice >= 0) {
-                heard.insert(emitter.voice);
-                emitterVoices_[emitter.voice] = {world, entity};
-            }
-        }
-    }
-    for (auto it = emitterVoices_.begin(); it != emitterVoices_.end();) {
-        if (heard.contains(it->first)) {
-            ++it;
-            continue;
-        }
-        audio_->stopSound(it->first, 0.3);
-        if (const auto world = it->second.world.lock(); world && world->valid(it->second.entity)) {
-            if (auto* emitter = world->registry().try_get<AudioEmitter>(it->second.entity);
-                emitter && emitter->voice == it->first) {
-                emitter->voice = -1;
-            }
-        }
-        it = emitterVoices_.erase(it);
-    }
-    audio_->setListeners(std::move(listeners));
 }
 
 void Engine::writeApi(const std::filesystem::path& stubs, const std::filesystem::path& markdown) const {
-    docs_.writeStubs(stubs);
-    docs_.writeMarkdown(markdown);
+    docs_->writeStubs(stubs);
+    docs_->writeMarkdown(markdown);
 }
 } // namespace fe

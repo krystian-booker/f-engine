@@ -87,13 +87,7 @@ return {
     t.ok(full[1] ~= hero, "a full-cost turn waits")
   end,
 
-  ["ATB battles run to a result with gauges"] = function(t)
-    setup()
-    local scheduler = require("fe.battle.schedulers.atb").new({ mode = "active", speed = 8 })
-    local b = battle_with(scheduler, "slimes", 9)
-    local outcome = b:run()
-    t.eq(outcome, "victory")
-  end,
+
 
   ["every scheduler gives upkeep turns to battlers that cannot act"] = function(t)
     for _, name in ipairs({ "round_order", "atb", "initiative" }) do
@@ -705,7 +699,9 @@ return {
     local job = task.spawn(function() outcome = b:run() end)
     t.wait_until(function() return b.round >= 2 end, 600)
     for _, name in ipairs({ "fe.effects", "fe.battle.core", "fe.battle.battler", "fe.battle.ai", "fe.battle",
-      "fe.battle.schedulers.round_order", "fe.battle.break", "fe.rpg.party", "fe.rpg.actor", "fe.rpg.combatant" }) do
+      "fe.battle.schedulers.round_order", "fe.battle.schedulers.atb", "fe.battle.break", "fe.battle.reactions",
+      "fe.battle.presenter_common", "fe.battle.sideview", "fe.battle.sideview_hud", "fe.battle.sideview_commands",
+      "fe.rpg.party", "fe.rpg.actor", "fe.rpg.combatant", "fe.rpg.database" }) do
       t.ok(fe.harness.reload(name), "reloaded " .. name)
     end
     t.eq(fe.harness.errors(), 0)
@@ -986,5 +982,386 @@ return {
     t.eq(hero:resource("tp"), 3, "and costs nothing when refused")
     stats.resource_list, stats.resource_by_id = saved, {}
     for _, d in ipairs(saved) do stats.resource_by_id[d.id] = d end
+  end,
+
+  ["ATB battles run to a result with gauges"] = function(t)
+    setup()
+    local scheduler = require("fe.battle.schedulers.atb").new({ mode = "active", speed = 8 })
+    local b = battle_with(scheduler, "slimes", 9)
+    for _, battler in ipairs(b.battlers) do battler.data.gauge = 0 end
+    local turns, first, overfull = {}, nil, false
+    b:add_rules({ on_turn_start = function(_, who)
+      first = first or who:name()
+      turns[who:name()] = (turns[who:name()] or 0) + 1
+    end })
+    local watcher = task.spawn(function()
+      while true do
+        for _, x in ipairs(b.battlers) do
+          if (x.data.gauge or 0) > 1 then overfull = true end
+        end
+        task.frame()
+      end
+    end)
+    local outcome = b:run()
+    watcher:cancel()
+    t.eq(outcome, "victory")
+    t.eq(first, "Hero", "from empty gauges the fastest battler acts first")
+    t.ok((turns.Hero or 0) >= (turns.Sage or 0), "the faster member takes at least as many turns")
+    t.ok(not overfull, "gauges stop at full")
+    t.ok(b.battlers[1].data.gauge <= 1)
+  end,
+
+  ["Battle:perform names its refusal"] = function(t)
+    setup()
+    local b = battle_with(round_order.new(), "slimes")
+    local hero, slime = b.battlers[1], b.battlers[3]
+    local attack = { kind = "skill", user = hero, skill = "attack", targets = { slime } }
+    hero:add_state("stun")
+    t.eq({ b:perform(attack) }, { nil, "cannot_act" })
+    hero:remove_state("stun")
+    b.rules.before_action = function(_, a) a.cancelled = true end
+    t.eq({ b:perform({ kind = "skill", user = hero, skill = "attack", targets = { slime } }) }, { nil, "cancelled" })
+    b.rules.before_action = nil
+    hero:set_resource("mp", 0)
+    t.eq({ b:perform({ kind = "skill", user = hero, skill = "cleave", targets = { slime } }) }, { nil, "unaffordable" })
+    b.rules.usable = function() return false end
+    t.eq({ b:perform({ kind = "skill", user = hero, skill = "attack", targets = { slime } }) }, { nil, "vetoed" })
+    t.eq({ b:usable(hero, data.get("skills", "attack")) }, { false, "vetoed" })
+    b.rules.usable = nil
+    t.eq({ b:perform({ kind = "item", user = hero, item = "potion", targets = { hero } }) }, { nil, "unaffordable" })
+    local store = Battle.settings.inventory
+    Battle.settings.inventory = nil
+    t.eq({ b:perform({ kind = "item", user = hero, item = "potion", targets = { hero } }) }, { nil, "no_inventory" })
+    Battle.settings.inventory = store
+    t.ok(b:perform({ kind = "skill", user = hero, skill = "attack", targets = { slime } }) ~= nil)
+  end,
+
+  ["previews run no apply hooks and keep the random stream"] = function(t)
+    setup()
+    local b = battle_with(round_order.new(), "slimes")
+    local hero, slime = b.battlers[1], b.battlers[3]
+    local applied, after = 0, 0
+    b:effect_hook("apply", function() applied = applied + 1 end)
+    b:effect_hook("after", function() after = after + 1 end)
+    local attack = data.get("skills", "attack")
+    effects.resolve({ user = hero, targets = { slime }, source = attack, battle = b, preview = true })
+    t.eq(applied, 0, "apply hooks may have side effects, so previews skip them")
+    t.eq(after, 0)
+    effects.resolve({ user = hero, targets = { slime }, source = attack, battle = b, random = b.random })
+    t.eq(applied, 1)
+    t.eq(after, 1)
+  end,
+
+  ["skills whose targets fell keep their target kind"] = function(t)
+    setup()
+    local b = battle_with(round_order.new(), "slimes", 6)
+    local hero, slime_a, slime_b = b.battlers[1], b.battlers[3], b.battlers[4]
+    local golem = b:add({ enemy = "golem", side = "enemy" })
+    slime_a:set_resource("hp", 0)
+    b:settle()
+    local results = b:perform({ kind = "skill", user = hero, skill = "cleave", targets = { slime_a } })
+    local hit = {}
+    for _, r in ipairs(results) do hit[r.target] = true end
+    t.ok(hit[slime_b] and hit[golem] and not hit[slime_a], "an all-enemies skill falls back to every living foe")
+    results = b:perform({ kind = "skill", user = hero, skill = "attack", targets = { slime_a } })
+    t.eq(#results, 1, "a single-target skill picks one")
+    b.random = fe.random.new(99)
+    b:perform({ kind = "skill", user = hero, skill = "might", targets = {} })
+    t.eq(#hero:buffs_of("buff"), 1, "a self skill falls back to the user")
+    t.eq(b.random:float(), fe.random.new(99):float(), "without drawing from the random stream")
+  end,
+
+  ["rewards go to the battlers who fought; benched actives get the reserve share; JP reaches both classes"] = function(t)
+    setup()
+    party.join("scout", { active = false })
+    local hero, sage, scout = party.actor("hero"), party.actor("sage"), party.actor("scout")
+    hero:set_secondary("mage")
+    local b = Battle({ scheduler = round_order.new(), random = fe.random.new(2) })
+    b:add({ actor = hero, side = "party", position = { slot = 1 } }).auto = true
+    b:add({ actor = scout, side = "party", position = { slot = 2 } }).auto = true
+    b:add({ enemy = "slime", side = "enemy" }):set_resource("hp", 1)
+    t.eq(#b:participants(), 2)
+    local outcome, rewards = b:run()
+    t.eq(outcome, "victory")
+    t.eq(rewards.exp, 30)
+    t.eq(hero:exp(), 30)
+    t.eq(scout:exp(), 30, "a reserve member who fought gets the full share")
+    t.eq(sage:exp(), 15, "an active member who stayed out gets the reserve share")
+    t.eq(hero:jp("fighter"), 5)
+    t.eq(hero:jp("mage"), 5, "the secondary class learns too")
+    t.eq(scout:jp(), 5)
+    t.eq(sage:jp(), 0)
+    local named = tablex.map(rewards.levels, function(e) return e.actor.id .. (e.reserve and "*" or "") end)
+    t.eq(named, { "hero", "scout", "sage*" })
+  end,
+
+  ["a revived enemy comes back with full shields"] = function(t)
+    setup()
+    local shields = require("fe.battle.break")
+    local b = battle_with(round_order.new(), "wisps", 1, shields.rules())
+    b:notify("setup")
+    local events = record(b)
+    local sage, wisp = b.battlers[2], b.battlers[3]
+    wisp:set_resource("hp", 1)
+    b:perform({ kind = "skill", user = sage, skill = "fire", targets = { wisp } })
+    t.ok(not wisp:alive())
+    t.eq(wisp.data.shield, 0)
+    wisp:set_resource("hp", 50)
+    b:settle()
+    t.eq(wisp.data.shield, wisp.data.max_shield, "refilled on revival")
+    t.ok(not shields.is_broken(wisp))
+    t.eq(count(events, "shield_restored"), 1)
+  end,
+
+  ["ATB cancels a player's decision when the chooser falls"] = function(t)
+    setup()
+    local scheduler = require("fe.battle.schedulers.atb").new({ mode = "active", speed = 8 })
+    local choosing
+    local rules = {
+      player_controller = function(_, b)
+        if b:name() == "Hero" then
+          choosing = task.current()
+          task.wait_until(function() return false end)
+        end
+        return { kind = "defend", user = b }
+      end,
+      outcome = function(bb) if bb.data.done then return "draw" end end,
+    }
+    local b = battle_with(scheduler, "slimes", 5, rules)
+    local hero = b.battlers[1]
+    hero:set_resource("hp", 1)
+    local job = task.spawn(function() b:run() end)
+    t.wait_until(function() return choosing ~= nil end, 600)
+    t.wait_until(function() return not hero:alive() end, 60 * 30, "a slime finishes the hero while he chooses")
+    t.tick(2)
+    t.eq(choosing.status, "cancelled", "the menu task is cancelled")
+    t.eq(hero.data.gauge, 0)
+    t.ok(not hero.data.queued)
+    b.data.done = true
+    t.wait_until(function() return job.status ~= "running" end, 600)
+    t.eq(job.status, "done", tostring(job.error))
+  end,
+
+  ["states re-applied during the bearer's own action stay fresh that turn"] = function(t)
+    setup()
+    local b = battle_with(round_order.new(), "slimes")
+    local hero = b.battlers[1]
+    hero:add_state("focus", 2)
+    b.rules.actions = { refocus = function(_, action) action.user:add_state("focus", 2) return {} end }
+    b:turn(hero, { kind = "refocus", user = hero })
+    t.eq(hero.state_turns.focus, 2, "re-applied with the same duration: not counted down")
+    b:turn(hero, false)
+    t.eq(hero.state_turns.focus, 1)
+  end,
+
+  ["ambushes and pre-emptive strikes skip one side's first turns in every scheduler"] = function(t)
+    for _, name in ipairs({ "round_order", "atb", "initiative" }) do
+      for opening, skipping in pairs({ ambush = "party", preemptive = "enemy" }) do
+        setup()
+        local turns, first_action, openings = {}, {}, {}
+        local rules = {
+          before_action = function(_, action)
+            local user = action.user
+            if first_action[user] == nil then first_action[user] = turns[user] or 0 end
+            action.cancelled = true
+          end,
+          on_turn_end = function(_, who) turns[who] = (turns[who] or 0) + 1 end,
+          outcome = function(bb)
+            for _, who in ipairs(bb.battlers) do
+              if (turns[who] or 0) < 2 then return nil end
+            end
+            return "draw"
+          end,
+        }
+        local b = Battle({ scheduler = schedulers[name](), troop = "slimes", random = fe.random.new(3), rules = rules,
+          opening = opening })
+        b:populate(party.members(), "slimes")
+        b.events:connect(function(event, payload) if event == "opening" then openings[#openings + 1] = payload end end)
+        t.eq(b:run(), "draw")
+        t.eq(#openings, 1, name .. ": the opening is presented once")
+        t.eq(openings[1].kind, opening)
+        t.eq(openings[1].side, skipping)
+        for _, who in ipairs(b.battlers) do
+          local label = name .. " " .. opening .. ": " .. who:name()
+          t.eq(first_action[who], who.side == skipping and 1 or 0, label .. " first acts on turn " .. tostring(first_action[who]))
+        end
+      end
+    end
+    t.error(function() Battle({ scheduler = {}, opening = "surprise" }) end, "unknown opening")
+  end,
+
+  ["Battle.speed scales the presenters' waits"] = function(t)
+    local common = require("fe.battle.presenter_common")
+    local config = require("fe.config")
+    local saved = config.values.battle_speed
+    config.values.battle_speed = 4
+    Battle.settings.speed = nil
+    t.eq(Battle.speed(), 4, "the player's setting")
+    Battle.settings.speed = 2
+    t.eq(Battle.speed(), 2, "the game's setting wins")
+    local elapsed
+    local job = task.spawn(function()
+      local started = task.time()
+      common.wait(0.4)
+      elapsed = task.time() - started
+    end)
+    t.wait_until(function() return job.status ~= "running" end, 120)
+    t.near(elapsed, 0.2, 0.04)
+    Battle.settings.speed = 0
+    t.eq(Battle.speed(), 0.1, "never stops time")
+    Battle.settings.speed = nil
+    config.values.battle_speed = saved
+  end,
+
+  ["counter forecasts give the chance without rolling"] = function(t)
+    setup()
+    local reactions = require("fe.battle.reactions")
+    local rules = { reaction = reactions.counter({ requires = "counter", chance = 0.5 }) }
+    local b = battle_with(round_order.new(), "brute", 8, rules)
+    local hero, sage, brute = b.battlers[1], b.battlers[2], b.battlers[3]
+    b.random = fe.random.new(7)
+    t.near(reactions.forecast(b, brute, { kind = "skill", user = hero, skill = "attack", targets = { brute } }), 0.5)
+    t.eq(reactions.forecast(b, hero, { kind = "skill", user = brute, skill = "attack", targets = { hero } }), 0,
+      "the hero cannot counter")
+    t.eq(reactions.forecast(b, brute, { kind = "skill", user = sage, skill = "fire", targets = { brute } }), 0,
+      "spells from afar are not countered")
+    brute:add_state("stun")
+    t.eq(reactions.forecast(b, brute, { kind = "skill", user = hero, skill = "attack", targets = { brute } }), 0,
+      "a stunned defender cannot counter")
+    brute:remove_state("stun")
+    t.eq(b.random:float(), fe.random.new(7):float(), "nothing was rolled")
+    b.rules.reaction = function() end
+    t.eq(reactions.forecast(b, brute, { kind = "skill", user = hero, skill = "attack", targets = { brute } }), nil,
+      "a plain function has no forecast")
+  end,
+
+  ["damage and healing caps apply after variance"] = function(t)
+    setup()
+    local b = battle_with(round_order.new(), "slimes")
+    local hero, sage, slime = b.battlers[1], b.battlers[2], b.battlers[3]
+    effects.settings.max_damage = 5
+    effects.settings.max_heal = 7
+    local hit = effects.resolve({ user = hero, targets = { slime }, source = data.get("skills", "attack"), battle = b,
+      random = b.random })[1]
+    t.eq(hit.amount, 5)
+    hero:set_resource("hp", 1)
+    local heal = effects.resolve({ user = sage, targets = { hero }, source = data.get("skills", "heal"), battle = b,
+      random = b.random })[1]
+    t.eq(heal.amount, 7)
+    effects.settings.max_damage, effects.settings.max_heal = nil, nil
+    t.ok(effects.resolve({ user = hero, targets = { slime }, source = data.get("skills", "attack"), battle = b,
+      random = b.random })[1].amount > 5)
+  end,
+
+  ["weaknesses can be revealed and changed mid-battle"] = function(t)
+    setup()
+    local shields = require("fe.battle.break")
+    local b = battle_with(round_order.new(), "wisps", 1, shields.rules())
+    b:notify("setup")
+    local events = record(b)
+    local hero, wisp = b.battlers[1], b.battlers[3]
+    t.ok(shields.reveal(b, wisp, "fire"), "hidden until now")
+    t.ok(shields.revealed(wisp, "fire"))
+    t.ok(not shields.reveal(b, wisp, "fire"), "already known")
+    t.eq(count(events, "weakness_revealed"), 1)
+    shields.set_weaknesses(wisp, { "sword" })
+    t.eq(shields.weaknesses(wisp), { "sword" })
+    b:perform({ kind = "skill", user = hero, skill = "attack", targets = { wisp } })
+    t.ok(shields.is_broken(wisp), "the sword is a weakness now")
+    shields.set_weaknesses(wisp, nil)
+    t.eq(shields.weaknesses(wisp), { "fire" }, "back to the data")
+  end,
+
+  ["experience per action is granted at once and presented"] = function(t)
+    setup()
+    Battle.settings.exp_per_action = function(_, action) return action.kind == "skill" and 30 or 0 end
+    local b = battle_with(round_order.new(), "slimes")
+    local events = record(b)
+    local hero, slime = b.battlers[1], b.battlers[3]
+    b:perform({ kind = "skill", user = hero, skill = "attack", targets = { slime } })
+    Battle.settings.exp_per_action = nil
+    t.eq(hero.actor:exp(), 30)
+    t.eq(hero.actor:level(), 2)
+    t.eq(count(events, "exp", function(p) return p.battler == hero and p.amount == 30 and p.gains[1].level == 2 end), 1)
+    b:perform({ kind = "skill", user = slime, skill = "attack", targets = { hero } })
+    t.eq(count(events, "exp"), 1, "enemies gain nothing, and the setting is off again")
+  end,
+
+  ["the side-view HUD computes the turn preview once per battle event"] = function(t)
+    setup()
+    local hud = require("fe.battle.sideview_hud")
+    local scheduler = round_order.new()
+    local calls, preview = 0, scheduler.preview
+    scheduler.preview = function(...) calls = calls + 1 return preview(...) end
+    local b = battle_with(scheduler, "slimes")
+    local p = { battle = b, stamp = 0 }
+    local order = hud.preview(p)
+    t.ok(hud.preview(p) == order)
+    t.eq(calls, 1)
+    p.stamp = 1
+    hud.preview(p)
+    t.eq(calls, 2, "an event refreshes it")
+    b.current = b.battlers[1]
+    hud.preview(p)
+    t.eq(calls, 3, "so does a change of the acting battler")
+    local presenter = require("fe.battle.sideview").new(b, {})
+    b.presenter = nil
+    b:present("round", 1)
+    t.eq(presenter.stamp, 1, "presenters count events")
+  end,
+
+  ["a cancelled effect shows as nullified in the side view and aborts nothing"] = function(t)
+    require("fe.input").use_defaults()
+    setup()
+    local outcome, popups
+    local job = task.spawn(function()
+      outcome = battle_kit.start({ stage = "arena", scheduler = round_order.new(), allow_defeat = true,
+        setup = function(b)
+          local hero = b:add({ actor = party.actor("hero"), side = "party", position = { slot = 1 } })
+          hero.auto = true
+          b:add({ enemy = "golem", side = "enemy", position = { slot = 1 } })
+        end,
+        rules = {
+          effect_hooks = { { phase = "before", fn = function(ctx) ctx.cancelled = true end } },
+          after_action = function(b, _, results)
+            if results and results[1] and results[1].cancelled then
+              b.data.nullified = true
+              popups = tablex.map(b.presenter.popups, function(popup) return popup.text end)
+            end
+          end,
+          outcome = function(b) if b.data.nullified then return "draw" end end,
+        } })
+    end)
+    t.wait_until(function() return job.status ~= "running" end, 60 * 60)
+    t.eq(job.status, "done", tostring(job.error))
+    t.eq(outcome, "draw")
+    t.eq(popups, { "Nullified" })
+    t.tick(30)
+    t.eq(fe.harness.errors(), 0)
+  end,
+
+  ["effect records are validated against their handlers' schemas"] = function(t)
+    setup()
+    local function problems(effect) return effects.validate(effect, "e") end
+    t.eq(problems({ type = "damage", formula = "physical", power = 100 }), {})
+    t.eq(problems({ type = "push", distance = 1 }), {}, "the tactical kit's push is known through its provider")
+    t.ok(problems({ type = "steal" })[1]:find("no effect handler"), "a type without a handler")
+    effects.handler("steal", function() return {} end)
+    t.eq(problems({ type = "steal", anything = true }), {}, "a handler without a schema accepts anything")
+    effects.handlers.steal = nil
+    t.ok(problems({ type = "add_state", state = "nonsense" })[1]:find("unknown states"))
+    t.ok(problems({ type = "add_state", state = "poison", chance = 2 })[1]:find("above maximum"))
+    t.ok(problems({ type = "buff", mul = 1.5 })[1]:find("stat: missing"))
+    t.ok(problems({ type = "revive", fraction = "half" })[1]:find("expected number"))
+    t.ok(problems({ power = 3 })[1]:find("type: missing"))
+    local database = require("fe.rpg.database")
+    t.eq(database.validate_effects("skills"), {})
+    local member = data.get("troops", "arena_slimes").members[1]
+    t.eq(member.id, "left")
+    t.eq(member.facing, { x = 1, z = 0 })
+    t.eq(member.position.layer, 0)
+    t.ok(data.validate("troops", { { id = "bad", members = { { enemy = "slime", facing = { x = "east" } } } } }) == false)
+    t.ok(data.get("skills", "attack").uses_weapon == true and data.get("skills", "longshot").los == true)
+    t.eq(data.get("skills", "fire").uses_weapon, false, "schema defaults")
   end,
 }

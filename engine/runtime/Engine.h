@@ -1,9 +1,8 @@
 #pragma once
 #include "engine/core/AssetCache.h"
 #include "engine/core/GameConfig.h"
+#include "engine/core/Log.h"
 #include "engine/platform/Display.h"
-#include "engine/script/Binder.h"
-#include "engine/script/LuaHost.h"
 #include "engine/services/Audio.h"
 #include "engine/services/Canvas.h"
 #include "engine/services/InputState.h"
@@ -11,12 +10,25 @@
 #include "engine/services/SaveStore.h"
 #include "engine/services/ScreenFx.h"
 #include "engine/text/TextSystem.h"
-#include "engine/world/World.h"
-#include <future>
+#include "engine/world/Camera.h"
+#include "engine/world/MapData.h"
+#include <map>
 #include <memory>
 #include <optional>
+#include <set>
+#include <string>
+#include <vector>
 
+// This header pulls in neither sol2 nor EnTT: code that needs the Lua state
+// includes engine/script/LuaHost.h, and code that touches entities
+// engine/world/World.h.
 namespace fe {
+class BindingDocs;
+class EmitterAudio;
+class LuaHost;
+class World;
+class WorldLoader;
+
 struct EngineOptions {
     std::filesystem::path gameRoot;
     std::filesystem::path libraryRoot; // lualib
@@ -28,7 +40,14 @@ struct EngineOptions {
     std::optional<std::uint64_t> seed;          // fixed seed (tests and replays)
     std::unique_ptr<Audio> audio;               // null = silent NullAudio
     std::unique_ptr<PlatformServices> platform; // null = LocalPlatformServices in userData
+    std::unique_ptr<SaveBackend> saveBackend;   // null = files in userData
     std::string locale = "en-US";               // the player's preferred locale, BCP 47
+    // Decoded bytes the asset cache keeps before evicting assets no loaded
+    // world references (see AssetCache).
+    std::size_t assetBudget = AssetCache::DefaultBudget;
+    // Installed with setLogSink (engine/core/Log.h) for the engine's lifetime:
+    // every log record also reaches it (telemetry, crash reporters).
+    LogSink logSink;
 };
 
 // Requests from scripts that only the windowed runtime can fulfil.
@@ -54,6 +73,9 @@ struct WorldDraw {
 
 struct FrameStats {
     double luaUpdate = 0, luaDraw = 0; // milliseconds, last frame
+    // Filled by the windowed runtime after each frame; 0 headless.
+    double frame = 0;              // milliseconds between the last two frames
+    std::uint32_t drawCalls = 0;   // world draw calls of the last frame
     std::map<std::string, double> zones;
 };
 
@@ -78,11 +100,14 @@ public:
     void draw(double alpha);
     // A file changed on disk (development hot reload).
     void reload(const std::filesystem::path& file);
+    // The window's size in pixels. With game.json canvas_fit = "expand" the
+    // canvas widens to the viewport's aspect ratio (never below the
+    // configured virtual width); otherwise it keeps the configured size.
     void setViewport(int width, int height);
 
     [[nodiscard]] const GameConfig& config() const { return config_; }
     [[nodiscard]] LuaHost& lua() { return *lua_; }
-    [[nodiscard]] BindingDocs& docs() { return docs_; }
+    [[nodiscard]] BindingDocs& docs() { return *docs_; }
     [[nodiscard]] AssetCache& assets() { return *assets_; }
     [[nodiscard]] TextSystem& text() { return *text_; }
     [[nodiscard]] Canvas& canvas() { return *canvas_; }
@@ -122,9 +147,21 @@ public:
     // parse if needed; assets still decoding load on first use. Throws the
     // load's error. The ticket is consumed.
     std::shared_ptr<World> finishLoad(int ticket);
+    // Drops a background load that will not be finished (a cancelled warp):
+    // a worker still parsing the map finishes and is discarded, assets it
+    // queued stay cached, and the ticket becomes unknown.
+    void cancelLoad(int ticket);
     std::shared_ptr<World> world(const std::string& name) const;
+    // Also runs releaseUnusedAssets().
     void unloadWorld(const std::string& name);
     [[nodiscard]] const std::map<std::string, std::shared_ptr<World>>& worlds() const { return worlds_; }
+    // Asset paths the loaded worlds use: their geometry, sky panorama and
+    // backdrops, LUTs, weather and emitter sprites, entity sprites (with
+    // their atlases and palettes) and meshes.
+    [[nodiscard]] std::set<std::string> referencedAssets() const;
+    // Evicts least recently used assets outside referencedAssets() while the
+    // cache is over its budget; returns how many were evicted.
+    std::size_t releaseUnusedAssets();
     // Worlds scripts asked to draw this frame, in order.
     void queueDraw(const std::shared_ptr<World>& world) { drawList_.push_back({world, {}, {}, {}, {}}); }
     void queueDraw(WorldDraw draw) { drawList_.push_back(std::move(draw)); }
@@ -132,32 +169,17 @@ public:
     // The world most recently drawn (editor).
     [[nodiscard]] std::shared_ptr<World> focusWorld() const;
 
-    [[nodiscard]] sol::object mainModule() const { return main_; }
+    // start() loaded the entry module (a table). Its functions are reached
+    // through lua().require(config().entry).
+    [[nodiscard]] bool hasMain() const;
     // Writes LuaLS stubs and the Markdown API reference.
     void writeApi(const std::filesystem::path& stubs, const std::filesystem::path& markdown) const;
 
 private:
-    struct EmitterVoice {
-        std::weak_ptr<World> world;
-        entt::entity entity = entt::null;
-    };
+    // The entry module and the Lua state cell (Engine.cpp): what needs sol2.
+    struct Script;
     void bind();
-    // Calls an optional function of the entry module; false on script error.
-    template<class... Args> bool callMain(const char* name, Args&&... args);
     [[nodiscard]] std::filesystem::path resolveMap(const std::string& mapId) const;
-    void updateAudioEmitters();
-    struct PendingWorld {
-        enum class Stage { Parsing, Assets, Atlases, Ready, Failed };
-        std::string name, mapId;
-        std::future<MapData> parse;
-        std::optional<MapData> map;
-        std::string error;
-        Stage stage = Stage::Parsing;
-        int ticket = 0;
-        std::vector<std::string> sprites;
-        std::size_t assetCount = 0;
-    };
-    void advance(PendingWorld& load);
     std::shared_ptr<World> addWorld(const std::string& name, const std::string& mapId, MapData map);
     GameConfig config_;
     bool development_, testHooks_;
@@ -173,17 +195,16 @@ private:
     std::unique_ptr<PlatformServices> platform_;
     DisplayState display_;
     std::string locale_;
-    std::map<int, PendingWorld> loads_;
-    int nextLoad_ = 1;
+    std::unique_ptr<WorldLoader> loader_;
+    std::unique_ptr<EmitterAudio> emitters_;
     FrameStats stats_;
-    BindingDocs docs_;
+    std::unique_ptr<BindingDocs> docs_;
     std::map<std::string, std::shared_ptr<World>> worlds_;
     std::vector<WorldDraw> drawList_;
     std::weak_ptr<World> focus_;
-    std::map<int, EmitterVoice> emitterVoices_;
     std::unique_ptr<LuaHost> lua_;
-    std::shared_ptr<lua_State*> scriptState_; // null once the Lua state is closed
-    sol::object main_;
+    std::unique_ptr<Script> script_;
+    bool ownsLogSink_ = false;
     std::uint64_t ticks_ = 0;
     double time_ = 0;
     double drawAlpha_ = 1;

@@ -55,21 +55,30 @@ void SceneLighting::prepare(World& world, double alpha, float aspect, const glm:
     const glm::vec2 extent(static_cast<float>(grid.width()), static_cast<float>(grid.depth()));
     grid_.build(sceneLights_, glm::vec2(-LightMargin), extent + LightMargin, camera.focus(alpha));
     prepareLightShadows(world.camera().focus(alpha), Frustum(viewProjection), views, atlas);
-    bgfx::updateTexture2D(
-        lights_.get(), 0, 0, 0, 0, LightGrid::MaxLights, LightGrid::Rows,
-        bgfx::copy(grid_.lightTexels.data(),
-                   static_cast<std::uint32_t>(grid_.lightTexels.size() * sizeof(glm::vec4))));
+    // Uploads only what changed: a world whose lights hold still (no flicker,
+    // no moving light entities) sends nothing per frame.
+    if (uploadedLights_ != grid_.lightTexels) {
+        uploadedLights_ = grid_.lightTexels;
+        bgfx::updateTexture2D(
+            lights_.get(), 0, 0, 0, 0, LightGrid::MaxLights, LightGrid::Rows,
+            bgfx::copy(grid_.lightTexels.data(),
+                       static_cast<std::uint32_t>(grid_.lightTexels.size() * sizeof(glm::vec4))));
+    }
     const glm::ivec2 cellTexture(grid_.cells.x * LightGrid::MaxPerCell / 4, grid_.cells.y);
     if (cellTexture != cellTextureSize_) {
         cellTextureSize_ = cellTexture;
         cells_ = Texture(bgfx::createTexture2D(static_cast<std::uint16_t>(cellTexture.x),
                                                static_cast<std::uint16_t>(cellTexture.y), false, 1,
                                                bgfx::TextureFormat::RGBA32F, PointClamp));
+        uploadedCells_.clear();
     }
-    bgfx::updateTexture2D(cells_.get(), 0, 0, 0, 0, static_cast<std::uint16_t>(cellTexture.x),
-                          static_cast<std::uint16_t>(cellTexture.y),
-                          bgfx::copy(grid_.cellTexels.data(),
-                                     static_cast<std::uint32_t>(grid_.cellTexels.size() * sizeof(float))));
+    if (uploadedCells_ != grid_.cellTexels) {
+        uploadedCells_ = grid_.cellTexels;
+        bgfx::updateTexture2D(cells_.get(), 0, 0, 0, 0, static_cast<std::uint16_t>(cellTexture.x),
+                              static_cast<std::uint16_t>(cellTexture.y),
+                              bgfx::copy(grid_.cellTexels.data(),
+                                         static_cast<std::uint32_t>(grid_.cellTexels.size() * sizeof(float))));
+    }
 
     ShadowCamera view;
     view.position = camera.position(alpha) - camera.shake;
@@ -77,6 +86,8 @@ void SceneLighting::prepare(World& world, double alpha, float aspect, const glm:
     view.right = camera.right(alpha);
     view.up = glm::normalize(glm::cross(view.right, view.forward));
     view.fovY = glm::radians(camera.interpolatedFov(alpha));
+    view.orthographic = camera.orthographic;
+    view.orthoHeight = camera.viewHeight(alpha);
     view.aspect = aspect;
     view.nearPlane = camera.nearPlane;
     const float distance = camera.interpolatedDistance(alpha);
@@ -142,12 +153,14 @@ void SceneLighting::prepareLightShadows(glm::vec3 focus, const Frustum& view, co
             {visible ? lightShadowPriority(light, focus) : 0.0f, light.type == LightType::Point});
     }
     const auto& caps = *bgfx::getCaps();
-    for (const auto& slot : chooseShadowLights(shadowCandidates_)) {
+    chooseShadowLights(shadowCandidates_, shadowSlots_, shadowOrder_);
+    for (const auto& slot : shadowSlots_) {
         const auto& light = sceneLights_[grid_.sources[slot.light]].settings;
         grid_.setShadow(static_cast<int>(slot.light), slot.firstTile, slot.tiles,
                         lightShadowTexelScale(light));
-        const auto tiles =
-            lightShadowViews(light, slot.firstTile, caps.homogeneousDepth, caps.originBottomLeft);
+        auto& tiles = shadowViews_;
+        tiles.clear();
+        lightShadowViews(light, slot.firstTile, caps.homogeneousDepth, caps.originBottomLeft, tiles);
         for (std::size_t i = 0; i < tiles.size(); ++i) {
             const int tile = slot.firstTile + static_cast<int>(i);
             const auto id = views.lightShadow[static_cast<std::size_t>(tile)];

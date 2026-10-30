@@ -121,7 +121,12 @@ TEST_CASE("focus loss releases every held input and the recorder sees it") {
     const auto commands = recorder.toJson(1).at("commands");
     bool released = false;
     for (const auto& command : commands) {
-        released = released || (command.contains("input") && command.at("input").value("key:Left", 1.0) == 0);
+        if (!command.contains("input")) {
+            continue;
+        }
+        for (const auto& pair : command.at("input")) {
+            released = released || (pair.at(0) == "key:Left" && pair.at(1) == 0);
+        }
     }
     CHECK(released);
 }

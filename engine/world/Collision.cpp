@@ -71,6 +71,13 @@ std::optional<float> rayCylinder(glm::vec3 o, glm::vec3 d, glm::vec3 feet, float
     return near <= far ? std::optional<float>(near) : std::nullopt;
 }
 
+// Whether two upright bodies share any height (feet at `ay` and `by`).
+// Heights below a hair count as a hair, so flat colliders still touch.
+bool overlapVertically(float ay, float ah, float by, float bh) {
+    constexpr float Hair = 1e-3f;
+    return ay < by + std::max(bh, Hair) && by < ay + std::max(ah, Hair);
+}
+
 // Zone ids an entity is currently inside (internal to zone tracking).
 struct ZonePresence {
     std::vector<std::string> inside;
@@ -79,6 +86,7 @@ struct ZonePresence {
 
 CollisionSystem::CollisionSystem(entt::registry& registry, std::vector<Box> boxes)
     : registry_(registry), boxes_(std::move(boxes)) {
+    indexBoxes();
     registry_.on_construct<Collider>().connect<&CollisionSystem::track>(*this);
     registry_.on_construct<Transform>().connect<&CollisionSystem::track>(*this);
     registry_.on_update<Collider>().connect<&CollisionSystem::resized>(*this);
@@ -161,6 +169,71 @@ void CollisionSystem::refresh() {
     }
 }
 
+void CollisionSystem::setBoxes(std::vector<Box> boxes) {
+    boxes_ = std::move(boxes);
+    indexBoxes();
+}
+
+void CollisionSystem::indexBoxes() {
+    // A box wider than this many buckets per side is tested by every query
+    // instead of being listed in each bucket it covers.
+    constexpr std::int64_t WideSpan = 64;
+    boxBuckets_.clear();
+    wideBoxes_.clear();
+    for (std::size_t i = 0; i < boxes_.size(); ++i) {
+        const auto& box = boxes_[i];
+        const std::int64_t x0 = bucketCoord(box.min.x), x1 = bucketCoord(box.max.x);
+        const std::int64_t z0 = bucketCoord(box.min.z), z1 = bucketCoord(box.max.z);
+        if (x1 < x0 || z1 < z0 || (x1 - x0 + 1) * (z1 - z0 + 1) > WideSpan) {
+            wideBoxes_.push_back(static_cast<int>(i)); // also non-finite bounds
+            continue;
+        }
+        for (std::int64_t z = z0; z <= z1; ++z) {
+            for (std::int64_t x = x0; x <= x1; ++x) {
+                boxBuckets_[bucketKey(static_cast<int>(x), static_cast<int>(z))].push_back(static_cast<int>(i));
+            }
+        }
+    }
+}
+
+template<class Visit> void CollisionSystem::forEachBoxNear(glm::vec3 p, float reach, Visit&& visit) const {
+    for (const int index : wideBoxes_) {
+        visit(boxes_[static_cast<std::size_t>(index)]);
+    }
+    if (boxBuckets_.empty()) {
+        return;
+    }
+    const std::int64_t x0 = bucketCoord(p.x - reach), x1 = bucketCoord(p.x + reach);
+    const std::int64_t z0 = bucketCoord(p.z - reach), z1 = bucketCoord(p.z + reach);
+    if (x1 < x0 || z1 < z0) {
+        return;
+    }
+    const std::int64_t span = (x1 - x0 + 1) * (z1 - z0 + 1);
+    if (span > static_cast<std::int64_t>(boxBuckets_.size())) {
+        for (const auto& [key, indices] : boxBuckets_) {
+            const std::int64_t x = key >> 32;
+            const std::int64_t z = static_cast<std::int32_t>(static_cast<std::uint32_t>(key));
+            if (x >= x0 && x <= x1 && z >= z0 && z <= z1) {
+                for (const int index : indices) {
+                    visit(boxes_[static_cast<std::size_t>(index)]);
+                }
+            }
+        }
+        return;
+    }
+    for (std::int64_t z = z0; z <= z1; ++z) {
+        for (std::int64_t x = x0; x <= x1; ++x) {
+            const auto found = boxBuckets_.find(bucketKey(static_cast<int>(x), static_cast<int>(z)));
+            if (found == boxBuckets_.end()) {
+                continue;
+            }
+            for (const int index : found->second) {
+                visit(boxes_[static_cast<std::size_t>(index)]);
+            }
+        }
+    }
+}
+
 template<class Visit> void CollisionSystem::forEachNear(glm::vec3 p, float reach, Visit&& visit) const {
     const std::int64_t x0 = bucketCoord(p.x - reach), x1 = bucketCoord(p.x + reach);
     const std::int64_t z0 = bucketCoord(p.z - reach), z1 = bucketCoord(p.z + reach);
@@ -195,36 +268,50 @@ template<class Visit> void CollisionSystem::forEachNear(glm::vec3 p, float reach
     }
 }
 
+void CollisionSystem::nearby(glm::vec3 position, float reach, std::vector<entt::entity>& out) const {
+    forEachNear(position, reach, [&](entt::entity entity) { out.push_back(entity); });
+}
+
 bool CollisionSystem::blockedByBox(glm::vec3 p, float radius, float height) const {
-    for (const auto& box : boxes_) {
-        if (p.y + height < box.min.y || p.y > box.max.y) {
-            continue;
+    bool blocked = false;
+    forEachBoxNear(p, radius, [&](const Box& box) {
+        if (blocked || p.y + height < box.min.y || p.y > box.max.y) {
+            return;
         }
         const glm::vec2 nearest =
             glm::clamp(glm::vec2(p.x, p.z), glm::vec2(box.min.x, box.min.z), glm::vec2(box.max.x, box.max.z));
         const auto offset = nearest - glm::vec2(p.x, p.z);
-        if (glm::dot(offset, offset) < radius * radius) {
-            return true;
-        }
-    }
-    return false;
+        blocked = glm::dot(offset, offset) < radius * radius;
+    });
+    return blocked;
 }
 
-bool CollisionSystem::blockedByEntity(entt::entity self, glm::vec3 p, float radius,
+bool CollisionSystem::blockedByEntity(entt::entity self, glm::vec3 p, float radius, float height,
                                       std::span<const entt::entity> ignore) const {
+    return blocksMove(self, p, p, radius, height, ignore);
+}
+
+bool CollisionSystem::blocksMove(entt::entity self, glm::vec3 from, glm::vec3 to, float radius, float height,
+                                 std::span<const entt::entity> ignore) const {
     bool blocked = false;
-    forEachNear(p, radius + maxRadius(), [&](entt::entity other) {
+    forEachNear(to, radius + maxRadius(), [&](entt::entity other) {
         if (blocked || other == self || std::find(ignore.begin(), ignore.end(), other) != ignore.end()) {
             return;
         }
         const auto& collider = registry_.get<Collider>(other);
         const auto q = registry_.get<Transform>(other).position;
-        if (!collider.solid || std::abs(q.y - p.y) > 0.8f) {
+        if (!collider.solid || !overlapVertically(to.y, height, q.y, collider.height)) {
             return;
         }
         const float reach = radius + collider.radius;
-        const glm::vec2 d(q.x - p.x, q.z - p.z);
-        blocked = glm::dot(d, d) < reach * reach;
+        const float after = glm::length(glm::vec2(q.x - to.x, q.z - to.z));
+        if (after >= reach) {
+            return;
+        }
+        // Overlapping at the destination: allowed only as a way out of an
+        // overlap that already exists.
+        const float before = glm::length(glm::vec2(q.x - from.x, q.z - from.z));
+        blocked = !(before < reach && after > before + 1e-6f);
     });
     return blocked;
 }
@@ -234,15 +321,17 @@ void CollisionSystem::updateContacts(EventQueue& events) {
     current_.clear();
     for (const auto a : registry_.view<Transform, Collider>()) {
         const auto pa = registry_.get<Transform>(a).position;
-        const auto ra = registry_.get<Collider>(a).radius;
-        forEachNear(pa, ra + maxRadius() + Margin, [&](entt::entity b) {
+        const auto& ca = registry_.get<Collider>(a);
+        forEachNear(pa, ca.radius + maxRadius() + Margin, [&](entt::entity b) {
             if (!(a < b)) {
                 return;
             }
             const auto pb = registry_.get<Transform>(b).position;
-            const float reach = ra + registry_.get<Collider>(b).radius + Margin;
+            const auto& cb = registry_.get<Collider>(b);
+            const float reach = ca.radius + cb.radius + Margin;
             const glm::vec2 d(pb.x - pa.x, pb.z - pa.z);
-            if (std::abs(pb.y - pa.y) < 1.0f && glm::dot(d, d) <= reach * reach) {
+            if (overlapVertically(pa.y, ca.height + Margin, pb.y, cb.height + Margin) &&
+                glm::dot(d, d) <= reach * reach) {
                 current_.emplace_back(a, b);
             }
         });

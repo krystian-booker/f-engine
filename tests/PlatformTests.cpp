@@ -1,6 +1,10 @@
+#include "engine/core/Log.h"
+#include "engine/core/Paths.h"
 #include "engine/platform/Display.h"
 #include "engine/runtime/Engine.h"
 #include "engine/runtime/Headless.h"
+#include "engine/script/LuaHost.h"
+#include "engine/world/World.h"
 #include <chrono>
 #include <cstdlib>
 #include <doctest/doctest.h>
@@ -179,6 +183,10 @@ TEST_CASE("display settings validate, merge and read back") {
               "local d = fe.app.display() return d.fullscreen, d.width, d.height, d.vsync, d.monitor, "
               "#d.monitors, #d.modes") == "false\t" + std::to_string(engine.config().windowWidth) + "\t" +
                                               std::to_string(engine.config().windowHeight) + "\ton\t1\t1\t1");
+    // Headless there is no back buffer, so none is HDR; the runtime sets the flag from bgfx's format.
+    CHECK(run(engine, "return tostring(fe.app.display().hdr)") == "false");
+    engine.display().hdr = true;
+    CHECK(run(engine, "return tostring(fe.app.display().hdr)") == "true");
     run(engine, "fe.app.set_display{width = 1600, height = 900, vsync = 'adaptive'}");
     run(engine, "fe.app.set_display{fullscreen = true}");
     CHECK(run(engine, "local d = fe.app.display() return d.fullscreen, d.width, d.vsync") ==
@@ -260,6 +268,33 @@ TEST_CASE("worlds load in the background and finish on the main thread") {
     tickUntil(engine, [&] { return engine.loadProgress(std::stoi(missing)) >= 1; });
     CHECK(failure(engine, "fe.world.finish_load(" + missing + ")").find("nowhere") != std::string::npos);
     CHECK_FALSE(engine.world("x"));
+}
+
+TEST_CASE("cancelled background loads are dropped and never create a world") {
+    Engine engine(options());
+    // Cancelled at once, while the worker may still be parsing: the ticket is
+    // gone and the parse's result is discarded once it arrives.
+    const auto ticket = run(engine, "return fe.world.load_async('field', 'arena')");
+    run(engine, "fe.world.cancel_load(" + ticket + ")");
+    CHECK(failure(engine, "fe.world.load_progress(" + ticket + ")").find("Unknown world load") !=
+          std::string::npos);
+    CHECK(failure(engine, "fe.world.finish_load(" + ticket + ")").find("Unknown world load") !=
+          std::string::npos);
+    CHECK(failure(engine, "fe.world.cancel_load(" + ticket + ")").find("Unknown world load") !=
+          std::string::npos);
+    for (int i = 0; i < 30; ++i) {
+        engine.tick(1.0 / 60);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK_FALSE(engine.world("field"));
+    // A load that already finished decoding can be cancelled too, and the
+    // same world still loads afterwards.
+    const auto later = std::stoi(run(engine, "return fe.world.load_async('field', 'arena')"));
+    tickUntil(engine, [&] { return engine.loadProgress(later) >= 1; });
+    engine.cancelLoad(later);
+    CHECK_THROWS_WITH_AS(engine.finishLoad(later), doctest::Contains("Unknown world load"), std::runtime_error);
+    CHECK(run(engine, "return fe.world.finish_load(fe.world.load_async('field', 'arena')).map_id") == "arena");
+    REQUIRE(engine.world("field"));
 }
 
 TEST_CASE("local dates follow the time zone") {
@@ -386,4 +421,226 @@ TEST_CASE("the engine library is found next to the executable") {
     CHECK(findLibraryRoot(root / "Game.app" / "Contents" / "MacOS" / "fengine") ==
           std::filesystem::weakly_canonical(root / "Game.app" / "Contents" / "Resources" / "lualib"));
     std::filesystem::remove_all(root);
+}
+
+TEST_CASE("game ids are stable folder names derived from the title or given in game.json") {
+    CHECK(derivedGameId("Ridgeline") == "ridgeline");
+    CHECK(derivedGameId("Crystal of the Vale") == "crystal-of-the-vale");
+    CHECK(derivedGameId("  Two   Words ") == "two-words");
+    CHECK(derivedGameId("snake_case-ok 9") == "snake_case-ok-9");
+    CHECK_FALSE(derivedGameId("Final Fantasy VI — Narshe"));
+    CHECK_FALSE(derivedGameId("Dragon's Lair"));
+    CHECK_FALSE(derivedGameId("   "));
+    CHECK(validGameId("ff6-narshe"));
+    CHECK_FALSE(validGameId("Bad Id"));
+    CHECK_FALSE(validGameId(""));
+    CHECK_FALSE(validGameId(std::string(65, 'a')));
+    CHECK(GameConfig::load(FENGINE_TEST_GAME).id == "fengine-tests");
+
+    const auto root = std::filesystem::temp_directory_path() / "fengine-config-id";
+    write(root / "game.json", R"({"title": "Dragon's Lair"})");
+    CHECK_THROWS_WITH(GameConfig::load(root), doctest::Contains("needs an \"id\""));
+    write(root / "game.json", R"({"title": "Dragon's Lair", "id": "dragons-lair"})");
+    CHECK(GameConfig::load(root).id == "dragons-lair");
+    write(root / "game.json", R"({"title": "Plain", "id": "Not Valid"})");
+    CHECK_THROWS_WITH(GameConfig::load(root), doctest::Contains("id must be"));
+    write(root / "game.json", R"({"title": "Plain", "max_fps": 144, "canvas_fit": "expand"})");
+    const auto config = GameConfig::load(root);
+    CHECK(config.maxFps == 144);
+    CHECK(config.canvasFit == CanvasFit::Expand);
+    CHECK(GameConfig::load(FENGINE_TEST_GAME).maxFps == 0);
+    CHECK(GameConfig::load(FENGINE_TEST_GAME).canvasFit == CanvasFit::Letterbox);
+    write(root / "game.json", R"({"title": "Plain", "max_fps": -1})");
+    CHECK_THROWS_WITH(GameConfig::load(root), doctest::Contains("max_fps"));
+    write(root / "game.json", R"({"title": "Plain", "canvas_fit": "stretch"})");
+    CHECK_THROWS_WITH(GameConfig::load(root), doctest::Contains("canvas_fit"));
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("canvas_fit expand widens the canvas to the viewport; letterbox keeps it") {
+    auto config = GameConfig::load(FENGINE_TEST_GAME);
+    REQUIRE(config.virtualWidth == 320);
+    REQUIRE(config.virtualHeight == 180);
+    {
+        Engine engine(options(), config);
+        engine.setViewport(2560, 1080);
+        CHECK(engine.canvas().width() == 320);
+        CHECK(engine.canvas().height() == 180);
+    }
+    config.canvasFit = CanvasFit::Expand;
+    Engine engine(options(), config);
+    engine.setViewport(1280, 720);
+    CHECK(engine.canvas().width() == 320);
+    engine.setViewport(2560, 1080);
+    CHECK(engine.canvas().width() == 426); // floor(180 * 2560 / 1080)
+    CHECK(engine.canvas().height() == 180);
+    CHECK(engine.canvas().present({2560, 1080}).scale == doctest::Approx(6));
+    // A narrower window keeps the configured width (bars above and below).
+    engine.setViewport(720, 1280);
+    CHECK(engine.canvas().width() == 320);
+    CHECK(engine.canvas().height() == 180);
+}
+
+TEST_CASE("the log writes a rotated file, filters by level and reports crashes") {
+    const auto folder = std::filesystem::temp_directory_path() / "fengine-log-test";
+    std::filesystem::remove_all(folder);
+    const auto previousLevel = logLevel();
+    openLogFile(folder);
+    CHECK(logFilePath() == folder / "log.txt");
+    setLogLevel(LogLevel::Warning);
+    log(LogLevel::Info, "quiet info line");
+    log(LogLevel::Warning, "loud warning line");
+    log(LogLevel::Error, "loud error line");
+    setLogLevel(previousLevel);
+    const auto recent = recentLogLines(2);
+    REQUIRE(recent.size() == 2);
+    CHECK(recent[0].find("loud warning line") != std::string::npos);
+    CHECK(recent[1].find("loud error line") != std::string::npos);
+    flushLog();
+    const auto first = readFile(folder / "log.txt");
+    CHECK(first.find("quiet info line") == std::string::npos);
+    CHECK(first.find("loud warning line") != std::string::npos);
+    CHECK(first.find("error   loud error line") != std::string::npos);
+    const auto report = writeCrashReport(folder, "crash: SIGSEGV");
+    const auto crash = readFile(report);
+    CHECK(crash.starts_with("crash: SIGSEGV\n"));
+    CHECK(crash.find("loud error line") != std::string::npos);
+    // Opening again rotates the previous file once.
+    openLogFile(folder);
+    log(LogLevel::Error, "second run");
+    flushLog();
+    CHECK(readFile(folder / "log.txt.1") == first);
+    CHECK(readFile(folder / "log.txt").find("second run") != std::string::npos);
+    closeLogFile();
+    CHECK(logFilePath().empty());
+    std::filesystem::remove_all(folder);
+}
+
+TEST_CASE("a log sink sees every record that passes the filter, and never its own") {
+    std::vector<std::pair<LogLevel, std::string>> seen;
+    const auto previousLevel = logLevel();
+    setLogLevel(LogLevel::Info);
+    setLogSink([&](LogLevel level, std::string_view message) {
+        seen.emplace_back(level, std::string(message));
+        if (message == "forwarded") {
+            log(LogLevel::Error, "from the sink"); // written, but not fed back
+        }
+    });
+    log(LogLevel::Debug, "dropped by the level");
+    log(LogLevel::Info, "forwarded");
+    log(LogLevel::Warning, "and this");
+    setLogSink({});
+    log(LogLevel::Error, "after the sink was removed");
+    setLogLevel(previousLevel);
+    REQUIRE(seen.size() == 2);
+    CHECK(seen[0].first == LogLevel::Info);
+    CHECK(seen[0].second == "forwarded");
+    CHECK(seen[1].first == LogLevel::Warning);
+    CHECK(seen[1].second == "and this");
+    const auto recent = recentLogLines(3);
+    REQUIRE(recent.size() == 3);
+    CHECK(recent[0].find("from the sink") != std::string::npos);
+    CHECK(recent[2].find("after the sink was removed") != std::string::npos);
+    // EngineOptions::logSink installs it for the engine's lifetime.
+    {
+        auto withSink = options();
+        withSink.logSink = [&](LogLevel level, std::string_view message) {
+            seen.emplace_back(level, std::string(message));
+        };
+        Engine engine(std::move(withSink));
+        seen.clear();
+        log(LogLevel::Warning, "while the engine lives");
+        REQUIRE(seen.size() == 1);
+        CHECK(seen[0].second == "while the engine lives");
+    }
+    seen.clear();
+    log(LogLevel::Warning, "after the engine");
+    CHECK(seen.empty());
+}
+
+TEST_CASE("the frame cap spaces frame starts one interval apart without drift") {
+    FrameCap cap;
+    CHECK(cap.maxFps() == 0);
+    CHECK(cap.wait(1.0) == 0);
+    cap.setMaxFps(100);
+    CHECK(cap.maxFps() == 100);
+    CHECK(cap.interval() == doctest::Approx(0.01));
+    CHECK(cap.wait(10.0) == 0); // the first frame starts at once
+    CHECK(cap.wait(10.004) == doctest::Approx(0.006));
+    // Deadlines advance by whole intervals: a frame that starts late does not
+    // push the next one back.
+    CHECK(cap.wait(10.0125) == doctest::Approx(0.0075));
+    CHECK(cap.wait(10.03) == 0);
+    // Far behind (more than an interval late): start now and restart the schedule.
+    CHECK(cap.wait(10.5) == 0);
+    CHECK(cap.wait(10.505) == doctest::Approx(0.005));
+    cap.setMaxFps(0);
+    CHECK(cap.wait(11.0) == 0);
+}
+
+TEST_CASE("stat values that are not numbers are overwritten, and writes are coalesced") {
+    const auto folder = std::filesystem::temp_directory_path() / "fengine-platform-stat-test";
+    std::filesystem::remove_all(folder);
+    const auto file = folder / "platform.json";
+    writeJson(file, {{"unlocked", Json::object()}, {"stats", {{"steps", "many"}, {"jumps", 2}}}});
+    {
+        LocalPlatformServices platform(file);
+        CHECK_FALSE(platform.stat("steps"));
+        CHECK_NOTHROW(platform.setStat("steps", 3));
+        CHECK(platform.stat("steps") == 3);
+        CHECK(platform.dirty());
+        platform.update(); // the first write happens at once
+        CHECK_FALSE(platform.dirty());
+        CHECK(readJson(file)["stats"]["steps"] == 3);
+        platform.setStat("steps", 4);
+        platform.update(); // within the 5 s coalescing window: not yet written
+        CHECK(platform.dirty());
+        CHECK(readJson(file)["stats"]["steps"] == 3);
+        platform.flush();
+        CHECK_FALSE(platform.dirty());
+        CHECK(readJson(file)["stats"]["steps"] == 4);
+        platform.setStat("steps", 5);
+    }
+    CHECK(readJson(file)["stats"]["steps"] == 5); // written on shutdown
+    LocalPlatformServices quick(file, std::chrono::milliseconds(0));
+    quick.setStat("jumps", 3);
+    quick.update();
+    CHECK(readJson(file)["stats"]["jumps"] == 3);
+    std::filesystem::remove_all(folder);
+}
+
+TEST_CASE("programs locate their own executable through the operating system") {
+    const auto self = executablePath("not-a-real-path");
+    CHECK(self.is_absolute());
+    CHECK(std::filesystem::is_regular_file(self));
+    CHECK(self.filename().string().find("tests") != std::string::npos);
+    const auto fallback = executablePath("relative/fallback");
+    CHECK(fallback.is_absolute());
+}
+
+TEST_CASE("the engine keeps the loaded worlds' assets and evicts the rest on unload") {
+    auto o = options();
+    o.assetBudget = 0;
+    Engine engine(std::move(o));
+    const auto world = engine.loadWorld("field", "arena");
+    const auto geometry = world->geometryPath();
+    engine.assets().model(geometry);
+    engine.assets().image("@fe/assets/ui/cursor.png");
+    const auto referenced = engine.referencedAssets();
+    CHECK(referenced.contains(geometry));
+    CHECK_FALSE(referenced.contains("@fe/assets/ui/cursor.png"));
+    const auto generation = engine.assets().generation();
+    CHECK(engine.releaseUnusedAssets() == 1);
+    CHECK(engine.assets().loaded(geometry));
+    CHECK_FALSE(engine.assets().loaded("@fe/assets/ui/cursor.png"));
+    CHECK(engine.assets().generation() > generation);
+    engine.unloadWorld("field");
+    CHECK_FALSE(engine.assets().loaded(geometry));
+    CHECK(engine.assets().cachedCount() == 0);
+    // With the default budget nothing is evicted.
+    Engine roomy(options());
+    roomy.loadWorld("field", "arena");
+    roomy.assets().image("@fe/assets/ui/cursor.png");
+    roomy.unloadWorld("field");
+    CHECK(roomy.assets().loaded("@fe/assets/ui/cursor.png"));
 }

@@ -1,4 +1,5 @@
 #include "engine/text/Markup.h"
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstdio>
@@ -99,6 +100,10 @@ struct Parser {
     Glyph style; // color, scale, bold and effect for the next glyphs
     std::vector<Glyph> out;
     std::size_t resolved = 0; // bytes the resolver returned so far
+    // {size} and {b} nest: {/size} restores the scale before the matching
+    // {size}, and text is bold until as many {/b} as {b} have closed.
+    std::vector<float> sizes{};
+    int boldDepth = 0;
 
     [[nodiscard]] Glyph styled() const {
         Glyph glyph;
@@ -160,15 +165,20 @@ struct Parser {
             if (!value || *value < 0.25f || *value > 8) {
                 return false;
             }
+            sizes.push_back(style.scale);
             style.scale = *value;
             return true;
         }
-        if (bare && (tag == "/size" || tag == "b" || tag == "/b")) {
-            if (tag == "/size") {
-                style.scale = 1;
-            } else {
-                style.bold = tag == "b";
+        if (bare && tag == "/size") {
+            style.scale = sizes.empty() ? 1.0f : sizes.back();
+            if (!sizes.empty()) {
+                sizes.pop_back();
             }
+            return true;
+        }
+        if (bare && (tag == "b" || tag == "/b")) {
+            boldDepth = tag == "b" ? boldDepth + 1 : std::max(0, boldDepth - 1);
+            style.bold = boldDepth > 0;
             return true;
         }
         if (bare && (tag == "shake" || tag == "wave")) {
@@ -260,6 +270,7 @@ std::string toMarkup(const std::vector<Glyph>& glyphs, std::uint32_t baseColor) 
     std::string out;
     Glyph style;
     style.color = baseColor;
+    std::vector<float> sizes; // the scales in force outside the open {size} tags
     char buffer[32];
     for (std::size_t i = 0; i < glyphs.size(); ++i) {
         const auto& glyph = glyphs[i];
@@ -268,8 +279,15 @@ std::string toMarkup(const std::vector<Glyph>& glyphs, std::uint32_t baseColor) 
             out += buffer;
         }
         if (glyph.scale != style.scale) {
-            std::snprintf(buffer, sizeof buffer, "{size:%g}", glyph.scale);
-            out += glyph.scale == 1 ? std::string("{/size}") : std::string(buffer);
+            // Back to the enclosing size closes a tag; anything else opens one.
+            if (!sizes.empty() && sizes.back() == glyph.scale) {
+                out += "{/size}";
+                sizes.pop_back();
+            } else {
+                sizes.push_back(style.scale);
+                std::snprintf(buffer, sizeof buffer, "{size:%g}", glyph.scale);
+                out += buffer;
+            }
         }
         if (glyph.bold != style.bold) {
             out += glyph.bold ? "{b}" : "{/b}";

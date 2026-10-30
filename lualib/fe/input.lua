@@ -50,6 +50,25 @@ input.defaults = {
   },
 }
 
+--- The file's defaults, for `__reload`.
+input.file_defaults = require("fe.tablex").deep_copy(input.defaults)
+
+--- Adopt edited defaults on hot reload (actions, movement and axes the
+--- game changed at runtime are kept), define them again and re-apply the
+--- player's saved rebindings.
+function input.__reload(live, fresh)
+  local tablex = require("fe.tablex")
+  local before = tablex.deep_copy(live.defaults)
+  for _, group in ipairs({ "actions", "movement", "axes" }) do
+    tablex.adopt(live.defaults[group], fresh.defaults[group], live.file_defaults[group])
+  end
+  live.file_defaults = tablex.deep_copy(fresh.defaults)
+  if not tablex.deep_equal(before, live.defaults) then
+    live.use_defaults()
+    require("fe.config").apply_bindings(false)
+  end
+end
+
 local function digital(action)
   local out = {}
   for _, raw in ipairs(fe.input.bindings(action)) do
@@ -95,9 +114,9 @@ function input.use_defaults(overrides)
 end
 
 local glyphs = {
-  keyboard = function(raw) return raw:gsub("^key:", "") end,
+  keyboard = function(raw) return (raw:gsub("^key:", "")) end,
   gamepad = function(raw)
-    local button = raw:gsub("^pad:", "")
+    local button = (raw:gsub("^pad:", ""))
     local key = "fe.button." .. button
     local name = i18n.t(key)
     return name == key and button or name
@@ -119,7 +138,7 @@ function input.prompt(action)
     end
   end
   local first = fe.input.bindings(action)[1]
-  return first and first:gsub("^%w+:", "") or "?"
+  return first and (first:gsub("^%w+:", "")) or "?"
 end
 
 --- Menu navigation with key repeat: returns -1, 0 or 1 for an axis pair.

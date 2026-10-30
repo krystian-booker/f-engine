@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <glm/glm.hpp>
+#include <limits>
 #include <map>
 #include <memory>
 #include <numeric>
@@ -16,7 +17,8 @@
 #include <vector>
 
 // CPU-side rules of the frame renderer that need no GPU: bloom chain sizes,
-// particle near fade, circle of confusion, chromatic aberration, uniform
+// particle near fade, circle of confusion, chromatic aberration, the HDR
+// output transform, uniform
 // packing, target pooling, draw camera interpolation, freeze-frame lifetime,
 // custom shader parameters, instance grouping, glyph effects and thumbnail
 // scaling. The shaders mirror the formulas here.
@@ -52,12 +54,20 @@ inline float bloomNormalisation(int levels, float radius) {
 }
 
 // Soft-knee bloom threshold: the fraction of a colour with brightest channel
-// `brightness` that passes. Below threshold - knee nothing passes; a
-// quadratic curve joins it to the linear part above threshold + knee.
+// `brightness` that passes. `knee` is absolute (in brightness units): below
+// threshold - knee nothing passes; a quadratic curve joins it to the linear
+// part above threshold + knee. fs_bloom_down.sc mirrors it.
 inline float bloomPass(float brightness, float threshold, float knee) {
     const float soft = std::clamp(brightness - threshold + knee, 0.0f, 2.0f * knee);
     const float curve = soft * soft / (4.0f * knee + 1e-4f);
     return std::max(curve, brightness - threshold) / std::max(brightness, 1e-4f);
+}
+
+// The absolute knee of a world's post settings: `bloom_knee` is authored as
+// a fraction of `bloom_threshold`. The one place the conversion happens, so
+// the shader (u_bloom[1].x) and bloomPass() always agree.
+inline float bloomKnee(const PostSettings& post) {
+    return post.bloomThreshold * post.bloomKnee;
 }
 
 // Opacity of a particle `depth` units in front of a camera that is
@@ -80,6 +90,90 @@ inline float linearDepth(float device, float nearPlane, float farPlane, bool hom
                std::max(farPlane + nearPlane - ndc * (farPlane - nearPlane), 1e-4f);
     }
     return nearPlane * farPlane / std::max(farPlane - device * (farPlane - nearPlane), 1e-4f);
+}
+
+// How the screen pass encodes the frame for the back buffer. The frame is
+// composed in sRGB (worlds graded and encoded by the post pass, the canvas on
+// top); an HDR back buffer takes it decoded to linear light and scaled.
+enum class OutputEncoding {
+    Srgb,  // 8-bit back buffer: the frame as it is
+    ScRgb, // RGBA16F, extended linear sRGB: 1.0 is `referenceWhite` nits
+    Hdr10, // RGB10A2, Rec. 2020 with the ST 2084 (PQ) curve, absolute nits
+};
+
+struct OutputColor {
+    OutputEncoding encoding = OutputEncoding::Srgb;
+    // The brightness of the frame's white (game.json hdr_paper_white) and
+    // what the back buffer's 1.0 means: 80 nits for scRGB on Windows and
+    // Vulkan; on macOS extended-range Metal layers put the display's own SDR
+    // white at 1.0, so the runtime passes the paper white itself (scale 1).
+    float paperWhite = 200, referenceWhite = 80;
+};
+
+inline float srgbToLinear(float c) {
+    return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+}
+
+inline float linearToSrgb(float c) {
+    return c <= 0.0031308f ? c * 12.92f : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
+}
+
+// The SMPTE ST 2084 perceptual quantizer of a luminance in nits (0..10000).
+inline float pqEncode(float nits) {
+    constexpr float m1 = 2610.0f / 16384, m2 = 2523.0f / 4096 * 128, c1 = 3424.0f / 4096,
+                    c2 = 2413.0f / 4096 * 32, c3 = 2392.0f / 4096 * 32;
+    const float y = std::pow(std::clamp(nits / 10000.0f, 0.0f, 1.0f), m1);
+    return std::pow((c1 + c2 * y) / (1.0f + c3 * y), m2);
+}
+
+// Rec. 709 primaries to Rec. 2020, linear light.
+inline glm::vec3 rec709ToRec2020(glm::vec3 c) {
+    return {0.6274f * c.x + 0.3293f * c.y + 0.0433f * c.z, 0.0691f * c.x + 0.9195f * c.y + 0.0114f * c.z,
+            0.0164f * c.x + 0.0880f * c.y + 0.8956f * c.z};
+}
+
+// What the screen pass writes for a composed (sRGB-encoded) frame colour.
+// fs_present.sc mirrors it; with Srgb the colour passes through untouched,
+// so an SDR frame stays bit-identical to one rendered before HDR existed.
+inline glm::vec3 outputColor(glm::vec3 srgb, const OutputColor& output) {
+    if (output.encoding == OutputEncoding::Srgb) {
+        return srgb;
+    }
+    const glm::vec3 linear(srgbToLinear(srgb.x), srgbToLinear(srgb.y), srgbToLinear(srgb.z));
+    if (output.encoding == OutputEncoding::ScRgb) {
+        return linear * (output.paperWhite / std::max(output.referenceWhite, 1.0f));
+    }
+    const glm::vec3 nits = rec709ToRec2020(linear) * output.paperWhite;
+    return {pqEncode(nits.x), pqEncode(nits.y), pqEncode(nits.z)};
+}
+
+// u_present[6] of fs_present.sc: encoding (0 sRGB, 1 scRGB, 2 HDR10) and the
+// scale the decoded linear colour is multiplied by (paper white over the
+// reference white, or the paper white in nits for PQ).
+inline glm::vec4 packOutput(const OutputColor& output) {
+    switch (output.encoding) {
+    case OutputEncoding::Srgb:
+        return {0, 1, 0, 0};
+    case OutputEncoding::ScRgb:
+        return {1, output.paperWhite / std::max(output.referenceWhite, 1.0f), 0, 0};
+    case OutputEncoding::Hdr10:
+        break;
+    }
+    return {2, output.paperWhite, 0, 0};
+}
+
+// An IEEE half-precision value as a float (screenshots of a 16F back buffer).
+inline float halfToFloat(std::uint16_t half) {
+    const std::uint32_t sign = (half >> 15u) & 1u, exponent = (half >> 10u) & 0x1fu, mantissa = half & 0x3ffu;
+    float value;
+    if (exponent == 0) {
+        value = std::ldexp(static_cast<float>(mantissa), -24);
+    } else if (exponent == 0x1f) {
+        value = mantissa ? std::numeric_limits<float>::quiet_NaN() : std::numeric_limits<float>::infinity();
+    } else {
+        value = std::ldexp(static_cast<float>(mantissa | 0x400u), static_cast<int>(exponent) - 25);
+    }
+    return sign ? -value : value;
 }
 
 // Chromatic aberration, one rule for the post pass (`post.chromatic_aberration`,
@@ -121,10 +215,11 @@ struct WaterFrame {
     glm::vec3 horizon{0};          // the sky's horizon colour
     bool sceneCopy = false;        // the opaque scene was copied for refraction and reflection
     bool originBottomLeft = false; // bgfx caps
+    bool orthographic = false;     // the scene's depth is linear between the planes
 };
 
 // u_water of fs_water.sc: time, wave scale, wave speed, fresnel; deep colour,
-// depth falloff; horizon, specular; near, far, depth tint (0/1), unused;
+// depth falloff; horizon, specular; near, far, depth tint (0/1), orthographic (0/1);
 // reflection, refraction, scene copy (0/1), origin bottom-left (0/1).
 inline std::array<glm::vec4, 5> packWater(const WaterSettings& w, const WaterFrame& frame) {
     const auto flag = [](bool on) {
@@ -132,7 +227,8 @@ inline std::array<glm::vec4, 5> packWater(const WaterSettings& w, const WaterFra
     };
     return {glm::vec4(frame.time, w.waveScale, w.waveSpeed, w.fresnel),
             glm::vec4(w.deepColor, w.depthFalloff), glm::vec4(frame.horizon, w.specular),
-            glm::vec4(frame.nearPlane, frame.farPlane, flag(frame.sceneCopy && w.depthFalloff > 0), 0),
+            glm::vec4(frame.nearPlane, frame.farPlane, flag(frame.sceneCopy && w.depthFalloff > 0),
+                      flag(frame.orthographic)),
             glm::vec4(w.reflection, w.refraction, flag(frame.sceneCopy), flag(frame.originBottomLeft))};
 }
 
@@ -182,7 +278,9 @@ public:
         found->second.used = true;
         return *found->second.value;
     }
-    [[nodiscard]] Value* find(const Key& key) const {
+    // Looks an entry up without acquiring it; `K` may be a view of the key
+    // (a std::string_view for a std::string key), so no key is built.
+    template<class K> [[nodiscard]] Value* find(const K& key) const {
         const auto found = entries_.find(key);
         return found == entries_.end() ? nullptr : found->second.value.get();
     }
@@ -200,8 +298,19 @@ private:
         std::unique_ptr<Value> value;
         bool used = false;
     };
-    std::map<Key, Entry> entries_;
+    std::map<Key, Entry, std::less<>> entries_;
 };
+
+// The scene target size for an output of `outSize` pixels at `pixelScale`
+// (PostSettings::pixelScale, 1..8): a whole scale divides exactly (each scene
+// pixel becomes a block of scale x scale output pixels), a fraction rounds.
+inline glm::ivec2 sceneSizeFor(glm::ivec2 outSize, float pixelScale) {
+    const float scale = std::max(1.0f, pixelScale);
+    if (scale == std::floor(scale)) {
+        return glm::max(glm::ivec2(1), outSize / static_cast<int>(scale));
+    }
+    return glm::max(glm::ivec2(1), glm::ivec2(glm::round(glm::vec2(outSize) / scale)));
+}
 
 // Interpolation of world:draw camera overrides. A draw's camera is matched
 // with the previous frame's draw of the same world into the same target (the
@@ -227,6 +336,8 @@ public:
             state.camera.pitch = next.pitch;
             state.camera.distance = next.distance;
             state.camera.fov = next.fov;
+            state.camera.orthographic = next.orthographic;
+            state.camera.orthoHeight = next.orthoHeight;
             state.camera.nearPlane = next.nearPlane;
             state.camera.farPlane = next.farPlane;
             state.camera.shake = next.shake;
@@ -297,16 +408,35 @@ inline std::array<glm::vec4, 4> packCustomParams(const std::vector<float>& param
 // Instanced draws: `order` becomes the indices of `keys` with equal keys
 // adjacent, groups in the order of their first key and each group in its
 // original order, so one instanced draw per group keeps the first-use order.
-template<class Key> void groupByFirstUse(const std::vector<Key>& keys, std::vector<int>& order) {
-    std::map<Key, int> first;
-    std::vector<int> rank(keys.size());
-    for (std::size_t i = 0; i < keys.size(); ++i) {
-        rank[i] = first.try_emplace(keys[i], static_cast<int>(i)).first->second;
-    }
-    order.resize(keys.size());
+// `rank` is scratch the caller keeps: with it and `order` sized from an
+// earlier call, a frame allocates nothing here (both sorts are in place).
+template<class Key>
+void groupByFirstUse(const std::vector<Key>& keys, std::vector<int>& order, std::vector<int>& rank) {
+    const auto count = keys.size();
+    order.resize(count);
+    rank.resize(count);
     std::iota(order.begin(), order.end(), 0);
-    std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
-        return rank[static_cast<std::size_t>(a)] < rank[static_cast<std::size_t>(b)];
+    // Equal keys adjacent, each group in index order; the first of a group is
+    // the group's first use.
+    std::sort(order.begin(), order.end(), [&](int a, int b) {
+        const auto& ka = keys[static_cast<std::size_t>(a)];
+        const auto& kb = keys[static_cast<std::size_t>(b)];
+        return ka != kb ? ka < kb : a < b;
+    });
+    for (std::size_t start = 0; start < count;) {
+        const auto& key = keys[static_cast<std::size_t>(order[start])];
+        std::size_t end = start + 1;
+        while (end < count && keys[static_cast<std::size_t>(order[end])] == key) {
+            ++end;
+        }
+        for (std::size_t k = start; k < end; ++k) {
+            rank[static_cast<std::size_t>(order[k])] = order[start];
+        }
+        start = end;
+    }
+    std::sort(order.begin(), order.end(), [&](int a, int b) {
+        const int ra = rank[static_cast<std::size_t>(a)], rb = rank[static_cast<std::size_t>(b)];
+        return ra != rb ? ra < rb : a < b;
     });
 }
 

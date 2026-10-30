@@ -16,16 +16,19 @@ Combatant.mixin(Actor)
 
 Actor.leveled_up = signal.new() -- (actor, new_level, learned_skill_ids)
 Actor.max_level = 99
+--- The default experience curve: base * (level - 1) ^ exponent + linear * (level - 1).
+Actor.exp_curve = { base = 18, exponent = 2.35, linear = 12 }
 
 --- Total experience needed to reach `level`. Replace for a custom curve.
 function Actor.exp_for_level(level)
   if level <= 1 then return 0 end
-  return math.floor(18 * (level - 1) ^ 2.35 + 12 * (level - 1))
+  local curve = Actor.exp_curve
+  return math.floor(curve.base * (level - 1) ^ curve.exponent + curve.linear * (level - 1))
 end
 
 local function new_record(def)
   return {
-    level = def.level, exp = Actor.exp_for_level(def.level), class = def.class, secondary = nil,
+    level = def.level, exp = Actor.exp_for_level(def.level), class = def.class,
     jp = {}, resources = {}, equipment = tablex.copy(def.equipment), learned = {}, states = {}, custom = {},
     supports = {},
   }
@@ -150,6 +153,7 @@ function Actor:equip_support(slot, skill_id)
     end
   end
   self.record.supports[slot] = skill_id or false
+  self:invalidate()
   return true
 end
 
@@ -178,8 +182,21 @@ function Actor:knows(skill_id)
   return tablex.find(known(self), function(s) return s.id == skill_id end) ~= nil
 end
 
---- Stat modifiers from the class, the secondary class, equipment and
---- active passives (in that order).
+--- The actor's own modifiers: the `modifiers` list in `actor:custom()`
+--- (saved with the game), for weapon upgrades, stat choices and the like.
+--- Set it with Actor:set_custom_modifiers so cached stats refresh.
+function Actor:custom_modifiers()
+  return self.record.custom.modifiers or {}
+end
+
+--- Replace the actor's own modifiers ({stat, add | mul | set, priority?} list).
+function Actor:set_custom_modifiers(list)
+  self.record.custom.modifiers = list
+  self:invalidate()
+end
+
+--- Stat modifiers from the class, the secondary class, equipment, the
+--- actor's own (Actor:custom_modifiers) and active passives (in that order).
 function Actor:modifiers()
   local out = {}
   local function add_all(list) for _, m in ipairs(list or {}) do out[#out + 1] = m end end
@@ -187,6 +204,7 @@ function Actor:modifiers()
   local secondary = self:secondary()
   if secondary then add_all(secondary.modifiers) end
   each_equipment(self, function(item) add_all(item.equip.modifiers) end)
+  add_all(self:custom_modifiers())
   for _, skill in ipairs(self:passives()) do add_all(skill.modifiers) end
   return out
 end
@@ -220,16 +238,25 @@ function Actor:can_equip(item_id, slot)
   return item.equip.type == nil or allowed[item.equip.type] == true
 end
 
---- Equip from the inventory (nil unequips). Returns true on success.
+--- Equip from the inventory (nil unequips). Returns true on success, else
+--- false and the refusal: "cannot_equip" (wrong slot, type or class),
+--- "not_held" (none in the inventory) or "inventory_full" (the item being
+--- taken off would not fit back; nothing changes, it stays equipped).
+--- Equipping what is already in the slot changes nothing and returns true.
+---@return boolean, string?
 function Actor:equip(slot, item_id)
   local inventory = require("fe.rpg.inventory")
-  if item_id and (not self:can_equip(item_id, slot) or inventory.count(item_id) < 1) then
-    return false
-  end
   local old = self.record.equipment[slot]
+  if old and old == item_id then return true end
+  if item_id and not self:can_equip(item_id, slot) then return false, "cannot_equip" end
+  if item_id and inventory.count(item_id) < 1 then return false, "not_held" end
+  if old and inventory.count(old) >= data.get("items", old).stack then
+    return false, "inventory_full"
+  end
   if old then inventory.add(old, 1) end
   if item_id then inventory.remove(item_id, 1) end
   self.record.equipment[slot] = item_id
+  self:invalidate()
   for _, def in ipairs(require("fe.rpg.stats").resource_list) do
     self:set_resource(def.id, self:resource(def.id))
   end
@@ -240,7 +267,7 @@ end
 function Actor:preview_equip(slot, item_id)
   local old = self.record.equipment[slot]
   self.record.equipment[slot] = item_id
-  local result = self:stats()
+  local result = self:compute_stats()
   self.record.equipment[slot] = old
   return result
 end
@@ -249,6 +276,7 @@ function Actor:learn(skill_id)
   data.get("skills", skill_id)
   if not tablex.contains(self.record.learned, skill_id) then
     self.record.learned[#self.record.learned + 1] = skill_id
+    self:invalidate()
     return true
   end
   return false
@@ -257,6 +285,7 @@ end
 function Actor:set_class(class_id)
   data.get("classes", class_id)
   self.record.class = class_id
+  self:invalidate()
   self:init_resources(false)
 end
 
@@ -265,6 +294,7 @@ end
 function Actor:set_secondary(class_id)
   if class_id then data.get("classes", class_id) end
   self.record.secondary = class_id
+  self:invalidate()
 end
 
 --- Job points per class.
@@ -295,6 +325,7 @@ function Actor:gain_exp(amount)
     local max_before = {}
     for _, def in ipairs(require("fe.rpg.stats").resource_list) do max_before[def.id] = self:max_resource(def.id) end
     self.record.level = self.record.level + 1
+    self:invalidate()
     -- Growth raises current values too, but never revives a knocked-out actor.
     if self:alive() then
       for _, def in ipairs(require("fe.rpg.stats").resource_list) do

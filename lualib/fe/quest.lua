@@ -94,8 +94,9 @@ function quest.start(id)
 end
 
 --- Move to the next stage (or a named stage). Objective progress starts
---- over for the new stage. Returns false when the quest is not active;
---- raises for an unknown quest or stage.
+--- over for the new stage. Returns false, changing nothing, when the quest
+--- is not active or is already on its last stage; raises for an unknown
+--- quest or stage.
 function quest.advance(id, stage_id)
   local def = data.get("quests", id)
   local index
@@ -108,7 +109,8 @@ function quest.advance(id, stage_id)
   local q = record.quests[id]
   if not q or q.status ~= "active" then return false end
   if not stage_id then
-    index = math.min(#def.stages, q.stage + 1)
+    index = q.stage + 1
+    if index > #def.stages then return false end
   end
   q.stage = index
   q.objectives = {}

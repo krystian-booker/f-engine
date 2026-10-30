@@ -15,6 +15,15 @@ void editCollider(World& world, entt::entity entity, const Collider& collider) {
     world.registry().replace<Collider>(entity, collider);
 }
 
+void editTransform(World& world, entt::entity entity, glm::vec3 position, int layer) {
+    auto& transform = world.registry().get<Transform>(entity);
+    transform.position = position;
+    transform.layer = layer;
+    // The hash is no longer rebuilt per tick: a transform written directly
+    // must be re-indexed, so queries (and a paused game) see it at once.
+    world.refreshCollision();
+}
+
 std::string MapEditHistory::key(const World& world) {
     return world.name() + "\n" + world.authored().id;
 }
@@ -26,10 +35,23 @@ void MapEditHistory::sync(const World& world) {
     }
 }
 
-void MapEditHistory::apply(World& world, const std::function<void(MapData&)>& edit, bool step) {
-    sync(world);
+MapEditHistory::Stacks& MapEditHistory::stacksFor(World& world, bool check) {
+    if (check) {
+        sync(world);
+    }
     auto& stacks = stacks_[key(world)];
-    if (step || stacks.undo.empty()) {
+    stacks.world = &world;
+    return stacks;
+}
+
+void MapEditHistory::apply(World& world, const std::function<void(MapData&)>& edit, bool step) {
+    // A gesture continues only on the world object it started on; any other
+    // world starts a step, which checks the map the history left.
+    const auto found = stacks_.find(key(world));
+    const bool continues = !step && found != stacks_.end() && found->second.world == &world &&
+                           !found->second.undo.empty();
+    auto& stacks = stacksFor(world, !continues);
+    if (!continues) {
         stacks.undo.push_back(world.authored().toJson());
         if (stacks.undo.size() > Limit) {
             stacks.undo.pop_front();
@@ -37,7 +59,20 @@ void MapEditHistory::apply(World& world, const std::function<void(MapData&)>& ed
         stacks.redo.clear();
     }
     applyEdit(world, edit);
-    stacks.head = world.authored().toJson();
+    if (continues) {
+        stacks.headStale = true;
+    } else {
+        stacks.head = world.authored().toJson();
+        stacks.headStale = false;
+    }
+}
+
+void MapEditHistory::settle(const World& world) {
+    const auto found = stacks_.find(key(world));
+    if (found != stacks_.end() && found->second.headStale && found->second.world == &world) {
+        found->second.head = world.authored().toJson();
+        found->second.headStale = false;
+    }
 }
 
 void MapEditHistory::restore(World& world, const Json& snapshot) {
@@ -85,30 +120,36 @@ void MapEditHistory::restore(World& world, const Json& snapshot) {
 }
 
 bool MapEditHistory::undo(World& world) {
+    settle(world);
     sync(world);
     const auto found = stacks_.find(key(world));
     if (found == stacks_.end() || found->second.undo.empty()) {
         return false;
     }
     auto& stacks = found->second;
+    stacks.world = &world;
     auto current = world.authored().toJson();
     restore(world, stacks.undo.back());
     stacks.head = world.authored().toJson();
+    stacks.headStale = false;
     stacks.undo.pop_back();
     stacks.redo.push_back(std::move(current));
     return true;
 }
 
 bool MapEditHistory::redo(World& world) {
+    settle(world);
     sync(world);
     const auto found = stacks_.find(key(world));
     if (found == stacks_.end() || found->second.redo.empty()) {
         return false;
     }
     auto& stacks = found->second;
+    stacks.world = &world;
     auto current = world.authored().toJson();
     restore(world, stacks.redo.back());
     stacks.head = world.authored().toJson();
+    stacks.headStale = false;
     stacks.redo.pop_back();
     stacks.undo.push_back(std::move(current));
     return true;
@@ -221,6 +262,18 @@ std::string editProblem(const Grid& grid, const GridLink& link) {
     return {};
 }
 
+std::string editProblem(const std::vector<Zone>& zones, const Zone& zone, std::size_t index) {
+    if (zone.id.empty()) {
+        return "Zone ids must be unique and not empty";
+    }
+    for (std::size_t i = 0; i < zones.size(); ++i) {
+        if (i != index && zones[i].id == zone.id) {
+            return "Zone ids must be unique and not empty";
+        }
+    }
+    return {};
+}
+
 void addFlickerKey(LightSettings& light) {
     const auto time = light.flickerCurve.empty() ? 0.0f : light.flickerCurve.back().x + 0.5f;
     light.flickerCurve.emplace_back(time, 1.0f);
@@ -301,4 +354,37 @@ int importMarkers(MapData& map, const Model& model, std::vector<std::string>& pr
     }
     return imported;
 }
+
+namespace editorui {
+namespace {
+const Json* typed(const Json& object, const char* key, bool (Json::*check)() const) {
+    if (!object.is_object()) {
+        return nullptr;
+    }
+    const auto found = object.find(key);
+    return found != object.end() && (*found.*check)() ? &*found : nullptr;
+}
+} // namespace
+
+std::string jsonString(const Json& object, const char* key, std::string fallback) {
+    const auto* value = typed(object, key, &Json::is_string);
+    return value ? value->get<std::string>() : fallback;
+}
+double jsonNumber(const Json& object, const char* key, double fallback) {
+    const auto* value = typed(object, key, &Json::is_number);
+    return value ? value->get<double>() : fallback;
+}
+bool jsonBool(const Json& object, const char* key, bool fallback) {
+    const auto* value = typed(object, key, &Json::is_boolean);
+    return value ? value->get<bool>() : fallback;
+}
+Json jsonObject(const Json& object, const char* key) {
+    const auto* value = typed(object, key, &Json::is_object);
+    return value ? *value : Json::object();
+}
+Json jsonArray(const Json& object, const char* key) {
+    const auto* value = typed(object, key, &Json::is_array);
+    return value ? *value : Json::array();
+}
+} // namespace editorui
 } // namespace fe

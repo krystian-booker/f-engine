@@ -1,6 +1,7 @@
 #include "engine/nav/Grid.h"
 #include <algorithm>
 #include <cmath>
+#include <numeric>
 #include <sstream>
 #include <stdexcept>
 
@@ -95,6 +96,7 @@ int Grid::addLayer(const std::string& name) {
         }
     }
     layers_.push_back(std::move(layer));
+    ++revision_;
     return static_cast<int>(layers_.size()) - 1;
 }
 
@@ -106,7 +108,87 @@ GridCell& Grid::at(int x, int z, int layer) {
     if (!contains(x, z, layer)) {
         throw std::out_of_range("Grid cell outside the map");
     }
+    ++revision_; // the caller may write through the reference
     return layers_[static_cast<std::size_t>(layer)].cells[index(x, z)];
+}
+
+void Grid::setCell(GridPos p, const GridCell& cell) {
+    if (!contains(p)) {
+        throw std::out_of_range("Grid cell outside the map");
+    }
+    auto& current = layers_[static_cast<std::size_t>(p.layer)].cells[index(p.x, p.z)];
+    if (current == cell) {
+        return;
+    }
+    current = cell;
+    ++revision_;
+}
+
+int Grid::component(GridPos p) const {
+    if (!contains(p) || !at(p).walkable) {
+        return -1;
+    }
+    if (!componentsBuilt_ || componentsRevision_ != revision_) {
+        buildComponents();
+    }
+    const auto perLayer = static_cast<std::size_t>(width_) * static_cast<std::size_t>(depth_);
+    return components_[static_cast<std::size_t>(p.layer) * perLayer + index(p.x, p.z)];
+}
+
+// Union-find over every cell of every layer: 4-neighbours on a layer, then
+// the two ends of every link. Labels are the root slots, so they are stable
+// for one build and comparable only with each other.
+void Grid::buildComponents() const {
+    const auto perLayer = static_cast<std::size_t>(width_) * static_cast<std::size_t>(depth_);
+    const auto total = perLayer * layers_.size();
+    std::vector<std::int32_t> parent(total);
+    std::iota(parent.begin(), parent.end(), 0);
+    const auto find = [&](std::int32_t i) {
+        while (parent[static_cast<std::size_t>(i)] != i) {
+            auto& up = parent[static_cast<std::size_t>(i)];
+            up = parent[static_cast<std::size_t>(up)];
+            i = up;
+        }
+        return i;
+    };
+    const auto slot = [&](GridPos p) {
+        return static_cast<std::int32_t>(static_cast<std::size_t>(p.layer) * perLayer + index(p.x, p.z));
+    };
+    const auto walkable = [&](GridPos p) {
+        return contains(p) && layers_[static_cast<std::size_t>(p.layer)].cells[index(p.x, p.z)].walkable;
+    };
+    const auto join = [&](GridPos a, GridPos b) {
+        if (!walkable(a) || !walkable(b)) {
+            return;
+        }
+        const auto ra = find(slot(a)), rb = find(slot(b));
+        if (ra != rb) {
+            parent[static_cast<std::size_t>(std::max(ra, rb))] = std::min(ra, rb);
+        }
+    };
+    for (int l = 0; l < layerCount(); ++l) {
+        for (int z = 0; z < depth_; ++z) {
+            for (int x = 0; x < width_; ++x) {
+                join({x, z, l}, {x + 1, z, l});
+                join({x, z, l}, {x, z + 1, l});
+            }
+        }
+    }
+    for (const auto& link : links_) {
+        if (link.kind == LinkKind::Ladder) {
+            join(link.foot(), link.top());
+        } else {
+            join({link.x, link.z, link.from}, {link.x, link.z, link.to});
+        }
+    }
+    components_.assign(total, -1);
+    for (std::size_t i = 0; i < total; ++i) {
+        if (layers_[i / perLayer].cells[i % perLayer].walkable) {
+            components_[i] = find(static_cast<std::int32_t>(i));
+        }
+    }
+    componentsBuilt_ = true;
+    componentsRevision_ = revision_;
 }
 
 const GridCell& Grid::at(int x, int z, int layer) const {
@@ -149,9 +231,27 @@ float Grid::edgeHeight(GridPos cell, int dx, int dz) const {
     return heightIn(cell, centre + glm::vec2(static_cast<float>(dx), static_cast<float>(dz)) * 0.5f);
 }
 
-bool Grid::canStand(glm::vec2 p, float radius, int layer) const {
+bool Grid::canStand(glm::vec2 p, float radius, int layer, int footprint, bool fly, std::uint32_t blockedTags,
+                    std::uint32_t requiredTags) const {
     if (!std::isfinite(p.x) || !std::isfinite(p.y) || radius < 0 || radius > 0.49f) {
         return false;
+    }
+    const auto open = [&](int x, int z) {
+        if (!contains(x, z, layer)) {
+            return false;
+        }
+        const auto& cell = at(x, z, layer);
+        return (fly || cell.walkable) && !(cell.tags & blockedTags) &&
+               (!requiredTags || (cell.tags & requiredTags));
+    };
+    const int anchorX = floorCell(p.x);
+    const int anchorZ = floorCell(p.y);
+    for (int dz = 0; dz < footprint; ++dz) {
+        for (int dx = 0; dx < footprint; ++dx) {
+            if (!open(anchorX + dx, anchorZ + dz)) {
+                return false;
+            }
+        }
     }
     const int x0 = floorCell(p.x - radius);
     const int x1 = floorCell(p.x + radius);
@@ -159,7 +259,7 @@ bool Grid::canStand(glm::vec2 p, float radius, int layer) const {
     const int z1 = floorCell(p.y + radius);
     for (int z = z0; z <= z1; ++z) {
         for (int x = x0; x <= x1; ++x) {
-            if (contains(x, z, layer) && at(x, z, layer).walkable) {
+            if (open(x, z)) {
                 continue;
             }
             const auto nearest = glm::clamp(p, glm::vec2(x, z), glm::vec2(x + 1, z + 1));
@@ -181,6 +281,7 @@ bool Grid::walkableAt(glm::vec2 p, int layer) const {
 void Grid::setLinks(std::vector<GridLink> links) {
     links_ = std::move(links);
     indexLinks();
+    ++revision_;
 }
 
 void Grid::indexLinks() {
@@ -381,7 +482,12 @@ Grid Grid::fromJson(const Json& data) {
                 }
             });
         };
-        charRows("walk", [](GridCell& cell, char c) { cell.walkable = c != '0' && c != '#'; });
+        charRows("walk", [](GridCell& cell, char c) {
+            if (c != '0' && c != '1' && c != '#') {
+                throw std::runtime_error(std::string("Grid walk rows use 1, 0 or #, got '") + c + "'");
+            }
+            cell.walkable = c == '1';
+        });
         charRows("ramp", [](GridCell& cell, char c) {
             const auto ramp = rampFromCode(c);
             if (!ramp) {
@@ -397,8 +503,14 @@ Grid Grid::fromJson(const Json& data) {
                                              std::to_string(width) + " values");
                 }
                 for (int x = 0; x < width; ++x) {
-                    cells[grid.index(x, z)].tags = static_cast<std::uint32_t>(
-                        std::stoul(words[static_cast<std::size_t>(x)], nullptr, 16));
+                    const auto mask = std::stoul(words[static_cast<std::size_t>(x)], nullptr, 16);
+                    if (mask > 0xffffffffUL ||
+                        (grid.tagNames_.size() < 32 && (mask >> grid.tagNames_.size()) != 0)) {
+                        throw std::runtime_error("Grid tag row " + std::to_string(z) + " uses tag bits the " +
+                                                 std::to_string(grid.tagNames_.size()) +
+                                                 "-entry tag list does not have");
+                    }
+                    cells[grid.index(x, z)].tags = static_cast<std::uint32_t>(mask);
                 }
             });
         }

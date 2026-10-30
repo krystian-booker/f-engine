@@ -2,11 +2,46 @@
 #include "engine/core/Log.h"
 #include "engine/core/Paths.h"
 #include "engine/runtime/Engine.h"
+#include "engine/script/Binder.h"
+#include "engine/world/World.h"
 #include <cstring>
 #include <iostream>
 #include <random>
+#ifdef _WIN32
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
 
 namespace fe {
+std::filesystem::path executablePath(const std::filesystem::path& fallback) {
+#ifdef _WIN32
+    std::wstring buffer(32768, L'\0');
+    const auto length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (length > 0 && length < buffer.size()) {
+        buffer.resize(length);
+        return std::filesystem::path(buffer);
+    }
+#elif defined(__APPLE__)
+    std::uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::string buffer(size, '\0');
+    if (size > 0 && _NSGetExecutablePath(buffer.data(), &size) == 0) {
+        buffer.resize(std::strlen(buffer.c_str()));
+        std::error_code ec;
+        const auto canonical = std::filesystem::canonical(buffer, ec);
+        return ec ? std::filesystem::path(buffer) : canonical;
+    }
+#else
+    std::error_code ec;
+    const auto link = std::filesystem::read_symlink("/proc/self/exe", ec);
+    if (!ec && !link.empty()) {
+        return link;
+    }
+#endif
+    return std::filesystem::absolute(fallback);
+}
+
 std::filesystem::path findLibraryRoot(const std::filesystem::path& executable) {
     const auto folder = std::filesystem::weakly_canonical(executable).parent_path();
     const auto isLibrary = [](const std::filesystem::path& candidate) {
@@ -211,7 +246,7 @@ int checkGame(const std::filesystem::path& game, const std::filesystem::path& lu
     if (!engine->start()) {
         ++problems;
     } else {
-        sol::table main = engine->mainModule();
+        sol::table main = engine->lua().require(engine->config().entry);
         if (main["validate"].valid()) {
             auto result = engine->lua().invoke(main["validate"]);
             if (!result.valid()) {
@@ -264,7 +299,7 @@ int runHeadlessCommand(int argc, char** argv) {
     if (!target.empty()) {
         target = openGame(target).string();
     }
-    const auto lualib = findLibraryRoot(argv[0]);
+    const auto lualib = findLibraryRoot(executablePath(argv[0]));
     if (command == "--test") {
         return runTests(target, lualib, filter);
     }

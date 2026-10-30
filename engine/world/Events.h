@@ -1,7 +1,9 @@
 #pragma once
+#include "engine/nav/Grid.h"
 #include <deque>
 #include <entt/entt.hpp>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace fe {
@@ -18,11 +20,18 @@ struct WorldEvent {
         AnimationEvent,
         AnimationFinished,
         ZoneEnter,
-        ZoneExit
+        ZoneExit,
+        CellEnter // a mover's cell (x, z, layer) changed; `cell` is the new one
     };
-    Kind kind;
+    WorldEvent() = default;
+    WorldEvent(Kind kind, entt::entity a = entt::null, entt::entity b = entt::null, std::string name = {},
+               GridPos cell = {})
+        : kind(kind), a(a), b(b), name(std::move(name)), cell(cell) {
+    }
+    Kind kind{};
     entt::entity a = entt::null, b = entt::null;
     std::string name; // animation event name, clip, or zone id
+    GridPos cell;     // CellEnter: the cell entered
 };
 
 // World events waiting for scripts. The queue is bounded: when nobody drains

@@ -13,6 +13,7 @@
 local game = require("fe.game")
 local signal = require("fe.signal")
 local state = require("fe.state")
+local tablex = require("fe.tablex")
 
 local save = {
   version = 1,
@@ -23,7 +24,15 @@ local save = {
   autosave_slot = "auto",
 }
 
+--- The file's value of `autosave_slot`, for `__reload`.
+save.file_defaults = { autosave_slot = save.autosave_slot }
+
 local providers = {}
+
+--- Adopt an edited `autosave_slot` on hot reload unless the game changed it.
+function save.__reload(live, fresh)
+  live.file_defaults = tablex.adopt(live, { autosave_slot = fresh.autosave_slot }, live.file_defaults)
+end
 
 --- Add a metadata provider: fn(meta) fills fields shown on save screens.
 --- With a `key`, a provider added earlier with the same key is replaced.

@@ -355,13 +355,32 @@ std::vector<std::vector<Glyph>> paginateText(const std::vector<Glyph>& glyphs, c
                                              int linesPerPage) {
     linesPerPage = std::max(1, linesPerPage);
     const auto layout = layoutText(glyphs, style);
+    // A ruby base that did not fit a line of its own was broken by the
+    // layout; when that break is a page break, the whole base goes to the
+    // later page, so each page's markup holds the base in one {ruby:} tag.
+    std::vector<int> pageOfUnit(glyphs.size(), 0);
+    for (std::size_t i = 0; i < glyphs.size(); ++i) {
+        pageOfUnit[i] = layout.lineOfUnit[i] / linesPerPage;
+    }
+    for (std::size_t i = 0; i < glyphs.size(); ++i) {
+        if (glyphs[i].rubySpan == 0) {
+            continue;
+        }
+        const auto end = std::min(glyphs.size(), i + glyphs[i].rubySpan);
+        int last = pageOfUnit[i];
+        for (auto j = i; j < end; ++j) {
+            last = std::max(last, pageOfUnit[j]);
+        }
+        std::fill(pageOfUnit.begin() + static_cast<std::ptrdiff_t>(i),
+                  pageOfUnit.begin() + static_cast<std::ptrdiff_t>(end), last);
+    }
     std::vector<std::vector<Glyph>> pages(1);
     int pageOf = 0;
     int previousLine = 0;
     bool lineStart = true;
     for (std::size_t i = 0; i < glyphs.size(); ++i) {
         const int line = layout.lineOfUnit[i];
-        const int page = line / linesPerPage;
+        const int page = pageOfUnit[i];
         if (line != previousLine) {
             lineStart = true;
         }
@@ -378,7 +397,10 @@ std::vector<std::vector<Glyph>> paginateText(const std::vector<Glyph>& glyphs, c
         if (current.empty() && g.newline()) {
             continue;
         }
-        if (line != previousLine && !g.newline() && !current.empty() && !current.back().newline()) {
+        // A wrapped line starts a newline in the page's markup, except inside
+        // a ruby base (its tag stays whole; the next layout wraps it again).
+        if (line != previousLine && !g.newline() && !g.rubyContinues && !current.empty() &&
+            !current.back().newline()) {
             Glyph wrap;
             wrap.codepoint = U'\n';
             wrap.color = g.color;
@@ -391,8 +413,7 @@ std::vector<std::vector<Glyph>> paginateText(const std::vector<Glyph>& glyphs, c
         if (!g.space() && !g.timing()) {
             lineStart = false;
         }
-        if (g.newline() && layout.lineOfUnit.size() > i + 1 &&
-            layout.lineOfUnit[i + 1] / linesPerPage != page) {
+        if (g.newline() && pageOfUnit.size() > i + 1 && pageOfUnit[i + 1] != page) {
             continue; // the page break replaces this newline
         }
         current.push_back(g);

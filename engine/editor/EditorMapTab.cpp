@@ -1,6 +1,8 @@
 #include "engine/editor/Editor.h"
 #include "engine/editor/EditorWidgets.h"
 #include "engine/runtime/Engine.h"
+#include "engine/script/LuaHost.h"
+#include "engine/world/World.h"
 #include <glm/gtc/type_ptr.hpp>
 #include <imgui.h>
 #include <imgui_stdlib.h>
@@ -59,6 +61,7 @@ void Editor::updateOverlays(World& w) {
 }
 
 void Editor::drawPaint(World& w) {
+    ImGui::PushID("paint");
     const auto& grid = w.authored().grid;
     ImGui::Checkbox("Show grid overlay", &showGrid_);
     ImGui::SliderInt("Layer", &layer_, 0, grid.layerCount() - 1);
@@ -98,6 +101,7 @@ void Editor::drawPaint(World& w) {
     }
     ImGui::InputText("Tag", &brush_.tag);
     ImGui::Checkbox("Paint with left mouse", &painting_);
+    ImGui::PopID();
     updateOverlays(w);
     const auto cell = hoveredCell(w);
     if (!cell) {
@@ -235,10 +239,15 @@ void Editor::drawPoints(World& w) {
     const auto playFrom = devtool("play_from");
     ImGui::BeginDisabled(playFrom == sol::lua_nil);
     if (ImGui::Button("Play from here")) {
-        if (succeeded(engine_.lua().invoke(playFrom, w.authored().id, name))) {
+        // The call-out may unload or replace `w`; drawMapTab holds it alive
+        // for the rest of this frame and nothing below reads the map.
+        const auto map = w.authored().id;
+        if (succeeded(engine_.lua().invoke(playFrom, map, name))) {
             paused_ = false;
             status_ = "Playing from " + name;
         }
+        ImGui::EndDisabled();
+        return;
     }
     ImGui::EndDisabled();
     if (playFrom == sol::lua_nil && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -274,15 +283,15 @@ void Editor::importMarkers(World& w) {
 }
 
 void Editor::drawMapTab() {
-    auto* w = world();
+    const auto w = world(); // held for the frame (see Editor::world)
     if (!w) {
         ImGui::TextDisabled("No world loaded");
         return;
     }
-    if (w != historyWorld_) {
+    if (w.get() != historyWorld_) {
         // A reloaded world: its history stays only if the map is the one it left.
         history_.sync(*w);
-        historyWorld_ = w;
+        historyWorld_ = w.get();
     }
     const auto& map = w->authored();
     layer_ = std::clamp(layer_, 0, map.grid.layerCount() - 1);
@@ -315,31 +324,47 @@ void Editor::drawMapTab() {
         gridOverlayKey_.clear();
     }
     if (ImGui::CollapsingHeader("Layer links")) {
+        ImGui::PushID("links");
         drawLinks(*w);
+        ImGui::PopID();
     }
     if (ImGui::CollapsingHeader("Placements")) {
+        ImGui::PushID("placements");
         drawPlacements(*w);
+        ImGui::PopID();
     }
     if (ImGui::CollapsingHeader("Zones")) {
+        ImGui::PushID("zones");
         drawZones(*w);
+        ImGui::PopID();
     } else {
         w->overlays().erase("editor:zone");
         zoneOverlayKey_.clear();
     }
     if (ImGui::CollapsingHeader("Points")) {
+        ImGui::PushID("points");
         drawPoints(*w);
+        ImGui::PopID();
     }
     if (ImGui::CollapsingHeader("Lights")) {
+        ImGui::PushID("lights");
         drawLights(*w);
+        ImGui::PopID();
     }
     if (ImGui::CollapsingHeader("Emitters")) {
+        ImGui::PushID("emitters");
         drawEmitters(*w);
+        ImGui::PopID();
     }
     if (ImGui::CollapsingHeader("Colliders")) {
+        ImGui::PushID("colliders");
         drawColliders(*w);
+        ImGui::PopID();
     }
     if (ImGui::CollapsingHeader("Environment")) {
+        ImGui::PushID("environment");
         drawEnvironment(*w);
+        ImGui::PopID();
     }
     if (ImGui::CollapsingHeader("Map props")) {
         auto props = map.props;

@@ -25,6 +25,8 @@ void usage() {
                  "  --record <file>      write this session's input as a replay\n"
                  "  --realtime           pace a replay in real time (listening checks)\n"
                  "  --write-references   make a replay's captures its reference images for this backend\n"
+                 "  --max-fps <n>        frame cap while vsync is off (0 = uncapped; default: game.json)\n"
+                 "  --hdr                present to an HDR back buffer when the renderer has one\n"
                  "  --seed <n>           fixed random seed\n"
                  "  --frames <n>         stop after n frames\n"
                  "  --capture <png>      screenshot at frame 30\n"
@@ -117,6 +119,10 @@ int main(int argc, char* argv[]) {
                 options.replay = value();
             } else if (arg == "--record") {
                 options.record = value();
+            } else if (arg == "--max-fps") {
+                options.maxFps = std::stoi(value());
+            } else if (arg == "--hdr") {
+                options.hdr = true;
             } else if (arg == "--seed") {
                 options.seed = std::stoull(value());
             } else if (arg == "--frames") {
@@ -148,14 +154,27 @@ int main(int argc, char* argv[]) {
         auto config = fe::GameConfig::load(options.game);
         options.pauseOnFocusLoss = config.pauseOnFocusLoss;
         if (options.userData.empty()) {
-            char* path = SDL_GetPrefPath("fengine", config.title.c_str());
+            // Keyed by the game's id, never its title: a renamed or translated
+            // title keeps the player's saves and settings.
+            char* path = SDL_GetPrefPath("fengine", config.id.c_str());
             if (!path) {
                 throw std::runtime_error(std::string("No user data folder: ") + SDL_GetError());
             }
             options.userData = path;
             SDL_free(path);
         }
-        return fe::MainLoop(std::move(options), std::move(config)).run();
+        // <user data>/log.txt (the previous run's as log.txt.1) and crash.txt.
+        try {
+            fe::openLogFile(options.userData);
+            fe::installCrashHandler(options.userData);
+        } catch (const std::exception& error) {
+            fe::log(fe::LogLevel::Warning, std::string("Logging to stderr only: ") + error.what());
+        }
+        fe::log(fe::LogLevel::Info, "fengine " + config.id + " (" + config.title + "); user data in " +
+                                        options.userData.string());
+        const int code = fe::MainLoop(std::move(options), std::move(config)).run();
+        fe::closeLogFile();
+        return code;
     } catch (const std::exception& error) {
         fe::log(fe::LogLevel::Error, error.what());
         return 1;

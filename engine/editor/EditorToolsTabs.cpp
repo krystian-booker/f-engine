@@ -1,5 +1,7 @@
 #include "engine/editor/Editor.h"
 #include "engine/runtime/Engine.h"
+#include "engine/script/LuaHost.h"
+#include "engine/world/World.h"
 #include <imgui.h>
 #include <imgui_stdlib.h>
 

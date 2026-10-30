@@ -1,6 +1,8 @@
 #include "engine/core/Paths.h"
+#include "engine/nav/Query.h"
 #include "engine/script/bindings/Convert.h"
 #include "engine/script/bindings/WorldTypes.h"
+#include <type_traits>
 
 namespace fe {
 namespace {
@@ -50,6 +52,33 @@ std::string shaderName(std::string name, const char* what) {
     return name;
 }
 
+// The entity's component as a copy, or a default one. Every setter below
+// validates into such a copy and stores it only when every field passed, so a
+// rejected table changes nothing (not even the fields before the bad one).
+template<class T> T copyOf(const EntityRef& e) {
+    const auto* current = e.find<T>();
+    return current ? *current : T{};
+}
+template<class T> void store(const EntityRef& e, const T& component) {
+    e.owner().registry().emplace_or_replace<T>(e.id, component);
+}
+
+// Settings read as JSON (lights, emitters) come back the same way; their
+// vectors return as {x, y, z} tables like every other vector.
+sol::table settingsTable(sol::state_view lua, const Json& json, std::initializer_list<const char*> vectors) {
+    sol::table t = jsonToLua(lua, json);
+    for (const char* key : vectors) {
+        const auto found = json.find(key);
+        if (found != json.end() && found->is_array() && found->size() == 3) {
+            t[key] = lua::table(lua, glm::vec3((*found)[0].get<float>(), (*found)[1].get<float>(),
+                                               (*found)[2].get<float>()));
+        }
+    }
+    return t;
+}
+
+// ---- sprite
+
 void applySprite(Sprite& s, const sol::table& t) {
     const auto previousClip = s.clip;
     s.animation = lua::get(t, "animation", s.animation);
@@ -71,6 +100,8 @@ void applySprite(Sprite& s, const sol::table& t) {
     s.tint = lua::color(lua::field(t, "tint"), s.tint);
     s.flash = lua::color(lua::field(t, "flash"), s.flash);
     s.outline = lua::color(lua::field(t, "outline"), s.outline);
+    s.outlineWidth =
+        lua::within(lua::get(t, "outline_width", s.outlineWidth), 0.5f, 4.0f, "sprite outline_width");
     if (const sol::object silhouette = lua::field(t, "silhouette");
         silhouette.get_type() == sol::type::boolean) {
         s.silhouette = silhouette.as<bool>() ? glm::vec4(1, 1, 1, 0.6f) : glm::vec4(0);
@@ -88,6 +119,12 @@ void applySprite(Sprite& s, const sol::table& t) {
         s.time = s.previousTime = 0;
         s.finished = false;
     }
+}
+
+void setSprite(const EntityRef& e, const sol::table& t) {
+    auto sprite = copyOf<Sprite>(e);
+    applySprite(sprite, t);
+    store(e, sprite);
 }
 
 sol::table spriteTable(sol::state_view lua, const Sprite& s) {
@@ -110,6 +147,7 @@ sol::table spriteTable(sol::state_view lua, const Sprite& s) {
     t["tint"] = lua::colorTable(lua, s.tint);
     t["flash"] = lua::colorTable(lua, s.flash);
     t["outline"] = lua::colorTable(lua, s.outline);
+    t["outline_width"] = s.outlineWidth;
     t["silhouette"] = lua::colorTable(lua, s.silhouette);
     if (s.pixelSnap) {
         t["pixel_snap"] = *s.pixelSnap;
@@ -124,7 +162,10 @@ sol::table spriteTable(sol::state_view lua, const Sprite& s) {
     return t;
 }
 
-void applyMesh(MeshInstance& m, const sol::table& t) {
+// ---- mesh
+
+void setMesh(const EntityRef& e, const sol::table& t) {
+    auto m = copyOf<MeshInstance>(e);
     m.model = lua::get(t, "model", m.model);
     m.animation = lua::get(t, "animation", m.animation);
     m.speed = lua::within(lua::get(t, "speed", m.speed), -1000.0f, 1000.0f, "mesh speed");
@@ -137,9 +178,26 @@ void applyMesh(MeshInstance& m, const sol::table& t) {
         m.blend = blendMode(blend, BlendMode::Opaque);
     }
     m.shader = shaderName(lua::get(t, "shader", m.shader), "mesh shader");
+    store(e, m);
 }
 
-void applyMover(Mover& m, const sol::table& t) {
+sol::table meshTable(sol::state_view lua, const MeshInstance& m) {
+    auto t = lua.create_table_with("model", m.model, "animation", m.animation, "time", m.time, "speed",
+                                   m.speed, "loop", m.loop, "playing", m.playing, "visible", m.visible,
+                                   "cast_shadow", m.castShadow, "tint", lua::colorTable(lua, m.tint));
+    if (m.blend) {
+        t["blend"] = blendModeName(*m.blend);
+    }
+    if (!m.shader.empty()) {
+        t["shader"] = m.shader;
+    }
+    return t;
+}
+
+// ---- mover
+
+void setMover(const EntityRef& e, const sol::table& t) {
+    auto m = copyOf<Mover>(e);
     m.speed = lua::within(lua::get(t, "speed", m.speed), 0.0f, MaxSpeed, "mover speed");
     m.maxStep = lua::within(lua::get(t, "max_step", m.maxStep), 0.0f, 1000.0f, "mover max_step");
     m.radius = lua::within(lua::get(t, "radius", m.radius), 0.0f, 0.49f, "mover radius");
@@ -148,11 +206,20 @@ void applyMover(Mover& m, const sol::table& t) {
     if (m.climbSpeed <= 0 || m.climbSpeed > MaxSpeed) {
         throw std::runtime_error("climb_speed must be a positive number up to 1000");
     }
+    m.footprint = lua::within(lua::get(t, "footprint", m.footprint), 1, MaxFootprint, "mover footprint");
+    m.fly = lua::get(t, "fly", m.fly);
+    const Grid& grid = e.owner().grid();
+    if (const auto tags = lua::field(t, "blocked_tags"); !lua::absent(tags)) {
+        m.blockedTags = gridTagBits(grid, tags, "mover blocked_tags");
+    }
+    if (const auto tags = lua::field(t, "required_tags"); !lua::absent(tags)) {
+        m.requiredTags = gridTagBits(grid, tags, "mover required_tags");
+    }
     const sol::object jumpValue = lua::field(t, "jump");
     if (jumpValue.get_type() == sol::type::table) {
         const sol::table jump = jumpValue;
         JumpRules rules;
-        rules.distance = static_cast<int>(lua::integer(lua::field(jump, "distance"), "jump.distance"));
+        rules.distance = lua::as<int>(lua::field(jump, "distance"), "jump.distance");
         rules.maxUp = lua::get(jump, "max_up", m.maxStep);
         rules.maxDown = lua::get(jump, "max_down", m.maxStep);
         rules.diagonal = lua::get(jump, "diagonal", false);
@@ -169,13 +236,187 @@ void applyMover(Mover& m, const sol::table& t) {
     } else if (!lua::absent(jumpValue)) {
         throw std::runtime_error("mover jump must be a table or false, got " + lua::describe(jumpValue));
     }
+    store(e, m);
 }
 
-void applyPlatform(Platform& p, const sol::table& t) {
+sol::object moverTable(sol::state_view lua, const EntityRef& e, const Mover& m) {
+    const Grid& grid = e.owner().grid();
+    auto t = lua.create_table_with("speed", m.speed, "max_step", m.maxStep, "radius", m.radius, "collide",
+                                   m.collide, "climb_speed", m.climbSpeed, "footprint", m.footprint, "fly",
+                                   m.fly, "blocked_tags", sol::as_table(grid.tagsOf(m.blockedTags)),
+                                   "required_tags", sol::as_table(grid.tagsOf(m.requiredTags)));
+    if (m.jump.distance > 0) {
+        t["jump"] = lua.create_table_with("distance", m.jump.distance, "max_up", m.jump.maxUp, "max_down",
+                                          m.jump.maxDown, "diagonal", m.jump.diagonal);
+    } else {
+        t["jump"] = false;
+    }
+    return t;
+}
+
+// ---- platform
+
+void setPlatform(const EntityRef& e, const sol::table& t) {
+    auto p = copyOf<Platform>(e);
     p.size = lua::vecXZ(lua::field(t, "size"), p.size);
     if (!(p.size.x > 0 && p.size.y > 0 && p.size.x <= 64 && p.size.y <= 64)) {
         throw std::runtime_error("platform size must be above 0 and at most 64 on each axis");
     }
+    store(e, p);
+}
+
+sol::table platformTable(sol::state_view lua, const Platform& p) {
+    return lua.create_table_with("size", lua::tableXZ(lua, p.size));
+}
+
+// ---- shader params (a list of up to 16 numbers; missing entries are 0)
+
+void setMaterialParams(const EntityRef& e, const sol::table& t) {
+    const auto count = lua_rawlen(t.lua_state(), t.push());
+    lua_pop(t.lua_state(), 1);
+    if (count > 16) {
+        throw std::runtime_error("shader_params takes at most 16 numbers");
+    }
+    MaterialParams params;
+    for (std::size_t i = 0; i < 16; ++i) {
+        const auto value = lua::field(t, static_cast<lua_Integer>(i + 1));
+        params.values[i / 4][static_cast<glm::length_t>(i % 4)] =
+            lua::absent(value) ? 0.0f : lua::as<float>(value, "shader_params value");
+    }
+    store(e, params);
+}
+
+sol::table materialParamsTable(sol::state_view lua, const MaterialParams& params) {
+    sol::table t = lua.create_table(16, 0);
+    for (std::size_t i = 0; i < 16; ++i) {
+        t[i + 1] = params.values[i / 4][static_cast<glm::length_t>(i % 4)];
+    }
+    return t;
+}
+
+// ---- collider
+
+void setCollider(const EntityRef& e, const sol::table& t) {
+    auto c = copyOf<Collider>(e);
+    c.radius = lua::within(lua::get(t, "radius", c.radius), 0.0f, 64.0f, "collider radius");
+    c.height = lua::within(lua::get(t, "height", c.height), 0.0f, 1000.0f, "collider height");
+    c.solid = lua::get(t, "solid", c.solid);
+    // Through the registry, so the collision system sees the new radius at once.
+    store(e, c);
+}
+
+sol::table colliderTable(sol::state_view lua, const Collider& c) {
+    return lua.create_table_with("radius", c.radius, "height", c.height, "solid", c.solid);
+}
+
+// ---- light
+
+void setLight(const EntityRef& e, const sol::table& t) {
+    auto settings = LightSettings::fromJson(lua::lightJson(t));
+    LightSource source{settings, true};
+    if (const auto* existing = e.find<LightSource>()) {
+        source.enabled = existing->enabled;
+        if (lua::absent(lua::field(t, "position"))) {
+            source.light.position = existing->light.position;
+        }
+    }
+    source.enabled = lua::get(t, "enabled", source.enabled);
+    store(e, source);
+}
+
+sol::table lightTable(sol::state_view lua, const LightSource& source) {
+    auto t = settingsTable(lua, source.light.toJson(), {"position", "direction"});
+    t["enabled"] = source.enabled;
+    return t;
+}
+
+// ---- emitter
+
+// Emitter settings; `paused` alone pauses or resumes without changing them.
+void setEmitter(const EntityRef& e, const sol::table& t) {
+    const auto paused = lua::opt<bool>(lua::field(t, "paused"), "Field 'paused'");
+    bool onlyPaused = true;
+    t.for_each([&onlyPaused](const sol::object& key, const sol::object&) {
+        onlyPaused = onlyPaused && key.get_type() == sol::type::string && key.as<std::string>() == "paused";
+    });
+    const auto* existing = e.find<Emitter>();
+    Emitter emitter = existing && onlyPaused ? *existing : Emitter{EmitterSettings::fromJson(lua::emitterJson(t))};
+    if (paused) {
+        emitter.active = !*paused;
+    }
+    store(e, emitter);
+}
+
+sol::table emitterTable(sol::state_view lua, const Emitter& emitter) {
+    auto t = settingsTable(lua, emitter.settings.toJson(), {"velocity", "velocity_jitter", "gravity", "area"});
+    t["paused"] = !emitter.active;
+    return t;
+}
+
+// ---- audio
+
+void setAudio(const EntityRef& e, const sol::table& t) {
+    auto a = copyOf<AudioEmitter>(e);
+    const auto sound = lua::get(t, "sound", a.sound);
+    if (sound.empty()) {
+        throw std::runtime_error("A positional sound needs a `sound` file");
+    }
+    resolveInside(e.engine->lua().gameRoot(), sound);
+    a.radius = lua::get(t, "radius", a.radius);
+    if (!(a.radius > 0 && a.radius <= lua::VectorBound)) {
+        throw std::runtime_error("A positional sound's radius must be above 0 and at most 1000000");
+    }
+    a.volume = lua::atLeast(lua::get(t, "volume", a.volume), 0.0f, "volume");
+    // Everything validated: a changed file stops the voice playing the old one.
+    if (sound != a.sound && a.voice >= 0) {
+        e.engine->audio().stopSound(a.voice, 0.3);
+        a.voice = -1;
+    }
+    a.sound = sound;
+    store(e, a);
+}
+
+sol::table audioTable(sol::state_view lua, const AudioEmitter& a) {
+    return lua.create_table_with("sound", a.sound, "radius", a.radius, "volume", a.volume);
+}
+
+template<class T> void removeComponent(const EntityRef& e) {
+    e.owner().registry().remove<T>(e.id);
+}
+template<> void removeComponent<AudioEmitter>(const EntityRef& e) {
+    if (const auto* audio = e.find<AudioEmitter>(); audio && audio->voice >= 0) {
+        e.engine->audio().stopSound(audio->voice, 0.3);
+    }
+    e.owner().registry().remove<AudioEmitter>(e.id);
+}
+
+// The eight component methods (sprite, mesh, mover, light, emitter,
+// collider, audio, platform) share one rule: no argument reads the component
+// (its settings as a table, nil when the entity has none; nothing is added),
+// a settings table adds the component or changes it (and returns its new
+// state), and an explicit nil removes it. `set(e, table)` validates and
+// stores, `read(lua, component)` (or `read(lua, e, component)` when the table
+// needs the world, as the mover's tag names do) builds the table.
+template<class T, class Set, class Read> auto component(const char* name, Set set, Read read) {
+    return [name, set, read](sol::this_state s, const EntityRef& e, sol::object settings) -> sol::object {
+        const auto table = [&](const T& current) {
+            if constexpr (std::is_invocable_v<Read, sol::this_state, const EntityRef&, const T&>) {
+                return read(s, e, current);
+            } else {
+                return read(s, current);
+            }
+        };
+        if (lua_gettop(s) >= 2 && lua::absent(settings)) {
+            removeComponent<T>(e);
+            return sol::lua_nil;
+        }
+        if (lua::absent(settings)) {
+            const auto* current = e.find<T>();
+            return current ? sol::object(table(*current)) : sol::object(sol::lua_nil);
+        }
+        set(e, lua::tableArg(settings, (std::string(name) + " settings").c_str()));
+        return table(e.get<T>());
+    };
 }
 
 // A waypoint from a cell ({x, z, layer?}: its centre, on the grid) or a point
@@ -206,58 +447,6 @@ Waypoint waypointFrom(const Grid& grid, const sol::object& value, std::optional<
     return waypoint;
 }
 
-// Validates a changed copy, then stores it through the registry, so the
-// collision system sees the new radius at once.
-void setCollider(entt::registry& registry, entt::entity entity, const sol::table& t) {
-    const auto* current = registry.try_get<Collider>(entity);
-    auto c = current ? *current : Collider{};
-    c.radius = lua::within(lua::get(t, "radius", c.radius), 0.0f, 64.0f, "collider radius");
-    c.height = lua::within(lua::get(t, "height", c.height), 0.0f, 1000.0f, "collider height");
-    c.solid = lua::get(t, "solid", c.solid);
-    registry.emplace_or_replace<Collider>(entity, c);
-}
-
-void applyAudio(Engine& engine, AudioEmitter& a, const sol::table& t) {
-    const auto sound = lua::get(t, "sound", a.sound);
-    if (sound.empty()) {
-        throw std::runtime_error("A positional sound needs a `sound` file");
-    }
-    resolveInside(engine.lua().gameRoot(), sound);
-    if (sound != a.sound && a.voice >= 0) {
-        engine.audio().stopSound(a.voice, 0.3);
-        a.voice = -1;
-    }
-    a.sound = sound;
-    a.radius = lua::get(t, "radius", a.radius);
-    if (!(a.radius > 0 && a.radius <= lua::VectorBound)) {
-        throw std::runtime_error("A positional sound's radius must be above 0 and at most 1000000");
-    }
-    a.volume = lua::atLeast(lua::get(t, "volume", a.volume), 0.0f, "volume");
-}
-
-// Component methods (sprite, mesh, mover, light, emitter, collider, audio,
-// platform) share one rule: a settings table adds the component or changes
-// it, no argument adds it with its defaults, and an explicit nil removes it.
-bool removes(lua_State* state, const sol::object& settings) {
-    return lua_gettop(state) >= 2 && lua::absent(settings);
-}
-
-// Emitter settings; `paused` alone pauses or resumes without changing them.
-void applyEmitter(entt::registry& registry, entt::entity id, const sol::table& t) {
-    const auto paused = lua::opt<bool>(lua::field(t, "paused"), "Field 'paused'");
-    bool onlyPaused = true;
-    t.for_each([&onlyPaused](const sol::object& key, const sol::object&) {
-        onlyPaused = onlyPaused && key.get_type() == sol::type::string && key.as<std::string>() == "paused";
-    });
-    auto* emitter = registry.try_get<Emitter>(id);
-    if (!emitter || !onlyPaused) {
-        emitter = &registry.emplace_or_replace<Emitter>(
-            id, Emitter{EmitterSettings::fromJson(lua::emitterJson(t))});
-    }
-    if (paused) {
-        emitter->active = !*paused;
-    }
-}
 } // namespace
 
 // Shared with WorldBindings for `world:spawn{...}`.
@@ -288,29 +477,28 @@ void configureEntity(EntityRef& e, const sol::table& spec) {
         return lua::options(lua::field(spec, key), (std::string("Field '") + key + "'").c_str());
     };
     if (const auto sprite = component("sprite")) {
-        applySprite(registry.get_or_emplace<Sprite>(e.id), *sprite);
+        setSprite(e, *sprite);
     }
     if (const auto mesh = component("mesh")) {
-        applyMesh(registry.get_or_emplace<MeshInstance>(e.id), *mesh);
+        setMesh(e, *mesh);
     }
     if (const auto light = component("light")) {
-        registry.emplace_or_replace<LightSource>(
-            e.id, LightSource{LightSettings::fromJson(lua::lightJson(*light))});
+        setLight(e, *light);
     }
     if (const auto emitter = component("emitter")) {
-        applyEmitter(registry, e.id, *emitter);
+        setEmitter(e, *emitter);
     }
     if (const auto collider = component("collider")) {
-        setCollider(registry, e.id, *collider);
+        setCollider(e, *collider);
     }
     if (const auto mover = component("mover")) {
-        applyMover(registry.get_or_emplace<Mover>(e.id), *mover);
+        setMover(e, *mover);
     }
     if (const auto platform = component("platform")) {
-        applyPlatform(registry.get_or_emplace<Platform>(e.id), *platform);
+        setPlatform(e, *platform);
     }
     if (const auto audio = component("audio")) {
-        applyAudio(*e.engine, registry.get_or_emplace<AudioEmitter>(e.id), *audio);
+        setAudio(e, *audio);
     }
     if (const auto props = lua::field(spec, "props"); !lua::absent(props)) {
         registry.emplace_or_replace<Props>(e.id, Props{luaToJson(props)});
@@ -426,16 +614,24 @@ void bindEntity(Engine& engine) {
                 auto& world = e.owner();
                 const auto options = lua::options(settings, "move_to options");
                 std::optional<int> layer;
+                std::optional<StepRules> rules;
                 sol::object path = sol::make_object(target.lua_state(), sol::lua_nil);
                 if (options) {
                     if (const auto speed = lua::opt<float>(lua::field(*options, "speed"), "Field 'speed'")) {
-                        world.registry().get_or_emplace<Mover>(e.id).speed =
-                            lua::within(*speed, 0.0f, MaxSpeed, "speed");
+                        auto mover = copyOf<Mover>(e);
+                        mover.speed = lua::within(*speed, 0.0f, MaxSpeed, "speed");
+                        store(e, mover);
                     }
                     layer = lua::opt<int>(lua::field(*options, "layer"), "Field 'layer'");
                     path = lua::field(*options, "path");
+                    if (const auto value = lua::field(*options, "rules"); !lua::absent(value)) {
+                        rules = stepRules(e.engine->lua(), world, value);
+                    }
                 }
                 if (path.get_type() == sol::type::table) {
+                    if (rules) {
+                        throw std::runtime_error("move_to takes either a path to follow or rules to plan with");
+                    }
                     std::vector<Waypoint> route;
                     for (const auto& waypoint : lua::elements(path.as<sol::table>())) {
                         route.push_back(waypointFrom(world.grid(), waypoint, std::nullopt));
@@ -452,19 +648,22 @@ void bindEntity(Engine& engine) {
                     return;
                 }
                 world.moveTo(e.id, lua::position(target), lua::opt<bool>(path, "Field 'path'").value_or(true),
-                             layer);
+                             layer, rules ? &*rules : nullptr);
             },
             "fun(target: Vec3|nil, options?: {path?: boolean|(Cell|Vec3)[], speed?: number, layer?: "
-            "integer})",
+            "integer, rules?: table})",
             "Walk to a position (pathfinding by default; `speed` 0 to 1000 sets the mover's); options come "
             "second, so a planned route is "
             "`move_to(nil, {path = cells})`. The target layer defaults to the current one if "
             "walkable there, else the walkable layer whose surface is nearest the target's y. `path` may "
             "instead be a list of cells ({x, z, layer}: walked through their centres) or points ({x, y, z}) "
             "to follow as given, then `target` if any; cells marked `jump` or `climb` (from world:path or "
-            "world:reachable) are jumped to or climbed. Emits 'arrived' once at the end, or 'blocked' (at "
-            "once when no path exists or the search stops at its 200000-cell cap, without moving); jumps "
-            "emit 'jump_start'/'landed' and ladder climbs "
+            "world:reachable) are jumped to or climbed. `rules` are the planning rules of world:path "
+            "(diagonal, blocked_tags, required_tags, tag_costs, blocked, no_stop, zoc, jump, ladders, cost) "
+            "for the built-in planner; without them it plans 8-directional with the mover's limits and "
+            "its own blocked_tags/required_tags. Emits "
+            "'arrived' once at the end, or 'blocked' (at once when no path exists or the search stops at "
+            "its 200000-cell cap, without moving); jumps emit 'jump_start'/'landed' and ladder climbs "
             "'climb_start'/'climb_end'.")
         .method(
             "stop", [](const EntityRef& e) { e.owner().stop(e.id); }, "fun()", "Stop moving.")
@@ -496,6 +695,19 @@ void bindEntity(Engine& engine) {
             "Arc to a position; `height` is -1000 to 1000 (default 1) and `duration` 0 to 60 seconds "
             "(default 0.5). Emits 'jump_start' and 'landed'.")
         .method(
+            "launch",
+            [](const EntityRef& e, sol::object velocity) { e.owner().launch(e.id, lua::vec3(velocity)); },
+            "fun(velocity: Vec3)",
+            "Throw the body with a velocity in units/second (each component within the world bound): it "
+            "flies a ballistic arc under the world's `gravity` (set_movement_tuning), keeping its "
+            "horizontal speed until a solid entity, a collider box, a cliff face or the grid's edge stops "
+            "it (it then drops straight down), and lands on the first surface it falls onto that it may "
+            "stand on (any layer; its tags and fly apply), or with none on the lowest layer's surface. A "
+            "landing inside a box or a solid body moves to the nearest free spot within `landing_search`; "
+            "with none it lands there anyway and 'blocked' follows 'landed'. Emits 'jump_start' and "
+            "'landed'. A zero velocity above the ground is a fall; a launch during a jump or launch "
+            "replaces it from where the body is; during a ladder climb it is an error.")
+        .method(
             "moving", [](const EntityRef& e) { return e.owner().moving(e.id); }, "fun(): boolean",
             "Walking, jumping, climbing or being driven.")
         .method(
@@ -508,60 +720,40 @@ void bindEntity(Engine& engine) {
             "Whether the entity would fit there (grid, colliders and solid entities, current as of this "
             "call).")
         .method(
-            "mover",
-            [](sol::this_state s, const EntityRef& e, sol::object settings) {
-                if (removes(s, settings)) {
-                    e.owner().registry().remove<Mover>(e.id);
-                    return;
-                }
-                const auto t = lua::options(settings, "mover settings");
-                auto& m = e.owner().registry().get_or_emplace<Mover>(e.id);
-                if (t) {
-                    applyMover(m, *t);
-                }
-            },
+            "mover", component<Mover>("mover", setMover, moverTable),
             "fun(settings?: {speed?: number, max_step?: number, radius?: number, collide?: boolean, "
-            "climb_speed?: number, jump?: {distance: integer, max_up?: number, max_down?: number, diagonal?: "
-            "boolean}|false}|nil)",
-            "Add or configure movement; nil removes it. `speed` (units/second) is 0 to 1000, `max_step` 0 "
+            "climb_speed?: number, footprint?: integer, fly?: boolean, blocked_tags?: string[], "
+            "required_tags?: string[], jump?: {distance: integer, max_up?: number, max_down?: number, "
+            "diagonal?: boolean}|false}|nil): table?",
+            "Movement. A table adds or configures it (and returns the new state), no argument reads it "
+            "(nil without a mover), nil removes it. `speed` (units/second) is 0 to 1000, `max_step` 0 "
             "to 1000 and `radius` 0 to 0.49. `jump` lets planned paths jump gaps (see world:path); ladders "
-            "are climbed at `climb_speed` (default 1.5, at most 1000), also when steering into one.")
+            "are climbed at `climb_speed` (default 1.5, at most 1000), also when steering into one. "
+            "`footprint` (1 to 8, default 1) is the square of cells the mover occupies, anchored at its cell "
+            "towards +x and +z, and `fly` lets it stand on and path over unwalkable cells and height steps. "
+            "`blocked_tags` and `required_tags` (grid tag names from the map's tag list; an unknown name is "
+            "an error) are its passability class, flying or not: it never stands on or paths through a "
+            "cell carrying a blocked tag or, when `required_tags` is not empty, a cell with none of them "
+            "(a boat is `{fly = true, required_tags = {'water'}}`). They are read back as name lists and "
+            "plan `move_to(target)`; rules given to move_to replace them.")
         .method(
-            "platform",
-            [](sol::this_state s, const EntityRef& e, sol::object settings) {
-                auto& registry = e.owner().registry();
-                if (removes(s, settings)) {
-                    registry.remove<Platform>(e.id);
-                    return;
-                }
-                const auto t = lua::options(settings, "platform settings");
-                auto& platform = registry.get_or_emplace<Platform>(e.id);
-                if (t) {
-                    applyPlatform(platform, *t);
-                }
-            },
-            "fun(settings?: {size?: {x: number, z: number}}|nil)",
+            "platform", component<Platform>("platform", setPlatform, platformTable),
+            "fun(settings?: {size?: {x: number, z: number}}|nil): table?",
             "Make the entity a moving surface (rafts, lifts): its position is the top, `size` (default 1 x "
             "1, at most 64 x 64) the footprint. Movers and colliders standing on it ride along; grid cells "
-            "whose centre it "
-            "covers on its layer are walkable at its height while it is there. Move it with "
-            "mover{collide = false} or place(); nil removes it.")
+            "whose centre it covers on its layer are walkable at its height while it is there. Move it with "
+            "mover{collide = false} or place(). No argument reads it (nil without one); nil removes it.")
         .method(
-            "sprite",
-            [](sol::this_state s, const EntityRef& e, sol::object settings) -> sol::object {
-                if (removes(s, settings)) {
-                    e.owner().registry().remove<Sprite>(e.id);
-                    return sol::lua_nil;
-                }
-                const auto t = lua::options(settings, "sprite settings");
-                auto& sprite = e.owner().registry().get_or_emplace<Sprite>(e.id);
-                if (t) {
-                    applySprite(sprite, *t);
-                }
-                return spriteTable(s, sprite);
-            },
+            "shader_params", component<MaterialParams>("shader_params", setMaterialParams, materialParamsTable),
+            "fun(values?: number[]|nil): number[]?",
+            "The 16 numbers a game shader (sprite or mesh `shader`) reads as `u_params[4]`: a list of up to "
+            "16 numbers in order (`u_params[0].x` first; missing ones are 0), for dissolve amounts, hit "
+            "timers and the like. No argument reads them (nil when never set); nil removes them (zeros).")
+        .method(
+            "sprite", component<Sprite>("sprite", setSprite, spriteTable),
             "fun(settings?: table|nil): table?",
-            "Add or change the sprite and return its current state (e:sprite() reads it); nil removes it.")
+            "Add or change the sprite and return its state; e:sprite() reads it (nil when the entity has no "
+            "sprite) and nil removes it.")
         .method(
             "clip",
             [](const EntityRef& e, const std::string& clip, sol::object restart) {
@@ -569,19 +761,9 @@ void bindEntity(Engine& engine) {
             },
             "fun(clip: string, restart?: boolean)", "Play a sprite clip.")
         .method(
-            "mesh",
-            [](sol::this_state s, const EntityRef& e, sol::object settings) {
-                if (removes(s, settings)) {
-                    e.owner().registry().remove<MeshInstance>(e.id);
-                    return;
-                }
-                const auto t = lua::options(settings, "mesh settings");
-                auto& m = e.owner().registry().get_or_emplace<MeshInstance>(e.id);
-                if (t) {
-                    applyMesh(m, *t);
-                }
-            },
-            "fun(settings?: table|nil)", "Add or change a glTF mesh (props, doors...); nil removes it.")
+            "mesh", component<MeshInstance>("mesh", setMesh, meshTable), "fun(settings?: table|nil): table?",
+            "Add or change a glTF mesh (props, doors...) and return its state; e:mesh() reads it (nil "
+            "without one) and nil removes it.")
         .method(
             "play",
             [](const EntityRef& e, const std::string& animation, sol::object loop) {
@@ -589,71 +771,27 @@ void bindEntity(Engine& engine) {
             },
             "fun(animation: string, loop?: boolean)", "Play a mesh animation by name.")
         .method(
-            "light",
-            [](sol::this_state s, const EntityRef& e, sol::object value) {
-                auto& registry = e.owner().registry();
-                if (removes(s, value)) {
-                    registry.remove<LightSource>(e.id);
-                    return;
-                }
-                const auto t = lua::options(value, "light settings");
-                auto settings = LightSettings::fromJson(t ? lua::lightJson(*t) : Json::object());
-                if (const auto* existing = registry.try_get<LightSource>(e.id);
-                    existing && (!t || lua::absent(lua::field(*t, "position")))) {
-                    settings.position = existing->light.position;
-                }
-                registry.emplace_or_replace<LightSource>(e.id, LightSource{settings});
-            },
-            "fun(settings?: table|nil)", "Attach a light (position is an offset); nil removes it.")
+            "light", component<LightSource>("light", setLight, lightTable),
+            "fun(settings?: table|nil): table?",
+            "Attach a light (position is an offset; `enabled = false` keeps it but turns it off) and return "
+            "its state; e:light() reads it (nil without one) and nil removes it.")
         .method(
-            "emitter",
-            [](sol::this_state s, const EntityRef& e, sol::object value) {
-                auto& registry = e.owner().registry();
-                if (removes(s, value)) {
-                    registry.remove<Emitter>(e.id);
-                    return;
-                }
-                const auto t = lua::options(value, "emitter settings");
-                applyEmitter(registry, e.id, t ? *t : sol::state_view(s).create_table());
-            },
-            "fun(settings?: table|nil)",
-            "Attach particles (the settings replace the previous ones); `paused = true|false` stops or "
-            "resumes "
-            "spawning, and a table with no other field keeps the settings. nil removes the emitter.")
+            "emitter", component<Emitter>("emitter", setEmitter, emitterTable),
+            "fun(settings?: table|nil): table?",
+            "Attach particles (the settings replace the previous ones) and return their state; `paused = "
+            "true|false` stops or resumes spawning, and a table with no other field keeps the settings. "
+            "e:emitter() reads it (nil without one) and nil removes the emitter.")
         .method(
-            "collider",
-            [](sol::this_state s, const EntityRef& e, sol::object value) {
-                auto& registry = e.owner().registry();
-                if (removes(s, value)) {
-                    registry.remove<Collider>(e.id);
-                    return;
-                }
-                const auto t = lua::options(value, "collider settings");
-                setCollider(registry, e.id, t ? *t : sol::state_view(s).create_table());
-            },
-            "fun(settings?: {radius?: number, height?: number, solid?: boolean}|nil)",
+            "collider", component<Collider>("collider", setCollider, colliderTable),
+            "fun(settings?: {radius?: number, height?: number, solid?: boolean}|nil): table?",
             "Contact shape: an upright cylinder, `radius` 0 to 64 (default 0.25) and `height` 0 to 1000 "
-            "(default 1.6). Solid colliders block movers; all report contacts. nil removes it.")
+            "(default 1.6). Solid colliders block movers; all report contacts. e:collider() reads it (nil "
+            "without one) and nil removes it.")
         .method(
-            "audio",
-            [](sol::this_state s, const EntityRef& e, sol::object value) {
-                auto& registry = e.owner().registry();
-                if (removes(s, value)) {
-                    if (const auto* audio = registry.try_get<AudioEmitter>(e.id);
-                        audio && audio->voice >= 0) {
-                        e.engine->audio().stopSound(audio->voice, 0.3);
-                    }
-                    registry.remove<AudioEmitter>(e.id);
-                    return;
-                }
-                const auto t = lua::options(value, "audio settings");
-                const auto* existing = registry.try_get<AudioEmitter>(e.id);
-                auto audio = existing ? *existing : AudioEmitter{};
-                applyAudio(*e.engine, audio, t ? *t : sol::state_view(s).create_table());
-                registry.emplace_or_replace<AudioEmitter>(e.id, audio);
-            },
-            "fun(settings?: {sound: string, radius?: number, volume?: number}|nil)",
-            "Looping positional sound (waterfalls, fires), heard while its world is drawn; nil removes it.")
+            "audio", component<AudioEmitter>("audio", setAudio, audioTable),
+            "fun(settings?: {sound: string, radius?: number, volume?: number}|nil): table?",
+            "Looping positional sound (waterfalls, fires), heard while its world is drawn. e:audio() reads "
+            "it (nil without one) and nil removes it.")
         .method(
             "tags",
             [](const EntityRef& e) {
@@ -741,12 +879,8 @@ void bindEntity(Engine& engine) {
             "Canvas position of the entity (plus `lift` units up); third value false when behind the camera. "
             "Pass draw's `alpha` to follow the rendered (interpolated) entity and camera.")
         .method(
-            "destroy",
-            [](EntityRef& e) {
-                if (e.valid()) {
-                    e.owner().destroy(e.id);
-                }
-            },
-            "fun()", "Remove the entity.");
+            "destroy", [](EntityRef& e) { e.owner().destroy(e.id); }, "fun()",
+            "Remove the entity. Like every other method it raises on a handle whose entity is already "
+            "gone (check e:valid() first when that is expected).");
 }
 } // namespace fe

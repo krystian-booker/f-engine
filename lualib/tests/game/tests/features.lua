@@ -202,7 +202,8 @@ return {
     fresh()
     local playing, stopped, events = true, {}, {}
     local disconnect = dialogue.speaking:connect(function(speaker, talking) events[#events + 1] = { speaker, talking } end)
-    with_stubs(sound, { play = function(id, options) t.eq(options.bus, "voice") return 7 end }, function()
+    local voiced = {}
+    with_stubs(sound, { voice = function(id) voiced[#voiced + 1] = id return 7 end }, function()
       with_stubs(fe.audio, {
         playing = function(voice) return voice == 7 and playing end,
         stop = function(voice) stopped[#stopped + 1] = voice end,
@@ -213,6 +214,7 @@ return {
         end)
         t.tick(150)
         t.eq(job.status, "running", "auto-advance waits for the voice")
+        t.eq(voiced, { "vo/mira_01.ogg" }, "the line plays through sound.voice (catalog ids or paths)")
         t.ok(dialogue.current():talking())
         playing = false
         t.wait_until(function() return job.status ~= "running" end, 120)
@@ -350,7 +352,7 @@ return {
   ["holding fast-forward advances a voiced line and cuts the voice"] = function(t)
     fresh()
     local playing = true
-    with_stubs(sound, { play = function() return 9 end }, function()
+    with_stubs(sound, { voice = function() return 9 end }, function()
       with_stubs(fe.audio, {
         playing = function(voice) return voice == 9 and playing end,
         stop = function() playing = false end,
@@ -513,6 +515,82 @@ return {
     end)
   end,
 
+  ["a party change refreshes the followers and the leader's sprite"] = function(t)
+    fresh()
+    local party = require("fe.rpg.party")
+    local followers = require("fe.field.followers")
+    local sprites = { "@fe/assets/ui/spark.anim.json" }
+    local leader = "@fe/assets/ui/emotes.anim.json"
+    local saved = { field.follower_sprites, field.settings.followers, field.settings.player_sprite }
+    field.follower_sprites = function() return sprites end
+    field.settings.followers = 2
+    field.settings.player_sprite = function() return leader end
+    field.start("arena", "start")
+    t.ok(followers.watch_party(party), "the party module handed over is watched")
+    t.ok(followers.watch_party(), "and stays watched without an argument")
+    t.eq(#field.followers(), 1)
+    t.eq(field.player:sprite().animation, leader)
+    sprites = { "@fe/assets/ui/spark.anim.json", "@fe/assets/ui/spark.anim.json" }
+    leader = "@fe/assets/ui/spark.anim.json"
+    party.changed:emit()
+    t.eq(#field.followers(), 2, "the trail follows the new line-up")
+    t.eq(field.player:sprite().animation, leader, "the leader's sprite is re-read")
+    field.follower_sprites, field.settings.followers, field.settings.player_sprite = saved[1], saved[2], saved[3]
+    scene.clear()
+  end,
+
+  ["finished chapters can be replayed without touching the record"] = function(t)
+    fresh()
+    local runs = {}
+    story.define("ed", { name = "Ed", chapters = { { title = "One", script = "tests.support.chapter" }, { title = "Two" } } })
+    local original = story.has_member
+    story.has_member = function() return true end
+    local chapter_script = require("tests.support.chapter")
+    chapter_script.calls = runs
+    story.recruit("ed")
+    t.error(function() story.replay("ed", 1) end, "has not finished")
+    story.begin("ed")
+    t.eq(runs[1], { "ed", "One", nil })
+    story.finish()
+    t.eq(story.chapter("ed"), 2)
+    local listed = story.available({ include_done = true })
+    t.eq(#listed, 2)
+    t.eq(listed[1].number, 1)
+    t.ok(listed[1].done)
+    t.eq(listed[2].number, 2)
+    t.eq(#story.available(), 1, "finished chapters are hidden by default")
+    story.replay("ed", 1)
+    t.eq(runs[2], { "ed", "One", true }, "the script runs again, told it is a replay")
+    t.eq(story.current(), nil, "nothing is being played")
+    t.eq(story.chapter("ed"), 2, "progress is untouched")
+    t.eq(story.finish(), nil)
+    local chosen, number
+    local job = task.spawn(function() chosen, number = story.open({ include_done = true }) end)
+    t.tick(1)
+    press(t, "key:Z")
+    t.tick(1)
+    t.eq(job.status, "done")
+    t.eq({ chosen, number }, { "ed", 1 }, "the select screen offers the finished chapter first")
+    story.has_member = original
+    story.protagonists.ed = nil
+    story.order = {}
+    scene.clear()
+  end,
+
+  ["the world map knows where the party is"] = function(t)
+    fresh()
+    local worldmap = require("fe.worldmap")
+    worldmap.definition = nil
+    local saved = field.world
+    field.world = nil
+    t.eq(worldmap.here(), nil, "no field yet")
+    field.world = saved
+    field.start("arena", "start")
+    t.eq(worldmap.here().id, "arena")
+    t.eq({ input.prompt("confirm") }, { "Return" }, "prompts return one value")
+    scene.clear()
+  end,
+
   ["warps load the map in the background with a loading indicator"] = function(t)
     fresh()
     field.start("arena", "start")
@@ -539,5 +617,33 @@ return {
     t.eq(scene.find("loading"), nil)
     t.near(field.player.position.x, 9.5, 0.01)
     scene.clear()
+  end,
+
+  ["a cancelled warp cancels its background load"] = function(t)
+    fresh()
+    field.start("arena", "start")
+    local requested, cancelled, finished = false, nil, false
+    with_stubs(fe.world, {
+      load_async = function() requested = true; return 7 end,
+      load_progress = function() return 0 end,
+      finish_load = function() finished = true end,
+      cancel_load = function(ticket) cancelled = ticket end,
+    }, function()
+      local job = task.spawn(function() field.warp("arena", "east", { autosave = false }) end)
+      t.wait_until(function() return requested end, 300)
+      t.eq(cancelled, nil)
+      job:cancel()
+      t.eq(job.status, "cancelled")
+    end)
+    t.eq(cancelled, 7, "the ticket is dropped with the task")
+    t.ok(not finished)
+    scene.clear()
+    -- Against the engine: a cancelled ticket is unknown from then on.
+    local ticket = fe.world.load_async("scratch", "arena")
+    fe.world.cancel_load(ticket)
+    t.error(function() fe.world.load_progress(ticket) end, "Unknown world load")
+    t.error(function() fe.world.finish_load(ticket) end, "Unknown world load")
+    t.error(function() fe.world.cancel_load(ticket) end, "Unknown world load")
+    t.eq(fe.world.get("scratch"), nil)
   end,
 }

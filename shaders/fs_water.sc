@@ -3,9 +3,11 @@ $input v_texcoord0, v_color0, v_worldPos, v_normal, v_viewDir, v_tangent
 SAMPLER2D(s_sceneDepth, 1);
 #include "lighting.sh"
 SAMPLER2D(s_sceneColor, 6);
+// Only [0] (colour times tint) is read; declared [3] because every part binds
+// the engine's u_material (fs_world.sc) and bgfx wants one size per name.
 uniform vec4 u_material[3];
 // time, wave scale, wave speed, fresnel; deep colour, depth falloff;
-// sky horizon, specular; near, far, depth tint enabled;
+// sky horizon, specular; near, far, depth tint enabled, orthographic camera (0/1);
 // reflection, refraction, opaque scene copy available, texture origin bottom-left
 uniform vec4 u_water[5];
 float wave(vec2 p, float t) {
@@ -15,6 +17,9 @@ float wave(vec2 p, float t) {
 // (0..1) on every backend, and that maps to view distance the same way for
 // OpenGL's -1..1 clip range (FrameMath.h, linearDepth()).
 float viewDepth(float device) {
+    if (u_water[3].w > 0.5) {
+        return u_water[3].x + device * (u_water[3].y - u_water[3].x);
+    }
     return u_water[3].x * u_water[3].y / max(u_water[3].y - device * (u_water[3].y - u_water[3].x), 0.0001);
 }
 vec2 screenOf(vec4 clip) {

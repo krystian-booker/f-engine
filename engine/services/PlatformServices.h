@@ -26,11 +26,13 @@ public:
 
 // The default backend: <user data>/platform.json holds {"unlocked": {id:
 // seconds since epoch}, "stats": {name: value}}. Unlocks are written at once;
-// stat changes at most once a second and when the backend is destroyed. An
-// empty file path keeps everything in memory.
+// stat changes are coalesced: written at most once per `writeInterval` (5 s)
+// while dirty, on flush() and when the backend is destroyed. An empty file
+// path keeps everything in memory.
 class LocalPlatformServices final : public PlatformServices {
 public:
-    explicit LocalPlatformServices(std::filesystem::path file);
+    explicit LocalPlatformServices(std::filesystem::path file,
+                                   std::chrono::milliseconds writeInterval = std::chrono::seconds(5));
     ~LocalPlatformServices() override;
     LocalPlatformServices(const LocalPlatformServices&) = delete;
     LocalPlatformServices& operator=(const LocalPlatformServices&) = delete;
@@ -41,10 +43,14 @@ public:
     void setStat(const std::string& name, double value) override;
     [[nodiscard]] std::optional<double> stat(const std::string& name) const override;
     void update() override;
+    // Writes pending stat changes now.
+    void flush();
+    [[nodiscard]] bool dirty() const { return dirty_; }
 
 private:
     void write();
     std::filesystem::path file_;
+    std::chrono::milliseconds writeInterval_;
     Json data_;
     bool dirty_ = false;
     std::chrono::steady_clock::time_point written_;

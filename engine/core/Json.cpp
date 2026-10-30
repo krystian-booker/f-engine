@@ -41,6 +41,20 @@ void moveOver(const std::filesystem::path& from, const std::filesystem::path& to
         throw std::runtime_error("Cannot replace " + to.string());
     }
 }
+
+// `to` becomes `from`, and what `to` was becomes `backup`: ReplaceFileW does
+// both in one step (and keeps `to`'s attributes); when it cannot (another
+// volume, a locked file) the two renames run one after the other.
+void moveOverKeeping(const std::filesystem::path& from, const std::filesystem::path& to,
+                     const std::filesystem::path& backup) {
+    if (ReplaceFileW(to.c_str(), from.c_str(), backup.c_str(), REPLACEFILE_WRITE_THROUGH, nullptr, nullptr)) {
+        return;
+    }
+    if (!MoveFileExW(to.c_str(), backup.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        throw std::runtime_error("Cannot keep the previous " + to.string());
+    }
+    moveOver(from, to);
+}
 #else
 void syncDescriptor(int descriptor) {
 #ifdef __APPLE__
@@ -84,7 +98,23 @@ void flushFolder(const std::filesystem::path& folder) {
 void moveOver(const std::filesystem::path& from, const std::filesystem::path& to) {
     std::filesystem::rename(from, to);
 }
+
+void moveOverKeeping(const std::filesystem::path& from, const std::filesystem::path& to,
+                     const std::filesystem::path& backup) {
+    std::filesystem::rename(to, backup); // replaces an older backup atomically
+    moveOver(from, to);
+}
 #endif
+
+// The current contents of `path`, for worthBackingUp.
+std::string currentBytes(const std::filesystem::path& path) {
+    std::ifstream previous(path, std::ios::binary);
+    std::string bytes((std::istreambuf_iterator<char>(previous)), std::istreambuf_iterator<char>());
+    if (!previous.good() && !previous.eof()) {
+        throw std::runtime_error("Cannot read " + path.string() + " to back it up");
+    }
+    return bytes;
+}
 } // namespace
 
 Json parseJson(std::string_view text) {
@@ -176,16 +206,31 @@ void writeTextAtomic(const std::filesystem::path& path, const std::string& text,
     }
     auto temporary = path;
     temporary += ".tmp";
-    writeDurably(temporary, text);
-    if (keepBackup && std::filesystem::is_regular_file(path)) {
-        std::ifstream previous(path, std::ios::binary);
-        std::string bytes((std::istreambuf_iterator<char>(previous)), std::istreambuf_iterator<char>());
-        if (!previous.good() && !previous.eof()) {
-            throw std::runtime_error("Cannot read " + path.string() + " to back it up");
-        }
-        writeDurably(backupPath(path), bytes);
+    writeDurably(temporary, text); // the one data fsync
+    // The previous version is renamed aside, never copied: between its rename
+    // and the temporary's, `path` is missing and `.bak` holds the last good
+    // version, which readJsonOrBackup and SaveStore read in its place.
+    if (keepBackup && std::filesystem::is_regular_file(path) && worthBackingUp(path, currentBytes(path))) {
+        moveOverKeeping(temporary, path, backupPath(path));
+    } else {
+        moveOver(temporary, path); // a blank or truncated file is replaced, not kept
     }
-    replaceFile(temporary, path);
+    flushFolder(path.parent_path()); // the one folder fsync covers both renames
+}
+
+bool worthBackingUp(const std::filesystem::path& path, const std::string& bytes) {
+    if (bytes.find_first_not_of(" \t\r\n") == std::string::npos) {
+        return false;
+    }
+    if (path.extension() != ".json") {
+        return true;
+    }
+    try {
+        (void)parseJson(bytes);
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
 }
 
 void writeJson(const std::filesystem::path& path, const Json& data, bool keepBackup) {

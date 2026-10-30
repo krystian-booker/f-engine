@@ -105,14 +105,6 @@ void readVec(const Json& j, const char* key, glm::vec4& value) {
         value = jsonVec4(j.at(key));
     }
 }
-void requireFinite(std::initializer_list<float> values, const char* what) {
-    for (const float v : values) {
-        if (!std::isfinite(v)) {
-            throw std::runtime_error(std::string("Non-finite ") + what);
-        }
-    }
-}
-
 float noise(double t, float seed) {
     return static_cast<float>(std::sin(t * 1.7 + seed) * 0.5 + std::sin(t * 4.3 + seed * 2.1) * 0.3 +
                               std::sin(t * 9.1 + seed * 0.7) * 0.2);
@@ -198,7 +190,6 @@ LightSettings LightSettings::fromJson(const Json& j) {
         light.flickerCurve.push_back(k);
     }
     read(j, "shadows", light.castShadows);
-    requireFinite({light.radius, light.intensity, light.innerCone, light.outerCone, light.flicker}, "light");
     if (light.radius <= 0 || light.radius > MaxLightRadius || light.intensity < 0 ||
         glm::length(light.direction) < 1e-4f) {
         throw std::runtime_error("Invalid light radius (above 0, at most 1000), intensity or direction");
@@ -254,7 +245,6 @@ EmitterSettings EmitterSettings::fromJson(const Json& j) {
     read(j, "world_space", e.worldSpace);
     read(j, "distort", e.distort);
     read(j, "max", e.maxParticles);
-    requireFinite({e.rate, e.lifetime, e.size, e.sizeEnd, e.drag, e.distort}, "emitter");
     if (e.distort < 0 || e.rate < 0 || e.rate > 5000 || e.lifetime <= 0 || e.lifetime > 120 || e.size <= 0 ||
         e.burst < 0 || e.burst > 4096 || e.maxParticles < 1 || e.maxParticles > 16384) {
         throw std::runtime_error("Invalid emitter settings");
@@ -302,9 +292,6 @@ Environment Environment::fromJson(const Json& j) {
     read(j, "sprite_light_height", env.spriteLightHeight);
     read(j, "anisotropic", env.anisotropic);
     read(j, "pixel_snap", env.pixelSnap);
-    requireFinite({env.fogDensity, env.fogMax, env.shadowDistance, env.shadowStrength, env.shadowBias,
-                   env.spriteLightHeight},
-                  "environment");
     if (glm::length(env.sunDirection) < 1e-4f || env.fogDensity < 0 || env.shadowDistance <= 0 ||
         env.fogMax < 0 || env.fogMax > 1 || env.shadowStrength < 0 || env.shadowStrength > 1 ||
         env.shadowBias < 0) {
@@ -320,9 +307,6 @@ Environment Environment::fromJson(const Json& j) {
     read(water, "depth_falloff", env.water.depthFalloff);
     read(water, "reflection", env.water.reflection);
     read(water, "refraction", env.water.refraction);
-    requireFinite({env.water.waveScale, env.water.waveSpeed, env.water.fresnel, env.water.specular,
-                   env.water.depthFalloff, env.water.reflection, env.water.refraction},
-                  "water settings");
     if (env.water.depthFalloff < 0 || env.water.reflection < 0 || env.water.reflection > 1 ||
         env.water.refraction < 0) {
         throw std::runtime_error("Water depth_falloff and refraction must not be negative and reflection "
@@ -355,6 +339,9 @@ Environment Environment::fromJson(const Json& j) {
     readVec(weather, "wind", env.weather.wind);
     readVec(weather, "color", env.weather.color);
     read(weather, "sprite", env.weather.sprite);
+    if (env.weather.intensity < 0) {
+        throw std::runtime_error("weather.intensity must not be negative");
+    }
     const auto post = j.value("post", Json::object());
     auto& p = env.post;
     read(post, "bloom", p.bloom);
@@ -390,7 +377,12 @@ Environment Environment::fromJson(const Json& j) {
         CustomPost custom;
         read(c, "shader", custom.shader);
         if (c.contains("params") && !c.at("params").empty()) { // Lua turns {} into an object
-            read(c, "params", custom.params);
+            if (!c.at("params").is_array()) {
+                throw std::runtime_error("post.custom params must be a list of numbers");
+            }
+            for (const auto& value : c.at("params")) {
+                custom.params.push_back(jsonFloat(value));
+            }
         }
         if (!isShaderName(custom.shader)) {
             throw std::runtime_error("post.custom shader names use a-z, 0-9, _ and - (at most 64)");
@@ -398,17 +390,16 @@ Environment Environment::fromJson(const Json& j) {
         if (custom.params.size() > 16) {
             throw std::runtime_error("post.custom params take at most 16 numbers");
         }
-        for (const float value : custom.params) {
-            requireFinite({value}, "post.custom params");
-        }
         p.custom.push_back(std::move(custom));
     }
-    requireFinite({p.bloomStrength, p.bloomThreshold, p.bloomKnee, p.bloomRadius, p.focus, p.focusRange,
-                   p.focusDistance, p.aperture, p.dofRadius, p.ssaoRadius, p.ssaoStrength, p.ssaoBias,
-                   p.chromaticAberration, p.distortion, p.exposure, p.lutBlend},
-                  "post settings");
-    if (p.exposure <= 0 || p.pixelScale < 1 || p.pixelScale > 8) {
-        throw std::runtime_error("Invalid exposure or pixel_scale");
+    if (p.exposure <= 0) {
+        throw std::runtime_error("Invalid exposure");
+    }
+    if (!(p.pixelScale >= 1 && p.pixelScale <= 8)) {
+        throw std::runtime_error("post.pixel_scale is a number from 1 to 8");
+    }
+    if (p.focus < 0 || p.focus > 1 || p.focusRange < 0 || p.focusRange > 1) {
+        throw std::runtime_error("post.focus and post.focus_range lie in 0..1");
     }
     if (p.bloomLevels < 1 || p.bloomLevels > 8 || p.bloomRadius < 0 || p.bloomRadius > 1 || p.bloomKnee < 0 ||
         p.bloomKnee > 1 || p.dofRadius < 0 || p.dofRadius > 32 || p.ssaoRadius <= 0 || p.custom.size() > 8) {
@@ -513,7 +504,9 @@ Json Environment::toJson() const {
               {"lut", post.lut},
               {"lut_blend_target", post.lutBlendTarget},
               {"lut_blend", post.lutBlend},
-              {"pixel_scale", post.pixelScale}}}};
+              {"pixel_scale", post.pixelScale == std::floor(post.pixelScale)
+                                  ? Json(static_cast<int>(post.pixelScale))
+                                  : Json(post.pixelScale)}}}};
 }
 
 MapData MapData::load(const std::filesystem::path& path) {
@@ -569,9 +562,13 @@ MapData MapData::fromJson(const Json& j) {
         }
         m.placements.push_back(std::move(placement));
     }
+    std::set<std::string> zoneIds;
     for (const auto& z : j.value("zones", Json::array())) {
         Zone zone;
         zone.id = z.at("id");
+        if (zone.id.empty() || !zoneIds.insert(zone.id).second) {
+            throw std::runtime_error("Duplicate or empty zone id: " + zone.id);
+        }
         zone.type = z.value("type", std::string("zone"));
         zone.min = jsonVec2(z.at("min"));
         zone.max = jsonVec2(z.at("max"));

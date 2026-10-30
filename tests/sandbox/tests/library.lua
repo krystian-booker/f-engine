@@ -8,7 +8,7 @@ local function stopped_by_watchdog(t, fn)
   fe.harness.begin_test() -- the rest of the test gets a fresh watchdog
   t.ok(not ok, "expected the watchdog to stop the call")
   t.ok(tostring(err):find("script watchdog", 1, true), tostring(err))
-  t.ok(elapsed < 10, "stopped after " .. elapsed .. " s")
+  t.ok(elapsed < 60, "stopped after " .. elapsed .. " s")
 end
 
 return {

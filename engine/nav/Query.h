@@ -31,6 +31,9 @@ struct JumpRules {
     bool diagonal = false;
 };
 
+// Largest body footprint (cells per side) the planner and movers accept.
+inline constexpr int MaxFootprint = 8;
+
 // Movement rules shared by path finding and reachability. Layer changes
 // follow Grid::traverseLink and ladders Grid::ladderStep, the rules movers use.
 struct StepRules {
@@ -38,6 +41,7 @@ struct StepRules {
     float maxUp = 0.6f;                                    // largest climb between adjacent cells
     float maxDown = 0.6f;                                  // largest drop
     std::uint32_t blockedTags = 0;                         // cells with any of these tags cannot be entered
+    std::uint32_t requiredTags = 0;                        // when not zero: cells with none of them cannot be entered
     std::vector<std::pair<std::uint32_t, float>> tagCosts; // extra entry cost per tag (finite, >= 0)
     std::unordered_set<std::int64_t> blocked;              // occupied cells that cannot be entered
     std::unordered_set<std::int64_t> noStop;               // can be crossed but not ended on (allies)
@@ -46,6 +50,16 @@ struct StepRules {
     std::unordered_set<std::int64_t> zoc;
     JumpRules jump;
     bool ladders = true; // false: ladder links are not climbed
+    // The body's size in cells per side: a square anchored at the unit's cell
+    // and extending towards +x and +z. Every cell of it must be enterable
+    // (walkable unless `fly`, free of blocked tags and blocked cells); height
+    // steps are measured at the anchor cell. Units wider than one cell do not
+    // climb ladders.
+    int footprint = 1;
+    // Flying: walkability and height steps are ignored (chasms and water can
+    // be crossed and ended on); grid bounds, blocked tags and blocked cells
+    // still hold.
+    bool fly = false;
     // Called for every candidate step with its base cost (distance plus tag
     // costs); returns the cost to use, or nullopt when the step is impossible.
     // Results must be finite and non-negative (std::invalid_argument otherwise).
@@ -69,6 +83,12 @@ struct Route {
 };
 // A* from one cell to another, excluding the start. Ties between equal-cost
 // cells break on the cell key, so results do not depend on the standard library.
+// A goal that cannot be entered under `rules` (unwalkable, a blocked or
+// missing tag, a blocked cell, outside the grid) returns an empty route
+// without searching, and so does a goal in another connected component of the
+// grid (Grid::component) when the rules neither fly nor jump gaps, the two
+// ways a route can leave its component. `maxVisited` counts expanded cells;
+// stale queue entries do not count.
 inline constexpr int DefaultRouteVisits = 200000;
 Route findRoute(const Grid& grid, GridPos from, GridPos to, const StepRules& rules,
                 int maxVisited = DefaultRouteVisits);
@@ -84,8 +104,18 @@ struct ReachCell {
     StepKind kind = StepKind::Walk; // how the step from `parent` enters this cell
 };
 // Every cell reachable within `budget` movement cost (Dijkstra; ties break on
-// discovery order, which is deterministic).
-std::vector<ReachCell> reachable(const Grid& grid, GridPos start, float budget, const StepRules& rules);
+// discovery order, which is deterministic). The search expands at most
+// `maxVisited` cells (a zero-cost step function would otherwise flood the
+// grid); `truncated` says it stopped there, so `cells` may be incomplete.
+struct Reach {
+    std::vector<ReachCell> cells;
+    bool truncated = false;
+};
+Reach findReachable(const Grid& grid, GridPos start, float budget, const StepRules& rules,
+                    int maxVisited = DefaultRouteVisits);
+// findReachable's cells without the truncation flag.
+std::vector<ReachCell> reachable(const Grid& grid, GridPos start, float budget, const StepRules& rules,
+                                 int maxVisited = DefaultRouteVisits);
 std::vector<GridPos> reachPath(const std::vector<ReachCell>& cells, GridPos target);
 
 // True when no terrain blocks the segment between two points. The segment is

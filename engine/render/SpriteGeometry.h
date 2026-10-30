@@ -1,10 +1,23 @@
 #pragma once
 #include "engine/nav/Grid.h"
+#include "engine/world/Animation.h"
 #include <array>
 #include <glm/glm.hpp>
 #include <vector>
 
 namespace fe {
+// The direction row of a clip with `rows` direction rows for a facing seen
+// from a camera at `cameraYaw` degrees (SpriteAnimation::direction() without
+// the clip lookup).
+[[nodiscard]] int clipDirection(int rows, glm::vec2 facing, float cameraYaw);
+
+// placeSprite() for a clip the renderer already resolved: identical results,
+// no clip lookup by name. The renderer keeps the clip per sprite in a
+// render-side cache; picking and raycasts go through placeSprite().
+[[nodiscard]] SpritePlacement placeSpriteClip(const Sprite& sprite, const SpriteAnimation& animation,
+                                              const SpriteClip& clip, glm::vec3 feet, glm::vec2 facing,
+                                              const Camera& camera, double alpha, int pixelsPerUnit);
+
 // One piece of a decal lying on one grid cell's surface plane. Corners are
 // bottom-left, bottom-right, top-right, top-left as seen from above with
 // north (-z) at the top, like a flat sprite.

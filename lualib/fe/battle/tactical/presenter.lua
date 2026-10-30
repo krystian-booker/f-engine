@@ -1,7 +1,15 @@
 --- Tactical presentation: unit sprites kept in sync with battle events,
 --- the grid scene and HUD, and player input (move / act / wait with undo,
---- target forecasts with hit chance, facing, CT turn-order previews).
---- Text comes from fe.tactics.* i18n keys.
+--- target forecasts with hit chance, positional bonuses and counter
+--- chances, facing, CT turn-order previews). Text comes from fe.tactics.*
+--- i18n keys; pauses are tactical.settings.waits, scaled by Battle.speed.
+---
+--- The presenter contract the tactical kit relies on (a game's own
+--- presenter must provide these): `spawn(b)`, `despawn(b)`, `sync(b)`
+--- (snap a sprite to its cell), `start(battle)` (deployment shows the board
+--- early), `banner(text, duration)`, `pick_cell(cells, start, on_hover?,
+--- finish?) -> cell | nil, done` and `choose_facing(b) -> {x, z}`, plus
+--- `command(b, battle) -> plan` for player turns (see rules.take_turn).
 ---
 --- Units walk their paths a step at a time with
 --- `entity:move_to(nil, {path = {cell}})`: steps marked `jump` (gap
@@ -10,11 +18,17 @@
 --- shown the scene reads the world's events: a unit's jump_start, landed,
 --- climb_start and climb_end call `Presenter:motion(battler, kind)`, which
 --- plays settings.motion_clips[kind] when the unit's sprite has that clip.
+---
+--- The forecast shown while aiming is computed once per hovered cell and
+--- battle event, not per frame.
 local Battle = require("fe.battle.core")
 local camera = require("fe.camera")
+local class = require("fe.class")
+local common = require("fe.battle.presenter_common")
 local effects = require("fe.effects")
 local grid = require("fe.battle.tactical.grid")
 local i18n = require("fe.i18n")
+local reactions = require("fe.battle.reactions")
 local rules = require("fe.battle.tactical.rules")
 local scene = require("fe.scene")
 local config = require("fe.battle.tactical.settings")
@@ -22,26 +36,37 @@ local sound = require("fe.sound")
 local tablex = require("fe.tablex")
 local task = require("fe.task")
 local transition = require("fe.transition")
-local tween = require("fe.tween")
 local ui = require("fe.ui")
 local vec = require("fe.vec")
 
 local settings = config.settings
 
 i18n.defaults({ fe = { tactics = {
-  turn = "{name}'s turn", follow_up = "Follow-up: {name}", counters = "{name} counters!",
-  reinforcements = "Reinforcements!", destroyed = "{name} is destroyed", miss = "Miss",
+  turn = "{name}'s turn", follow_up = "Follow-up: {name}",
+  reinforcements = "Reinforcements!", destroyed = "{name} is destroyed",
   victory = "Victory!", defeat = "Defeat...", over = "Battle over",
   command = { move = "Move", act = "Act", wait = "Wait", undo = "Undo move" },
   facing = "Choose a facing, then {button}", ct = "CT {cost}",
 } } })
 
-local Presenter = {}
-Presenter.__index = Presenter
+local tactical -- fe.battle.tactical, required lazily (it requires this module)
+
+---@class TacticalPresenter
+local Presenter = class("TacticalPresenter")
 
 ---@param options {map?: string, music?: string}
+function Presenter:init(battle, options)
+  self.battle = battle
+  self.options = options or {}
+  self.popups = {}
+  self.units = {}
+  self.stamp = 0 -- bumped by every battle event; forecasts are cached against it
+  battle.events:connect(function() self.stamp = self.stamp + 1 end)
+end
+
+--- Create a presenter (fe.battle.tactical calls this).
 function Presenter.new(battle, options)
-  return setmetatable({ battle = battle, options = options or {}, popups = {}, units = {} }, Presenter)
+  return Presenter(battle, options)
 end
 
 --- Recolour terrain overlays (burning, ice) from the grid.
@@ -60,8 +85,7 @@ function TacticalScene:update(dt)
   if fe.input.pressed("camera_right") then p.rig:rotate(90, true) end
   if fe.input.pressed("info") then p.top_down = not p.top_down p.rig:set_top_down(p.top_down) end
   p.rig:update(dt)
-  for _, popup in ipairs(p.popups) do popup.age = popup.age + dt end
-  p.popups = tablex.filter(p.popups, function(popup) return popup.age < 1.2 end)
+  common.age_popups(p, dt)
 end
 
 -- After the world moved: units' jumps and climbs.
@@ -78,7 +102,8 @@ end
 function TacticalScene:draw()
   local p = self.presenter
   p.world:draw()
-  require("fe.battle.tactical").draw_hud(p)
+  tactical = tactical or require("fe.battle.tactical")
+  tactical.draw_hud(p)
 end
 
 --- A sprite for a unit at its cell.
@@ -104,10 +129,7 @@ end
 --- is the world event: jump_start, landed, climb_start or climb_end).
 function Presenter:motion(b, kind)
   local clip = settings.motion_clips[kind]
-  local entity = b.entity
-  if clip and entity and entity:valid() and fe.app.sprite_clips(entity:sprite().animation)[clip] then
-    entity:clip(clip)
-  end
+  if clip then common.play_clip(b.entity, clip) end
 end
 
 -- Snap a unit's sprite to its cell.
@@ -137,33 +159,33 @@ function Presenter:start(battle)
   if self.options.map then transition.into("fade", 0.3) end
 end
 
+function Presenter:opening(payload)
+  self:banner(i18n.t("fe.battle." .. payload.kind), settings.waits.banner)
+  common.wait(settings.waits.opening)
+end
+
 function Presenter:turn(payload)
   self.order = payload.order
   self.active = payload.battler
   self.rig:follow(payload.battler.entity)
   self.ct_cost = nil
   self:banner(i18n.t("fe.tactics.turn", { name = payload.battler:name() }), 0.8)
-  task.wait(0.3)
+  common.wait(settings.waits.turn)
 end
 
+--- Show `text` for `duration` seconds (deployment and rules use this).
 function Presenter:banner(text, duration)
-  self.banner_text = text
-  task.spawn(function()
-    task.wait(duration or 1)
-    if self.banner_text == text then self.banner_text = nil end
-  end)
+  common.banner(self, text, duration or settings.waits.banner, "banner_text")
 end
 
 function Presenter:popup(b, text, color)
-  if not b.entity or not b.entity:valid() then return end
-  local x, y = b.entity:screen_position(1.4)
-  self.popups[#self.popups + 1] = { x = x, y = y, text = text, color = color or 0xffffffff, age = 0 }
+  common.popup(self, b, text, color)
 end
 
 function Presenter:step(payload)
   local b, world, to = payload.battler, self.world, payload.to
-  local entity = b.entity
-  if not entity or not entity:valid() then return end
+  local entity = common.sprite_of(b)
+  if not entity then return end
   local from_h = grid.cell_height(world, payload.from)
   local to_h = grid.cell_height(world, to)
   local cell = { x = to.x, z = to.z, layer = to.layer or 0, jump = to.jump, climb = to.climb }
@@ -177,56 +199,38 @@ end
 
 function Presenter:pushed(payload)
   local b = payload.battler
-  local entity = b.entity
-  if not entity or not entity:valid() then return end
+  local entity = common.sprite_of(b)
+  if not entity then return end
   entity:move_to(vec.cell_centre(payload.to, grid.cell_height(self.world, payload.to)), { path = false, speed = 8 })
   task.wait_until(function() return not entity:valid() or not entity:moving() end, 1)
   sync(b)
 end
 
 function Presenter:facing(b)
-  if b.entity and b.entity:valid() then b.entity:face(b.facing) end
+  local entity = common.sprite_of(b)
+  if entity then entity:face(b.facing) end
 end
 
 function Presenter:action(action)
   self:banner(action.source.name, 0.9)
-  local entity = action.user.entity
-  if entity and entity:valid() and fe.app.sprite_clips(entity:sprite().animation).attack then entity:clip("attack") end
-  task.wait(0.35)
+  common.play_clip(action.user.entity, "attack")
+  common.wait(settings.waits.action)
 end
 
 function Presenter:results(payload)
-  for _, r in ipairs(payload.results) do
-    local entity = r.target.entity
-    if r.missed then
-      self:popup(r.target, i18n.t("fe.tactics.miss"), ui.theme.muted)
-    elseif r.type == "damage" then
-      self:popup(r.target, tostring(r.amount), r.critical and 0xffd060ff or 0xffffffff)
-      if entity and entity:valid() then
-        entity:sprite({ flash = { 1, 1, 1, 0.8 } })
-        task.spawn(function()
-          tween.run(0.25, function(k) if entity:valid() then entity:sprite({ flash = { 1, 1, 1, 0.8 * (1 - k) } }) end end)
-        end)
-      end
-    elseif (r.type == "heal" or r.type == "revive") and (r.amount or 0) > 0 then
-      self:popup(r.target, tostring(r.amount), ui.theme.good)
-    end
-  end
-  task.wait(0.4)
+  common.result_popups(self, payload.results, { prefix = "fe.tactics" })
+  common.wait(settings.waits.results)
 end
 
 function Presenter:knocked_out(b)
-  local entity = b.entity
-  if not entity or not entity:valid() then return end
-  task.spawn(function()
-    tween.run(0.4, function(k) if entity:valid() then entity:sprite({ tint = { 1, 1, 1, 1 - k } }) end end)
-    if entity:valid() and not b:alive() then entity:sprite({ visible = false }) end
-  end)
+  local entity = common.sprite_of(b)
+  if entity then common.fade_out(entity, b) end
 end
 
 function Presenter:revived(b)
-  if not b.entity or not b.entity:valid() then return end
-  b.entity:sprite({ visible = true, tint = { 1, 1, 1, 1 } })
+  local entity = common.sprite_of(b)
+  if not entity then return end
+  common.restore(entity)
   sync(b)
 end
 
@@ -251,11 +255,21 @@ function Presenter:reinforcements(payload)
   local first = payload.units[1]
   if first.entity then self.rig:follow(first.entity) end
   sound.play("reinforcements")
-  task.wait(0.6)
+  common.wait(settings.waits.reinforcements)
 end
 
 function Presenter:destroyed(payload)
   self:banner(i18n.t("fe.tactics.destroyed", { name = payload.battler:name() }), 0.8)
+end
+
+--- Experience gained for an action (Battle.settings.exp_per_action): a
+--- popup, and a banner per level gained.
+function Presenter:exp(payload)
+  self:popup(payload.battler, i18n.t("fe.battle.exp_gain", { exp = payload.amount }), ui.theme.good)
+  for _, line in ipairs(common.level_up_lines({ { battler = payload.battler, gains = payload.gains } })) do
+    self:banner(line, settings.waits.level_up)
+    common.wait(settings.waits.level_up)
+  end
 end
 
 --- Terrain changes play the reaction's `sound`, else "terrain_<element>".
@@ -280,8 +294,7 @@ end
 --- on the field world the unit sprites are removed, a battle map is
 --- unloaded. Runs once (finish and abort both end here).
 function Presenter:close()
-  if self.closed then return end
-  self.closed = true
+  if not common.once(self, "closed") then return end
   if self.scene then scene.remove(self.scene) end
   local world = self.battle.tactical and self.battle.tactical.world
   if loaded(world) then
@@ -295,18 +308,21 @@ function Presenter:close()
   end
   for _, b in ipairs(self.battle.battlers) do b.entity = nil end
   self.units = {}
-  local tactical = require("fe.battle.tactical")
+  tactical = tactical or require("fe.battle.tactical")
   if tactical.active == self.battle then tactical.active = nil end
 end
 
---- Victory/defeat banner, then tear down (see Presenter:close).
+--- Victory/defeat banner (a victory lists the rewards and level-ups for a
+--- moment), then tear down (see Presenter:close).
 function Presenter:finish(payload)
   local key = payload.outcome == "victory" and "victory" or payload.outcome == "defeat" and "defeat" or "over"
   self:banner(i18n.t("fe.tactics." .. key), 2)
   if payload.outcome == "victory" and payload.rewards then
-    task.wait(0.5)
+    self.rewards_text = table.concat(common.reward_lines(self.battle, payload.rewards), "\n")
+    common.wait(settings.waits.rewards)
   end
-  task.wait(1.5)
+  common.wait(settings.waits.finish)
+  self.rewards_text = nil
   self:close()
 end
 
@@ -393,6 +409,26 @@ local function preview_order(p, battle, b, moved, acted)
   p.order = scheduler.preview(battle, 10, { battler = b, cost = p.ct_cost })
 end
 
+--- The forecast of `skill` aimed at `cell`: {skill, units, area, results
+--- (preview), positional[unit] (rules.positional_info), counter[unit]
+--- (reactions.forecast)}. Cached per cell until the next battle event.
+function Presenter:forecast_for(b, skill, cell)
+  local key = (cell.x or 0) .. "," .. (cell.z or 0) .. "," .. (cell.layer or 0) .. ":" .. skill.id
+  local cached = self.forecast_cache
+  if cached and cached.key == key and cached.stamp == self.stamp then return cached.value end
+  local battle = self.battle
+  local units, area = grid.affected(battle, b, skill, cell)
+  local value = { skill = skill, units = units, area = area, positional = {}, counter = {},
+    results = #units > 0 and effects.resolve({ user = b, targets = units, source = skill, battle = battle, preview = true }) or {} }
+  local action = { kind = "skill", user = b, skill = skill.id, targets = units, cell = cell }
+  for _, unit in ipairs(units) do
+    value.positional[unit] = rules.positional_info(battle, b, unit)
+    value.counter[unit] = reactions.forecast(battle, unit, action)
+  end
+  self.forecast_cache = { key = key, stamp = self.stamp, value = value }
+  return value
+end
+
 --- Player turn: Move / Act / Wait, with undoable movement. After acting
 --- the unit chooses a facing (plan.choose_facing); Wait chooses it now.
 function Presenter:command(b, battle)
@@ -400,7 +436,7 @@ function Presenter:command(b, battle)
   local plan = { move = {} }
   local origin = { x = b.cell.x, z = b.cell.z, layer = b.cell.layer }
   local origin_facing = b.facing
-  local moved = false
+  local moved, interrupted = false, false -- a move a cell_entered hook stopped cannot be undone
   while true do
     preview_order(self, battle, b, moved, true)
     local options = {
@@ -408,7 +444,9 @@ function Presenter:command(b, battle)
       { label = i18n.t("fe.tactics.command.act"), value = "act" },
       { label = i18n.t("fe.tactics.command.wait"), value = "wait" },
     }
-    if moved then options[#options + 1] = { label = i18n.t("fe.tactics.command.undo"), value = "undo" } end
+    if moved and not interrupted then
+      options[#options + 1] = { label = i18n.t("fe.tactics.command.undo"), value = "undo" }
+    end
     local _, choice = ui.choose(options, { anchor = "bottom-left", width = 90, rows = 4 })
     choice = choice and choice.value
     if choice == "move" then
@@ -422,7 +460,7 @@ function Presenter:command(b, battle)
       world:clear_overlay("move")
       world:clear_overlay("path")
       if dest then
-        grid.walk(battle, b, grid.path_to(cells, dest))
+        interrupted = not grid.walk(battle, b, grid.path_to(cells, dest))
         moved = true
         plan.moved = true
       end
@@ -437,15 +475,19 @@ function Presenter:command(b, battle)
       if skill then
         local cells = grid.range_cells(battle, b, skill)
         world:overlay("range", cells, { color = settings.colors.attack })
+        local shown
         local target = self:pick_cell(cells, cells[1] or b.cell, function(cursor)
           if grid.contains_cell(cells, cursor) then
-            local units, area = grid.affected(battle, b, skill, cursor)
-            world:overlay("area", area, { color = settings.colors.area, order = 1 })
-            self.forecast = { skill = skill, units = units,
-              results = #units > 0 and effects.resolve({ user = b, targets = units, source = skill, battle = battle, preview = true }) or {} }
-          else
+            local forecast = self:forecast_for(b, skill, cursor)
+            if forecast ~= shown then
+              world:overlay("area", forecast.area, { color = settings.colors.area, order = 1 })
+              self.forecast = forecast
+              shown = forecast
+            end
+          elseif shown then
             world:clear_overlay("area")
             self.forecast = nil
+            shown = nil
           end
         end)
         world:clear_overlay("range")

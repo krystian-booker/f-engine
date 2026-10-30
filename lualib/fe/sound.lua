@@ -17,12 +17,20 @@ local catalog = { music = {}, sfx = {}, voice = {} }
 
 local ducking = { buses = { music = 0.5 }, attack = 0.08, release = 0.5 }
 local ducking_applied = false
+-- Which files exist, by path: looked up once per file rather than on every
+-- footstep. Forgotten when the catalog loads again or a file changes.
+local known_files = {}
 
 local function apply_ducking()
   for bus, amount in pairs(ducking.buses) do
     fe.audio.duck(bus, amount, { attack = ducking.attack, release = ducking.release })
   end
   ducking_applied = true
+end
+
+--- Forget which sound files were found (after files are added).
+function sound.forget_files()
+  known_files = {}
 end
 
 function sound.load(path)
@@ -33,6 +41,7 @@ function sound.load(path)
     catalog.sfx = loaded.sfx or {}
     catalog.voice = loaded.voice or {}
   end
+  sound.forget_files()
   apply_ducking()
 end
 
@@ -42,6 +51,19 @@ local function entry(kind, id)
   if value then return value end
   if id:find("[/%.]") then return { file = id } end
   return nil
+end
+
+-- A catalog entry whose file exists, or nil (missing files are remembered
+-- too, so a placeholder id costs one lookup).
+local function playable(kind, id)
+  local e = entry(kind, id)
+  if not e then return nil end
+  local exists = known_files[e.file]
+  if exists == nil then
+    exists = fe.fs.exists(e.file)
+    known_files[e.file] = exists
+  end
+  return exists and e or nil
 end
 
 --- Whether the catalog has a music id.
@@ -74,8 +96,8 @@ end
 --- placeholder sound names never crash a game. Options are those of
 --- fe.audio.sound (position/world for positional one-shots).
 function sound.play(id, options)
-  local e = entry("sfx", id)
-  if not e or not fe.fs.exists(e.file) then return nil end
+  local e = playable("sfx", id)
+  if not e then return nil end
   local settings = { volume = e.volume, pitch = e.pitch }
   for k, v in pairs(options or {}) do settings[k] = v end
   return fe.audio.sound(e.file, settings)
@@ -85,8 +107,8 @@ end
 --- or nil when the line has no recording (so unvoiced text still works).
 ---@return integer?
 function sound.voice(id, options)
-  local e = entry("voice", id)
-  if not e or not fe.fs.exists(e.file) then return nil end
+  local e = playable("voice", id)
+  if not e then return nil end
   if not ducking_applied then apply_ducking() end
   local settings = { volume = e.volume, bus = "voice" }
   for k, v in pairs(options or {}) do settings[k] = v end
@@ -134,5 +156,8 @@ function sound.muffle(on, options)
     fade = options.fade or 0.25,
   })
 end
+
+-- A file added or removed during development may be a sound.
+require("fe.game").file_changed:connect(function() sound.forget_files() end, 0, "fe.sound.files")
 
 return sound

@@ -1,6 +1,8 @@
 #include "engine/services/InputState.h"
+#include "engine/services/InputRecorder.h"
 #include <algorithm>
 #include <cmath>
+#include <set>
 #include <stdexcept>
 #include <utility>
 
@@ -33,7 +35,66 @@ bool stickAxis(std::string_view input) {
     const auto control = input.substr(input.find(':') + 1);
     return control == "leftx" || control == "lefty" || control == "rightx" || control == "righty";
 }
+
+constexpr float DefaultThreshold = 0.5f;
 } // namespace
+
+bool InputState::Edge::down(float value) const {
+    switch (direction) {
+    case 1:
+        return value >= threshold;
+    case -1:
+        return -value >= threshold;
+    default:
+        return std::abs(value) >= threshold;
+    }
+}
+
+bool InputState::analogInput(std::string_view input) const {
+    if (padNumber(input) >= 0) {
+        return true;
+    }
+    for (const auto& [name, axis] : axes_) {
+        if (std::find(axis.analog.begin(), axis.analog.end(), input) != axis.analog.end()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+InputState::Binding InputState::parseBinding(const std::string& bound) const {
+    if (bound.size() > 1 && (bound.ends_with('+') || bound.ends_with('-'))) {
+        auto base = bound.substr(0, bound.size() - 1);
+        if (analogInput(base)) {
+            return {std::move(base), bound.ends_with('-') ? -1 : 1};
+        }
+    }
+    return {bound, 0};
+}
+
+std::vector<InputState::Edge> InputState::edgesOf(const std::string& input) const {
+    std::vector<Edge> edges{{DefaultThreshold, 0}};
+    for (const auto& [name, action] : actions_) {
+        for (const auto& bound : action.inputs) {
+            const auto binding = parseBinding(bound);
+            if (binding.input != input) {
+                continue;
+            }
+            const Edge edge{action.threshold, binding.direction};
+            const bool known = std::any_of(edges.begin(), edges.end(), [&](const Edge& e) {
+                return e.threshold == edge.threshold && e.direction == edge.direction;
+            });
+            if (!known) {
+                edges.push_back(edge);
+            }
+        }
+    }
+    return edges;
+}
+
+bool InputState::sameSide(const std::vector<Edge>& edges, float a, float b) {
+    return std::all_of(edges.begin(), edges.end(), [&](const Edge& e) { return e.down(a) == e.down(b); });
+}
 
 void InputState::define(const std::string& action, std::vector<std::string> inputs, float threshold) {
     if (action.empty()) {
@@ -74,11 +135,15 @@ void InputState::feed(const std::string& input, float value) {
     if (!std::isfinite(value)) {
         return;
     }
-    // Consecutive values on the same side of the threshold collapse into one;
-    // a flood of up/down changes keeps only the oldest and newest few.
+    if (recorder_) {
+        recorder_->input(input, value);
+    }
+    // Consecutive values on the same side of every threshold an action applies
+    // to this input collapse into one; a flood of up/down changes keeps only
+    // the oldest and newest few.
     auto& queue = pending_[input];
     const float clamped = std::clamp(value, -1.0f, 1.0f);
-    if (!queue.empty() && (std::abs(queue.back()) >= 0.5f) == (std::abs(clamped) >= 0.5f)) {
+    if (!queue.empty() && sameSide(edgesOf(input), queue.back(), clamped)) {
         queue.back() = clamped;
     } else {
         queue.push_back(clamped);
@@ -99,10 +164,20 @@ void InputState::feed(const std::string& input, float value) {
 }
 
 void InputState::feedMouse(glm::vec2 position) {
+    if (recorder_) {
+        recorder_->mouse(position);
+    }
     if (glm::length(position - mouse_) > 0.5f) {
         setDevice("mouse");
     }
     mouse_ = position;
+}
+
+void InputState::feedWheel(float delta) {
+    if (recorder_) {
+        recorder_->wheel(delta);
+    }
+    wheel_ += delta;
 }
 
 void InputState::setDevice(const std::string& device, const std::string& name) {
@@ -133,12 +208,19 @@ std::string InputState::deviceType() const {
 }
 
 void InputState::feedText(std::string_view utf8) {
+    if (recorder_) {
+        recorder_->text(utf8);
+    }
     if (pendingText_.size() + utf8.size() <= 4096) {
         pendingText_ += utf8;
     }
 }
 
 void InputState::feedComposition(std::string text, int cursor) {
+    if (recorder_) {
+        recorder_->composition(text, cursor);
+    }
+    composing_ = !text.empty();
     pendingComposition_.emplace(std::move(text), cursor);
 }
 
@@ -156,6 +238,7 @@ void InputState::endText() {
     pendingComposition_.reset();
     composition_.clear();
     compositionCursor_ = 0;
+    composing_ = false;
 }
 
 std::optional<InputState::TextEntry> InputState::takeTextEntryChange() {
@@ -178,14 +261,24 @@ std::vector<InputState::Rumble> InputState::takeRumble() {
 }
 
 void InputState::focusLost() {
-    pendingComposition_.emplace(std::string(), 0);
-    for (auto& [input, queue] : pending_) {
-        queue.assign(1, 0.0f);
+    std::set<std::string> release;
+    for (const auto& [input, queue] : pending_) {
+        release.insert(input);
     }
     for (const auto& [input, value] : raw_) {
         if (value != 0) {
-            pending_[input].assign(1, 0.0f);
+            release.insert(input);
         }
+    }
+    for (const auto& input : release) {
+        // Queued presses are dropped, not delivered: nothing is held after focus loss.
+        pending_[input].assign(1, 0.0f);
+        if (recorder_) {
+            recorder_->input(input, 0);
+        }
+    }
+    if (composing_) {
+        feedComposition(std::string(), 0);
     }
 }
 
@@ -194,16 +287,17 @@ void InputState::applyPending() {
     for (auto it = pending_.begin(); it != pending_.end();) {
         auto& [input, queue] = *it;
         float& state = raw_[input];
+        const auto edges = edgesOf(input);
         bool changed = false;
         while (!queue.empty()) {
             const float value = queue.front();
-            const bool down = std::abs(value) >= 0.5f;
-            if (down != (std::abs(state) >= 0.5f)) {
+            if (!sameSide(edges, state, value)) {
                 if (changed) {
                     break;
                 }
                 changed = true;
-                if (down && !stickAxis(input)) {
+                const bool wasDown = std::abs(state) >= DefaultThreshold;
+                if (std::abs(value) >= DefaultThreshold && !wasDown && !stickAxis(input)) {
                     pressedInputs_.push_back(input);
                 }
             }
@@ -224,11 +318,12 @@ void InputState::tick(double dt) {
     applyPending();
     for (auto& [name, action] : actions_) {
         bool held = false;
-        for (const auto& input : action.inputs) {
-            const float value = raw(input);
-            const bool negative = input.ends_with("-");
-            const auto base = negative || input.ends_with("+") ? input.substr(0, input.size() - 1) : input;
-            const float directed = input == base ? std::abs(value) : (negative ? -raw(base) : raw(base));
+        for (const auto& bound : action.inputs) {
+            const auto binding = parseBinding(bound);
+            const float value = raw(binding.input);
+            const float directed = binding.direction == 0 ? std::abs(value)
+                                   : binding.direction < 0 ? -value
+                                                           : value;
             held = held || directed >= action.threshold;
         }
         action.pressed = held && !action.held;
@@ -240,10 +335,10 @@ void InputState::tick(double dt) {
     for (auto& [name, axis] : axes_) {
         float value = 0;
         for (const auto& input : axis.positive) {
-            value += raw(input) >= 0.5f ? 1.0f : 0.0f;
+            value += raw(input) >= DefaultThreshold ? 1.0f : 0.0f;
         }
         for (const auto& input : axis.negative) {
-            value -= raw(input) >= 0.5f ? 1.0f : 0.0f;
+            value -= raw(input) >= DefaultThreshold ? 1.0f : 0.0f;
         }
         for (const auto& input : axis.analog) {
             const float analog = raw(input);

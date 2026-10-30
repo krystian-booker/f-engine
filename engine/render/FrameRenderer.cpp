@@ -184,7 +184,7 @@ void FrameRenderer::render(const std::vector<WorldDraw>& draws, const Canvas& ca
             output = {frame_.get(), glm::ivec4(0, 0, viewport)};
         }
         const glm::ivec2 outSize(output.rect.z, output.rect.w);
-        const auto sceneSize = glm::max(glm::ivec2(1), outSize / std::max(1, settings.pixelScale));
+        const auto sceneSize = sceneSizeFor(outSize, settings.pixelScale);
         auto& scene = scenes_.acquire({sceneSize.x, sceneSize.y}, [&] { return SceneTarget(sceneSize); });
         const float aspect = static_cast<float>(outSize.x) / static_cast<float>(outSize.y);
         const auto* camera =
@@ -195,7 +195,7 @@ void FrameRenderer::render(const std::vector<WorldDraw>& draws, const Canvas& ca
             take();
         }
         worlds_.render(world, slot, alpha, time, aspect, views, scene, calls_);
-        post_.render(world, screen, scene, output, time, take, calls_);
+        post_.render(world, screen, scene, output, alpha, time, take, calls_);
     }
 
     if (!sceneCaptures_.empty()) {
@@ -214,7 +214,7 @@ void FrameRenderer::render(const std::vector<WorldDraw>& draws, const Canvas& ca
     canvas_.render(
         canvas, viewport, take(), frame_.get(), time,
         [this](std::string_view name) -> bgfx::TextureHandle {
-            const auto* target = named_.find(std::string(name));
+            const auto* target = named_.find(name); // no string built per quad
             return target ? target->color.get() : bgfx::TextureHandle BGFX_INVALID_HANDLE;
         },
         calls_);
@@ -241,7 +241,8 @@ void FrameRenderer::render(const std::vector<WorldDraw>& draws, const Canvas& ca
         screen.flash,
         glm::vec4(std::clamp(screen.letterbox, 0.0f, 1.0f) * screen.letterboxHeight, aspect,
                   bgfx::getCaps()->originBottomLeft ? 1.0f : 0.0f, frozen ? 1.0f : 0.0f),
-        glm::vec4(screen.radialBlur, screen.radialCentre, screen.chromatic)};
+        glm::vec4(screen.radialBlur, screen.radialCentre, screen.chromatic),
+        packOutput(renderer_.output())};
     bgfx::setUniform(uniforms_.present.get(), present, Uniforms::PresentCount);
     bgfx::setTexture(0, uniforms_.frame.get(), frameColor_.get(), PointClamp);
     bgfx::setTexture(1, freezeSampler_.get(), frozen ? freezeColor_.get() : frameColor_.get(), LinearClamp);

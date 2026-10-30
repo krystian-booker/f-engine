@@ -1,4 +1,5 @@
 #include "engine/audio/MiniAudio.h"
+#include "engine/audio/PitchShift.h"
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -88,6 +89,29 @@ void mixUntil(MiniAudio& audio, const std::function<bool()>& done, double limit 
         play(audio, 0.01);
     }
 }
+
+// The frequency (Hz) with the largest DFT magnitude in the left channel of
+// interleaved stereo, over `frames` from `start`, scanning `from`..`to` in
+// 4 Hz steps.
+double peakFrequency(const std::vector<float>& stereo, std::size_t start, std::size_t frames, double from = 100,
+                     double to = 2000) {
+    double bestHertz = 0, best = -1;
+    for (double hertz = from; hertz <= to; hertz += 4) {
+        double re = 0, im = 0;
+        for (std::size_t i = 0; i < frames; ++i) {
+            const double phase = 2 * 3.14159265358979 * hertz * static_cast<double>(i) / 48000.0;
+            const double x = stereo[(start + i) * 2];
+            re += x * std::cos(phase);
+            im -= x * std::sin(phase);
+        }
+        const double magnitude = re * re + im * im;
+        if (magnitude > best) {
+            best = magnitude;
+            bestHertz = hertz;
+        }
+    }
+    return bestHertz;
+}
 } // namespace
 
 TEST_CASE("music plays at its volume, not the volume squared") {
@@ -132,6 +156,66 @@ TEST_CASE("stopped looping voices are released on the mixer clock, without game 
     CHECK(audio.activeSounds() == 1);
     play(audio, 0.4);
     CHECK(audio.activeSounds() == 0);
+}
+
+TEST_CASE("bus volumes range 0 to 4 like music and voice volumes") {
+    MiniAudio audio(false);
+    audio.setBusVolume("sfx", 2.5f);
+    CHECK(audio.busVolume("sfx") == doctest::Approx(2.5f));
+    audio.setBusVolume("sfx", 9.0f);
+    CHECK(audio.busVolume("sfx") == doctest::Approx(4.0f));
+    audio.setBusVolume("sfx", -1.0f);
+    CHECK(audio.busVolume("sfx") == doctest::Approx(0.0f));
+    audio.setBusVolume("sfx", 1.0f);
+    // The group carries the gain: a doubled bus doubles the output.
+    audio.playSound(toneFile(), SoundOptions{});
+    const double unity = rms(play(audio, 0.3), 0);
+    audio.setBusVolume("sfx", 2.0f);
+    const double doubled = rms(play(audio, 0.3), 0);
+    CHECK(doubled == doctest::Approx(unity * 2).epsilon(0.1));
+}
+
+TEST_CASE("the voice cap steals the oldest non-looping voice on the lowest-priority bus") {
+    MiniAudio audio(false);
+    CHECK(audio.maxVoices() == 64);
+    audio.setMaxVoices(3);
+    SoundOptions sfx, speech, loop;
+    speech.bus = "voice";
+    loop.loop = true;
+    const int firstSfx = audio.playSound(toneFile(), sfx);
+    const int line = audio.playSound(toneFile(), speech);
+    const int secondSfx = audio.playSound(toneFile(), sfx);
+    play(audio, 0.05);
+    CHECK(audio.activeSounds() == 3);
+    // Full: the oldest sfx goes, not the older voice line.
+    const int third = audio.playSound(toneFile(), sfx);
+    CHECK(audio.activeSounds() == 3);
+    CHECK_FALSE(audio.playing(firstSfx));
+    CHECK(audio.playing(line));
+    CHECK(audio.playing(secondSfx));
+    CHECK(audio.playing(third));
+    // Looping voices are kept while a non-looping one exists, even on a higher bus.
+    audio.stopSound(secondSfx, 0);
+    audio.stopSound(third, 0);
+    audio.update(0);
+    const int ambience = audio.playSound(toneFile(), loop);
+    const int otherLoop = audio.playSound(toneFile(), loop);
+    CHECK(audio.activeSounds() == 3);
+    const int fourth = audio.playSound(toneFile(), sfx);
+    CHECK_FALSE(audio.playing(line));
+    CHECK(audio.playing(ambience));
+    CHECK(audio.playing(otherLoop));
+    CHECK(audio.playing(fourth));
+    // A voice already fading out is the first to go.
+    audio.stopSound(otherLoop, 1.0);
+    audio.playSound(toneFile(), sfx);
+    CHECK(audio.playing(ambience));
+    CHECK(audio.playing(fourth));
+    CHECK(audio.activeSounds() == 3);
+    // Lowering the cap drops voices at once.
+    audio.setMaxVoices(1);
+    CHECK(audio.activeSounds() == 1);
+    CHECK(audio.playing(ambience)); // the one looping voice outlives the one-shots
 }
 
 TEST_CASE("one-shots end by themselves; missing files throw") {
@@ -353,4 +437,202 @@ TEST_CASE("positional sounds are attenuated and panned from their listener") {
     CHECK(audio.voiceMix(voice).pan == doctest::Approx(-1));
     audio.setListeners({});
     CHECK(audio.voiceMix(voice).gain == 0);
+}
+
+TEST_CASE("decoded effects stay under the cache budget; the least recently played go first") {
+    MiniAudio audio(false);
+    REQUIRE(audio.soundCacheBudget() == std::size_t{64} << 20);
+    const auto a = tone("cache-a", 0.5), b = tone("cache-b", 0.5), c = tone("cache-c", 0.5);
+    const std::size_t one = 48000 / 2 * 2 * sizeof(float); // half a second of f32 stereo
+    audio.setSoundCacheBudget(one * 2 + 1024);
+    audio.playSound(a, SoundOptions{});
+    play(audio, 0.7);
+    CHECK(audio.soundCached(a));
+    CHECK(audio.soundCacheBytes() == one);
+    audio.playSound(b, SoundOptions{});
+    play(audio, 0.7);
+    CHECK(audio.soundCached(a));
+    CHECK(audio.soundCached(b));
+    audio.playSound(a, SoundOptions{}); // a is now the most recently played
+    play(audio, 0.7);
+    audio.playSound(c, SoundOptions{});
+    play(audio, 0.7);
+    CHECK_FALSE(audio.soundCached(b)); // over budget: b was played longest ago
+    CHECK(audio.soundCached(a));
+    CHECK(audio.soundCached(c));
+    CHECK(audio.soundCacheBytes() <= audio.soundCacheBudget());
+    // A playing sound is never dropped, however small the budget.
+    SoundOptions looping;
+    looping.loop = true;
+    const int voice = audio.playSound(c, looping);
+    audio.setSoundCacheBudget(1);
+    play(audio, 0.2);
+    CHECK(audio.soundCached(c));
+    CHECK_FALSE(audio.soundCached(a));
+    CHECK(audio.playing(voice));
+    audio.stopSound(voice, 0);
+    play(audio, 0.1);
+    CHECK_FALSE(audio.soundCached(c));
+    CHECK(audio.soundCacheBytes() == 0);
+}
+
+TEST_CASE("effects longer than the stream threshold stream instead of being decoded") {
+    MiniAudio audio(false);
+    CHECK(audio.soundStreamThreshold() == doctest::Approx(10));
+    audio.setSoundStreamThreshold(0.5);
+    const auto file = tone("long", 3);
+    const int voice = audio.playSound(file, SoundOptions{});
+    mixUntil(audio, [&] { return audio.position(voice) > 0.1; });
+    CHECK(audio.playing(voice));
+    CHECK(audio.position(voice) > 0.1);
+    CHECK_FALSE(audio.soundCached(file));
+    CHECK(audio.soundCacheBytes() == 0);
+    const int cached = audio.playSound(tone("short", 0.2), SoundOptions{});
+    play(audio, 0.1);
+    CHECK(audio.playing(cached));
+    CHECK(audio.soundCached(tone("short", 0.2)));
+}
+
+TEST_CASE("the master limiter keeps a loud mix under full scale and leaves quiet sound alone") {
+    auto peakOf = [](bool limiter, float volume, int voices) {
+        MiniAudio audio(false);
+        audio.setMasterLimiter(limiter);
+        SoundOptions options;
+        options.loop = true;
+        options.volume = volume;
+        for (int i = 0; i < voices; ++i) {
+            audio.playSound(toneFile(), options);
+        }
+        play(audio, 0.2);
+        const auto out = play(audio, 0.3);
+        float peak = 0;
+        for (const float s : out) {
+            peak = std::max(peak, std::abs(s));
+        }
+        return std::make_pair(peak, rms(out, 0));
+    };
+    MiniAudio defaults(false);
+    CHECK(defaults.masterLimiter());
+    const auto [loudPeak, loudRms] = peakOf(true, 4, 3);
+    const auto [rawPeak, rawRms] = peakOf(false, 4, 3);
+    CHECK(rawPeak > 1.5f);
+    CHECK(loudPeak <= 1.0f);
+    CHECK(loudPeak > 0.9f);
+    const auto [quietPeak, quietRms] = peakOf(true, 0.5f, 1);
+    const auto [quietRawPeak, quietRawRms] = peakOf(false, 0.5f, 1);
+    CHECK(quietRms == doctest::Approx(quietRawRms).epsilon(0.01));
+    CHECK(quietPeak == doctest::Approx(quietRawPeak).epsilon(0.01));
+}
+
+TEST_CASE("music cued in one tick starts together; a later tick's cue is its own group") {
+    MiniAudio audio(false);
+    const auto file = tone("long", 3);
+    MusicOptions first;
+    first.layer = "pads";
+    audio.playMusic(file, first);
+    mixUntil(audio, [&] { return audio.musicPosition("pads") > 0; }); // ticks pass: later cues form another group
+    MusicOptions drums, bass;
+    drums.layer = "drums";
+    bass.layer = "bass";
+    audio.playMusic(file, drums);
+    audio.playMusic(file, bass);
+    mixUntil(audio, [&] { return audio.musicPosition("bass") > 0.2; });
+    CHECK(audio.musicPosition("drums") == doctest::Approx(audio.musicPosition("bass")).epsilon(1e-6));
+    CHECK(audio.musicPosition("pads") > audio.musicPosition("bass")); // cued and started a tick earlier
+}
+
+TEST_CASE("the pitch shifter moves a tone an octave without changing how long it plays") {
+    constexpr std::size_t frames = 48000;
+    std::vector<float> in(frames * 2), out;
+    for (std::size_t i = 0; i < frames; ++i) {
+        in[i * 2] = in[i * 2 + 1] =
+            0.5f * static_cast<float>(std::sin(2 * 3.14159265358979 * 440 * static_cast<double>(i) / 48000));
+    }
+    CHECK(peakFrequency(in, 9600, 16384) == doctest::Approx(440).epsilon(0.02));
+    const auto render = [&](float ratio) {
+        PitchShift shift(48000);
+        shift.setRatio(ratio);
+        std::vector<float> result;
+        std::size_t produced = 0;
+        for (std::size_t block = 0; block < frames; block += 480) { // the mixer's 10 ms pulls
+            std::vector<float> chunk(480 * 2);
+            shift.process(in.data() + block * 2, chunk.data(), 480);
+            result.insert(result.end(), chunk.begin(), chunk.end());
+            produced += 480;
+        }
+        CHECK(produced == frames); // frame for frame: the duration is kept (within 2%)
+        CHECK(static_cast<double>(result.size() / 2) == doctest::Approx(frames).epsilon(0.02));
+        return result;
+    };
+    out = render(2.0f);
+    CHECK(peakFrequency(out, 9600, 16384) == doctest::Approx(880).epsilon(0.02));
+    CHECK(rms(out, 0) == doctest::Approx(rms(in, 0)).epsilon(0.3)); // level roughly kept
+    out = render(0.5f);
+    CHECK(peakFrequency(out, 9600, 16384) == doctest::Approx(220).epsilon(0.02));
+    out = render(1.0f); // 1 copies the input straight through
+    CHECK(out == in);
+    CHECK(PitchShift::supports(0.5f));
+    CHECK(PitchShift::supports(2.0f));
+    CHECK_FALSE(PitchShift::supports(0.25f));
+    CHECK_FALSE(PitchShift::supports(4.0f));
+    PitchShift shift(48000);
+    shift.setRatio(4.0f); // unsupported: passes through
+    CHECK(shift.ratio() == 1.0f);
+    CHECK(shift.latency(2.0f) > shift.latency(1.0f));
+}
+
+TEST_CASE("preserve_speed shifts the pitch and keeps the playback time; outside its range it is varispeed") {
+    MiniAudio audio(false);
+    const auto file = tone("long", 3); // 382 Hz
+    MusicOptions options;
+    options.pitch = 2;
+    options.preserveSpeed = true;
+    options.fade = 0;
+    audio.playMusic(file, options);
+    mixUntil(audio, [&] { return audio.musicPosition("main") > 0.1; });
+    double before = audio.musicPosition("main");
+    auto output = play(audio, 0.5);
+    CHECK(audio.musicPosition("main") - before == doctest::Approx(0.5).epsilon(0.05)); // real time
+    CHECK(peakFrequency(output, 4800, 16384) == doctest::Approx(764).epsilon(0.03));   // an octave up
+    CHECK(audio.musicPitch("main") == doctest::Approx(2));
+    audio.setMusicPitch("main", 2); // varispeed again: twice as fast
+    before = audio.musicPosition("main");
+    play(audio, 0.3);
+    CHECK(audio.musicPosition("main") - before == doctest::Approx(0.6).epsilon(0.05));
+    audio.setMusicPitch("main", 0.5f, true);
+    before = audio.musicPosition("main");
+    output = play(audio, 0.5);
+    CHECK(audio.musicPosition("main") - before == doctest::Approx(0.5).epsilon(0.05));
+    CHECK(peakFrequency(output, 4800, 16384) == doctest::Approx(191).epsilon(0.04));
+
+    SoundOptions looping;
+    looping.loop = true;
+    looping.pitch = 1.5f;
+    looping.preserveSpeed = true;
+    const int voice = audio.playSound(file, looping);
+    mixUntil(audio, [&] { return audio.position(voice) > 0; });
+    CHECK(audio.voiceShifted(voice));
+    before = audio.position(voice);
+    play(audio, 0.4);
+    CHECK(audio.position(voice) - before == doctest::Approx(0.4).epsilon(0.05));
+    // Beyond the shifter's range the voice plays as varispeed (logged once).
+    audio.setSound(voice, {.pitch = 4.0f, .preserveSpeed = true});
+    CHECK_FALSE(audio.voiceShifted(voice));
+    before = audio.position(voice);
+    play(audio, 0.3);
+    CHECK(audio.position(voice) - before == doctest::Approx(1.2).epsilon(0.05));
+    // A pitch change that says nothing about speed keeps the last choice.
+    audio.setSound(voice, {.pitch = 0.75f});
+    CHECK(audio.voiceShifted(voice));
+    before = audio.position(voice);
+    play(audio, 0.4);
+    CHECK(audio.position(voice) - before == doctest::Approx(0.4).epsilon(0.05));
+    audio.setSound(voice, {.preserveSpeed = false});
+    CHECK_FALSE(audio.voiceShifted(voice));
+    before = audio.position(voice);
+    play(audio, 0.4);
+    CHECK(audio.position(voice) - before == doctest::Approx(0.3).epsilon(0.05));
+    // Voices that never asked for it have no shifter.
+    const int plain = audio.playSound(file, SoundOptions{});
+    CHECK_FALSE(audio.voiceShifted(plain));
 }

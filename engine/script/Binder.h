@@ -22,6 +22,9 @@ public:
         std::string owner; // "fe.world" or a class name
         std::string name, signature, doc;
         Kind kind = Kind::Function;
+        // Parameters the C++ reads (without self and sol::this_state), or -1
+        // when unknown; add() checks it against the signature's count.
+        int arity = -1;
     };
     struct Owner {
         std::string name, doc;
@@ -33,14 +36,24 @@ public:
     };
     void owner(const std::string& name, const std::string& doc, bool isClass);
     void alias(Alias alias) { aliases_.push_back(std::move(alias)); }
-    void add(Entry entry) { entries_.push_back(std::move(entry)); }
+    // Records an entry. A function or method whose LuaLS signature ("fun(...)")
+    // declares a different number of parameters than its C++ reads is a
+    // documentation bug: development builds (FENGINE_DEV) throw
+    // std::logic_error here, at registration, and every build refuses to
+    // write the API files (problems()), so tools/ci/check_api.py fails too.
+    void add(Entry entry);
+    [[nodiscard]] const std::vector<std::string>& problems() const { return problems_; }
     void writeStubs(const std::filesystem::path& file) const;
     void writeMarkdown(const std::filesystem::path& file) const;
+    // Parameters a LuaLS function type declares: "fun(a: x, b?: {c: y, d: z}): r" has 2.
+    static int signatureArity(const std::string& signature);
 
 private:
+    void checkWritable() const;
     std::vector<Alias> aliases_;
     std::vector<Owner> owners_;
     std::vector<Entry> entries_;
+    std::vector<std::string> problems_;
 };
 
 namespace detail {
@@ -56,6 +69,18 @@ template<class R, class... A> struct Signature<R (*)(A...)> {
 template<class R, class... A> struct Signature<R(A...)> {
     using Type = R(A...);
 };
+
+// How many parameters a binding reads from Lua: its C++ parameters without
+// sol::this_state (which sol2 supplies). A method's object counts as one.
+template<class T> struct ParameterCount;
+template<class R, class... A> struct ParameterCount<R(A...)> {
+    static constexpr int value =
+        ((std::is_same_v<std::remove_cvref_t<A>, sol::this_state> ? 0 : 1) + ... + 0);
+};
+
+// Raises "'fe.app.title' takes no arguments (got 1)", naming the set_ twin of
+// a getter when the owner module has one.
+[[noreturn]] void noArguments(LuaHost& host, const std::string& function, bool method, int got);
 
 template<class F, class R, class... A> auto guard(LuaHost& host, F function, R (*)(A...)) {
     return [&host, function = std::move(function)](A... args) -> R {
@@ -174,12 +199,21 @@ template<class A> Stored<A> argument(lua_State* state, int& next, const std::str
 }
 
 // Like guard, but the wrapper reads the arguments itself, so a wrong one
-// raises an error naming the documented types instead of sol2's C++ names.
+// raises an error naming the documented types instead of sol2's C++ names. A
+// function or method that takes no arguments rejects any it is given, so a
+// getter called with a setter's old spelling raises instead of only reading.
 template<class F, class R, class... A>
-auto convertingGuard(LuaHost& host, std::string function, F implementation, R (*)(A...)) {
-    return [&host, function = std::move(function), implementation = std::move(implementation)](
+auto convertingGuard(LuaHost& host, std::string function, bool method, F implementation, R (*)(A...)) {
+    constexpr int count = ParameterCount<R(A...)>::value;
+    return [&host, function = std::move(function), method, implementation = std::move(implementation)](
                [[maybe_unused]] sol::this_state state, sol::variadic_args) -> R {
         const LuaHost::BindingCall call(host);
+        (void)method; // only read for functions and methods without arguments
+        if constexpr (count == 0 || count == 1) {
+            if (count == (method ? 1 : 0) && lua_gettop(state) > count) {
+                noArguments(host, function, method, lua_gettop(state) - count);
+            }
+        }
         // Unused when the function takes no arguments.
         [[maybe_unused]] int next = 1;
         // Braced initialisation reads the arguments left to right.
@@ -200,12 +234,18 @@ template<class F> auto guarded(LuaHost& host, F&& function) {
 }
 
 // guarded, also reading the arguments (functions and methods; `name` is how
-// errors name the function, e.g. "fe.world.load" or "World:spawn").
-template<class F> auto guardedCall(LuaHost& host, std::string name, F&& function) {
+// errors name the function, e.g. "fe.world.load" or "World:spawn"; a method's
+// first parameter is the object).
+template<class F> auto guardedCall(LuaHost& host, std::string name, bool method, F&& function) {
     using Function = std::decay_t<F>;
     using Type = typename detail::Signature<Function>::Type;
-    return detail::convertingGuard(host, std::move(name), Function(std::forward<F>(function)),
+    return detail::convertingGuard(host, std::move(name), method, Function(std::forward<F>(function)),
                                    static_cast<Type*>(nullptr));
+}
+
+// The arguments a function or method reads from Lua (see ParameterCount).
+template<class F> constexpr int arity(bool method) {
+    return detail::ParameterCount<typename detail::Signature<std::decay_t<F>>::Type>::value - (method ? 1 : 0);
 }
 
 // Registers functions on a module table such as fe.world.
@@ -219,13 +259,14 @@ public:
     template<class F>
     ModuleBinder& fn(const char* name, F&& function, const char* signature, const char* doc) {
         // Lua holds only a pointer; the host owns the function (LuaHost::keep).
-        auto* stored = host_.keep(guardedCall(host_, name_ + "." + name, std::forward<F>(function)));
+        auto* stored =
+            host_.keep(guardedCall(host_, name_ + "." + name, false, std::forward<F>(function)));
         auto call = [stored](sol::this_state state, sol::variadic_args args) -> decltype(auto) {
             return (*stored)(state, args);
         };
         static_assert(std::is_trivially_destructible_v<decltype(call)>);
         table_.set_function(name, call);
-        docs_.add({name_, name, signature, doc, BindingDocs::Kind::Function});
+        docs_.add({name_, name, signature, doc, BindingDocs::Kind::Function, arity<F>(false)});
         return *this;
     }
 
@@ -254,9 +295,9 @@ public:
     }
     template<class F>
     TypeBinder& method(const char* name, F&& function, const char* signature, const char* doc) {
-        type_.set_function(name, guardedCall(host_, name_ + ":" + name, std::forward<F>(function)));
+        type_.set_function(name, guardedCall(host_, name_ + ":" + name, true, std::forward<F>(function)));
         members_.readable.insert(name);
-        docs_.add({name_, name, signature, doc, BindingDocs::Kind::Method});
+        docs_.add({name_, name, signature, doc, BindingDocs::Kind::Method, arity<F>(true)});
         return *this;
     }
     template<class G, class S>

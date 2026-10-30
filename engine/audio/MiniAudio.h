@@ -23,9 +23,12 @@ namespace fe {
 // moment ahead and scheduled to start exactly then. Seeking main re-cues its
 // synced stems with it.
 //
-// Signal flow: sound -> bus group (volume) -> bus effects (low-pass, reverb,
-// ducking) -> master group -> master effects -> device. The buses master,
-// music, sfx and voice always exist; others are created on first use.
+// Signal flow: sound [-> pitch shifter] -> bus group (volume) -> bus effects
+// (low-pass, reverb, ducking) -> master group -> master effects -> device. The
+// buses master, music, sfx and voice always exist; others are created on first
+// use. A sound asked to keep its speed under a pitch change gets a PitchShift
+// node of its own between it and its bus; otherwise pitch is miniaudio's
+// resampler (varispeed).
 class MiniAudio final : public Audio {
 public:
     static constexpr unsigned SampleRate = 48000, Channels = 2;
@@ -38,7 +41,7 @@ public:
     void playMusic(const std::filesystem::path& file, const MusicOptions& options) override;
     void stopMusic(const std::string& layer, double fade) override;
     void setMusicVolume(const std::string& layer, float volume, double fade) override;
-    void setMusicPitch(const std::string& layer, float pitch) override;
+    void setMusicPitch(const std::string& layer, float pitch, bool preserveSpeed = false) override;
     [[nodiscard]] float musicVolume(const std::string& layer) const override;
     [[nodiscard]] float musicPitch(const std::string& layer) const override;
     [[nodiscard]] std::string currentMusic(const std::string& layer) const override;
@@ -66,6 +69,28 @@ public:
 
     // Stops the device while the game is suspended (window in background).
     void setPaused(bool paused);
+    // Decoded sound effects are kept up to this many bytes (default 64 MiB;
+    // decoded audio is f32 stereo at 48 kHz, 384 KB per second). Over the
+    // budget the least recently played files are dropped first; a file a
+    // voice is still playing is never dropped. Files longer than the stream
+    // threshold (default 10 s) stream from disk instead of being decoded.
+    void setSoundCacheBudget(std::size_t bytes);
+    [[nodiscard]] std::size_t soundCacheBudget() const;
+    [[nodiscard]] std::size_t soundCacheBytes() const; // decoded bytes held now
+    [[nodiscard]] bool soundCached(const std::filesystem::path& file) const;
+    void setSoundStreamThreshold(double seconds);
+    [[nodiscard]] double soundStreamThreshold() const;
+    // At most this many voices (one-shots and looping effects, fading ones
+    // included) play at once, 64 by default. A sound started when the cap is
+    // reached steals a voice: one already fading out if any, else the oldest
+    // non-looping voice on the lowest-priority bus (sfx, then game-defined
+    // buses, voice, music); only when every voice loops is a looping one
+    // stolen. A stolen voice stops at once and no longer reports `playing`.
+    void setMaxVoices(std::size_t count);
+    [[nodiscard]] std::size_t maxVoices() const;
+    // The soft limiter on the master bus (BusDsp), on by default.
+    void setMasterLimiter(bool on);
+    [[nodiscard]] bool masterLimiter() const;
     // Mixes frames, advancing the mixer clock; the interleaved stereo output
     // is appended to `output` when given.
     void mix(std::uint32_t frames, std::vector<float>* output = nullptr);
@@ -76,6 +101,8 @@ public:
     [[nodiscard]] std::size_t activeSounds() const;
     [[nodiscard]] Spatial voiceMix(int voice) const;
     [[nodiscard]] float duckGain(const std::string& bus) const;
+    // Whether a voice plays through a pitch shifter (preserveSpeed within range).
+    [[nodiscard]] bool voiceShifted(int voice) const;
 
 private:
     struct Impl;

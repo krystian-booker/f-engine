@@ -38,12 +38,6 @@ WorldDraw worldDraw(Engine& engine, const std::shared_ptr<World>& world, const s
         }
         draw.target = *target;
     }
-    if (!draw.target.empty()) {
-        const auto& canvas = engine.canvas();
-        const glm::vec2 size =
-            draw.rect ? glm::vec2(draw.rect->w, draw.rect->h) : glm::vec2(canvas.width(), canvas.height());
-        engine.canvas().defineTarget(draw.target, glm::ivec2(glm::round(size)));
-    }
     if (const auto override = lua::options(lua::field(t, "camera"), "Field 'camera'")) {
         const auto& c = *override;
         Camera camera = world->camera();
@@ -54,6 +48,10 @@ WorldDraw worldDraw(Engine& engine, const std::shared_ptr<World>& world, const s
         camera.pitch = std::clamp(lua::get(c, "pitch", camera.pitch), -89.0f, 89.9f);
         camera.distance = std::clamp(lua::get(c, "distance", camera.distance), 0.1f, 10000.0f);
         camera.fov = std::clamp(lua::get(c, "fov", camera.fov), 1.0f, 170.0f);
+        camera.orthographic = lua::get(c, "orthographic", camera.orthographic);
+        if (const auto height = lua::opt<float>(lua::field(c, "ortho_height"), "Field 'ortho_height'")) {
+            camera.orthoHeight = *height <= 0 ? 0.0f : lua::within(*height, 0.01f, 100000.0f, "ortho_height");
+        }
         camera.shake = lua::vec3(lua::field(c, "shake"), glm::vec3(0));
         camera.snap();
         draw.camera = camera;
@@ -62,6 +60,13 @@ WorldDraw worldDraw(Engine& engine, const std::shared_ptr<World>& world, const s
         auto environment = world->environment().toJson();
         environment.merge_patch(Json{{"post", luaToJson(*post)}});
         draw.post = Environment::fromJson(environment).post;
+    }
+    // Everything validated: only now does a target get (re)defined.
+    if (!draw.target.empty()) {
+        const auto& canvas = engine.canvas();
+        const glm::vec2 size =
+            draw.rect ? glm::vec2(draw.rect->w, draw.rect->h) : glm::vec2(canvas.width(), canvas.height());
+        engine.canvas().defineTarget(draw.target, glm::ivec2(glm::round(size)));
     }
     return draw;
 }
@@ -100,8 +105,23 @@ const char* eventName(WorldEvent::Kind kind) {
         return "zone_enter";
     case WorldEvent::Kind::ZoneExit:
         return "zone_exit";
+    case WorldEvent::Kind::CellEnter:
+        return "cell_enter";
     }
     return "unknown";
+}
+} // namespace
+
+std::uint32_t gridTagBits(const Grid& grid, const sol::object& names, const char* what) {
+    std::uint32_t mask = 0;
+    for (const auto& name : lua::strings(names)) {
+        const auto bit = grid.tagMask({name});
+        if (!bit) {
+            throw std::runtime_error(std::string(what) + ": the map grid has no tag '" + name + "'");
+        }
+        mask |= bit;
+    }
+    return mask;
 }
 
 StepRules stepRules(LuaHost& host, World& world, const sol::object& value) {
@@ -113,6 +133,8 @@ StepRules stepRules(LuaHost& host, World& world, const sol::object& value) {
     const auto& t = *options;
     rules.diagonal = lua::get(t, "diagonal", rules.diagonal);
     rules.ladders = lua::get(t, "ladders", rules.ladders);
+    rules.footprint = lua::within(lua::get(t, "footprint", rules.footprint), 1, MaxFootprint, "rules.footprint");
+    rules.fly = lua::get(t, "fly", rules.fly);
     const float step = lua::get(t, "max_step", rules.maxUp);
     rules.maxUp = lua::get(t, "max_up", step);
     rules.maxDown = lua::get(t, "max_down", step);
@@ -120,6 +142,7 @@ StepRules stepRules(LuaHost& host, World& world, const sol::object& value) {
         throw std::runtime_error("max_step, max_up and max_down must be non-negative numbers");
     }
     rules.blockedTags = world.grid().tagMask(lua::strings(lua::field(t, "blocked_tags")));
+    rules.requiredTags = gridTagBits(world.grid(), lua::field(t, "required_tags"), "rules.required_tags");
     if (const auto costs = lua::options(lua::field(t, "tag_costs"), "Field 'tag_costs'")) {
         for (const auto& [key, value] : *costs) {
             if (key.get_type() != sol::type::string) {
@@ -203,6 +226,7 @@ StepRules stepRules(LuaHost& host, World& world, const sol::object& value) {
     return rules;
 }
 
+namespace {
 void markStep(sol::table& t, StepKind kind) {
     if (kind == StepKind::Jump) {
         t["jump"] = true;
@@ -330,7 +354,7 @@ void bindGrid(TypeBinder<WorldRef>& type) {
         .method(
             "cells_with_tag",
             [](sol::this_state s, const WorldRef& w, const std::string& tag) {
-                auto& grid = w.get().grid();
+                const auto& grid = w.get().grid();
                 const auto mask = grid.tagMask({tag});
                 std::vector<GridPos> cells;
                 for (int l = 0; mask && l < grid.layerCount(); ++l) {
@@ -365,12 +389,20 @@ void bindGrid(TypeBinder<WorldRef>& type) {
             "fun(from: Cell, to: Cell, rules?: table): {truncated?: true, [integer]: {x: integer, z: "
             "integer, "
             "layer: integer, jump?: true, climb?: true}}",
-            "A* path of cells (excluding the start). Rules: diagonal, max_step, max_up, max_down, "
-            "blocked_tags, tag_costs (non-negative extra cost per tag), blocked, no_stop, zoc (cells that "
+            "A* path of cells (excluding the start; empty when none exists, found without a search when the "
+            "goal cannot be entered or, without fly or jump, lies in another connected part of the grid). "
+            "Rules: diagonal, max_step, max_up, max_down, "
+            "footprint (1 to 8 cells per side, anchored at the cell towards +x and +z), fly (unwalkable "
+            "cells and height steps are ignored), "
+            "blocked_tags, required_tags (cells with none of them cannot be entered; every name must be "
+            "in the map's tag list), tag_costs (non-negative extra cost per tag), blocked, no_stop, zoc "
+            "(cells that "
             "end movement), jump = {distance, max_up?, max_down?, diagonal?} (gap jumps along the axes, and "
             "with diagonal = true the diagonals, over up to `distance` unwalkable, blocked-tag or sunken "
             "cells), ladders (default true; false never climbs ladder links), cost = fun(from, to, base): "
-            "number|false (per step; false = impassable; the two cell tables are reused between calls). "
+            "number|false (per step; false = impassable; the two cell tables are reused between calls; it "
+            "runs under a C call, inside the search, so it must not yield: a task.wait in it raises "
+            "'attempt to yield across a C-call boundary'). "
             "Layer changes follow links and ladders the way movers do; steps that jump or climb a ladder are "
             "marked `jump`/`climb`. The search expands at most 200000 cells; when it stops there before "
             "reaching the goal the list has `truncated = true` and is empty or a route that may not be the "
@@ -384,8 +416,12 @@ void bindGrid(TypeBinder<WorldRef>& type) {
                 const auto from = lua::cell(start);
                 const auto limit = lua::atLeast(lua::as<float>(budget, "budget"), 0.0f, "budget");
                 const auto parsed = stepRules(w.engine->lua(), *world, rules);
-                const auto cells = reachable(world->grid(), from, limit, parsed);
+                const auto reach = findReachable(world->grid(), from, limit, parsed);
+                const auto& cells = reach.cells;
                 auto out = lua.create_table(static_cast<int>(cells.size()), 0);
+                if (reach.truncated) {
+                    out["truncated"] = true;
+                }
                 for (std::size_t i = 0; i < cells.size(); ++i) {
                     const auto& c = cells[i];
                     auto entry = lua.create_table_with("x", c.pos.x, "z", c.pos.z, "layer", c.pos.layer,
@@ -398,13 +434,16 @@ void bindGrid(TypeBinder<WorldRef>& type) {
                 }
                 return out;
             },
-            "fun(start: Cell, budget: number, rules?: table): {x: integer, z: integer, layer: integer, "
-            "cost: number, parent?: integer, stop: boolean, jump?: true, climb?: true}[]",
+            "fun(start: Cell, budget: number, rules?: table): {truncated?: true, [integer]: {x: integer, z: "
+            "integer, layer: integer, cost: number, parent?: integer, stop: boolean, jump?: true, climb?: "
+            "true}}",
             "Every cell reachable within a movement budget (tactical move ranges), with the rules of "
             "world:path. The first entry is the start cell, which has no `parent`; every other entry's "
             "`parent` is the index in this list of the cell it is reached from, so `while c.parent do c = "
             "list[c.parent] end` walks back to the start. `jump`/`climb` mark how the step from the parent "
-            "enters the cell. Zone-of-control cells are reachable but nothing is reached through them.")
+            "enters the cell. Zone-of-control cells are reachable but nothing is reached through them. Like "
+            "world:path the search expands at most 200000 cells; when it stops there the list has "
+            "`truncated = true` and may be incomplete.")
         .method(
             "line_of_sight",
             [](const WorldRef& w, sol::object from, sol::object to, sol::object layer, sol::object blocking) {
@@ -698,7 +737,63 @@ void bindMapData(TypeBinder<WorldRef>& type) {
             "Change environment values (day/night, weather, post effects). Only this world changes; the map "
             "file does not.")
         .method(
-            "time", [](const WorldRef& w) { return w.get().time(); }, "fun(): number", "Simulated seconds.")
+            "movement_tuning",
+            [](sol::this_state s, const WorldRef& w) {
+                const auto& t = w.get().movementTuning();
+                return sol::state_view(s).create_table_with(
+                    "arrive_distance", t.arriveDistance, "snap_distance", t.snapDistance, "stuck_share",
+                    t.stuckShare, "stuck_seconds", t.stuckSeconds, "jump_arc_base", t.jumpArcBase,
+                    "jump_arc_per_unit", t.jumpArcPerUnit, "jump_arc_per_rise", t.jumpArcPerRise,
+                    "jump_minimum_seconds", t.jumpMinimumSeconds, "landing_search", t.landingSearch, "gravity",
+                    t.gravity);
+            },
+            "fun(): {arrive_distance: number, snap_distance: number, stuck_share: number, stuck_seconds: "
+            "number, jump_arc_base: number, jump_arc_per_unit: number, jump_arc_per_rise: number, "
+            "jump_minimum_seconds: number, landing_search: number, gravity: number}",
+            "The movers' thresholds and route-jump shape for this world (see set_movement_tuning).")
+        .method(
+            "set_movement_tuning",
+            [](const WorldRef& w, sol::table t) {
+                auto tuning = w.get().movementTuning();
+                tuning.arriveDistance = lua::within(lua::get(t, "arrive_distance", tuning.arriveDistance),
+                                                    0.001f, 1.0f, "arrive_distance");
+                tuning.snapDistance =
+                    lua::within(lua::get(t, "snap_distance", tuning.snapDistance), 0.0f, 1.0f, "snap_distance");
+                tuning.stuckShare =
+                    lua::within(lua::get(t, "stuck_share", tuning.stuckShare), 0.0f, 1.0f, "stuck_share");
+                tuning.stuckSeconds =
+                    lua::within(lua::get(t, "stuck_seconds", tuning.stuckSeconds), 0.05, 60.0, "stuck_seconds");
+                tuning.jumpArcBase =
+                    lua::within(lua::get(t, "jump_arc_base", tuning.jumpArcBase), 0.0f, 16.0f, "jump_arc_base");
+                tuning.jumpArcPerUnit = lua::within(lua::get(t, "jump_arc_per_unit", tuning.jumpArcPerUnit),
+                                                    0.0f, 16.0f, "jump_arc_per_unit");
+                tuning.jumpArcPerRise = lua::within(lua::get(t, "jump_arc_per_rise", tuning.jumpArcPerRise),
+                                                    0.0f, 16.0f, "jump_arc_per_rise");
+                tuning.jumpMinimumSeconds =
+                    lua::within(lua::get(t, "jump_minimum_seconds", tuning.jumpMinimumSeconds), 0.01f, 10.0f,
+                                "jump_minimum_seconds");
+                tuning.landingSearch = lua::within(lua::get(t, "landing_search", tuning.landingSearch), 0.0f,
+                                                   16.0f, "landing_search");
+                tuning.gravity = lua::within(lua::get(t, "gravity", tuning.gravity), 0.1f, 1000.0f, "gravity");
+                w.get().movementTuning() = tuning;
+            },
+            "fun(changes: {arrive_distance?: number, snap_distance?: number, stuck_share?: number, "
+            "stuck_seconds?: number, jump_arc_base?: number, jump_arc_per_unit?: number, jump_arc_per_rise?: "
+            "number, jump_minimum_seconds?: number, landing_search?: number, gravity?: number})",
+            "Tune this world's movers; omitted fields keep their value. `arrive_distance` (0.001-1, default "
+            "0.05): a waypoint counts as reached within it, stopping short is a block; `snap_distance` (0-1, "
+            "0.02): a waypoint this close is reached even when the tick's step is shorter; `stuck_share` "
+            "(0-1, 0.1) and `stuck_seconds` (0.05-60, 1): a route whose ticks cover less than that share of "
+            "their step for that long is `blocked`; a route jump's apex is `jump_arc_base` + "
+            "`jump_arc_per_unit` x horizontal length + `jump_arc_per_rise` x |height difference| (each 0-16; "
+            "0.4, 0.2, 0.5) and lasts at least `jump_minimum_seconds` (0.01-10, 0.3); `landing_search` "
+            "(0-16, 1) is how far around a blocked landing the nearest free spot is looked for; `gravity` "
+            "(0.1-1000, 20 units/second^2) pulls down bodies in flight after entity:launch.")
+        .method(
+            "time", [](const WorldRef& w) { return w.get().time(); }, "fun(): number",
+            "Simulated seconds of this world (advanced by its ticks at its time_scale, not while paused). "
+            "A method rather than a property like `paused` and `time_scale`: a Lua value cannot be both "
+            "(`w:time()` would call a number), so the spelling stays for compatibility.")
         .property(
             "paused", [](const WorldRef& w) { return w.get().paused; },
             [](const WorldRef& w, sol::object paused) { w.get().paused = lua::as<bool>(paused, "paused"); },
@@ -732,11 +827,17 @@ void bindEntities(TypeBinder<WorldRef>& type) {
                 const bool hasHeight = !lua::absent(lua::field(positionValue.as<sol::table>(), "y")) ||
                                        !lua::absent(lua::field(positionValue.as<sol::table>(), 2));
                 const auto entity = world.spawn(lua::get<std::string>(spec, "id", ""), position, layer);
-                if (!keepHeight && !hasHeight) {
-                    world.place(entity, position, layer);
-                }
                 EntityRef ref{w.world, entity, w.engine};
-                configureEntity(ref, spec);
+                try {
+                    if (!keepHeight && !hasHeight) {
+                        world.place(entity, position, layer);
+                    }
+                    configureEntity(ref, spec);
+                } catch (...) {
+                    // A rejected component leaves no entity (and frees its id).
+                    world.destroy(entity);
+                    throw;
+                }
                 return ref;
             },
             "fun(spec: {id?: string, position: Vec3, layer?: integer, facing?: {x: number, z: number}, yaw?: "
@@ -763,21 +864,73 @@ void bindEntities(TypeBinder<WorldRef>& type) {
                 std::string tag;
                 std::optional<glm::vec3> centre;
                 float radius = 0;
+                std::vector<std::string> fields;
                 if (const auto filter = lua::options(options, "query filter")) {
                     tag = lua::get<std::string>(*filter, "tag", "");
                     if (const auto near = lua::field(*filter, "near"); !lua::absent(near)) {
                         centre = lua::position(near);
                         radius = lua::atLeast(lua::get(*filter, "radius", 1.0f), 0.0f, "radius");
                     }
+                    fields = lua::strings(lua::field(*filter, "fields"));
                 }
+                auto& world = w.get();
+                const auto found = world.query(tag, centre, radius);
                 auto out = lua.create_table();
-                for (const auto entity : w.get().query(tag, centre, radius)) {
-                    out.add(EntityRef{w.world, entity, w.engine});
+                if (fields.empty()) {
+                    for (const auto entity : found) {
+                        out.add(EntityRef{w.world, entity, w.engine});
+                    }
+                    return out;
+                }
+                // Struct of arrays: one table per field, each with n entries.
+                out["n"] = static_cast<lua_Integer>(found.size());
+                const auto& registry = world.registry();
+                for (const auto& name : fields) {
+                    auto column = lua.create_table(static_cast<int>(found.size()), 0);
+                    lua_Integer i = 0;
+                    if (name == "entity") {
+                        for (const auto entity : found) {
+                            column.raw_set(++i, EntityRef{w.world, entity, w.engine});
+                        }
+                    } else if (name == "id") {
+                        for (const auto entity : found) {
+                            const auto* named = registry.try_get<Name>(entity);
+                            column.raw_set(++i, named ? named->id : std::string());
+                        }
+                    } else if (name == "x" || name == "y" || name == "z" || name == "layer" ||
+                               name == "cell_x" || name == "cell_z") {
+                        for (const auto entity : found) {
+                            const auto& t = registry.get<Transform>(entity);
+                            if (name == "x") {
+                                column.raw_set(++i, t.position.x);
+                            } else if (name == "y") {
+                                column.raw_set(++i, t.position.y);
+                            } else if (name == "z") {
+                                column.raw_set(++i, t.position.z);
+                            } else if (name == "layer") {
+                                column.raw_set(++i, t.layer);
+                            } else if (name == "cell_x") {
+                                column.raw_set(++i, floorCell(t.position.x));
+                            } else {
+                                column.raw_set(++i, floorCell(t.position.z));
+                            }
+                        }
+                    } else {
+                        throw std::runtime_error("Unknown query field '" + name +
+                                                 "' (expected entity, x, y, z, layer, id, cell_x or cell_z)");
+                    }
+                    out[name] = column;
                 }
                 return out;
             },
-            "fun(filter?: {tag?: string, near?: Vec3, radius?: number}): Entity[]",
-            "Entities with a tag and/or within a radius.")
+            "fun(filter?: {tag?: string, near?: Vec3, radius?: number, fields?: string[]}): Entity[]|{n: "
+            "integer, entity?: Entity[], x?: number[], y?: number[], z?: number[], layer?: integer[], id?: "
+            "string[], cell_x?: integer[], cell_z?: integer[]}",
+            "Entities with a tag and/or within a radius (XZ distance from `near`). With `fields` the result "
+            "is a struct of arrays instead of a list of handles: `n` entities and one array per requested "
+            "field (`entity` handles, `x`, `y`, `z` positions, `layer`, `id`, `cell_x`, `cell_z`), so a HUD "
+            "or a tactics kit reads two hundred positions a tick with a handful of tables rather than a "
+            "handle and a table per entity.")
         .method(
             "events",
             [](sol::this_state s, const WorldRef& w) {
@@ -794,14 +947,18 @@ void bindEntities(TypeBinder<WorldRef>& type) {
                     if (!event.name.empty()) {
                         t["name"] = event.name;
                     }
+                    if (event.kind == WorldEvent::Kind::CellEnter) {
+                        t["cell"] = lua::table(lua, event.cell);
+                    }
                     out.add(t);
                 }
                 return out;
             },
-            "fun(): {type: string, a?: Entity, b?: Entity, name?: string}[]",
+            "fun(): {type: string, a?: Entity, b?: Entity, name?: string, cell?: Cell}[]",
             "Events since the last call: contact_begin/end, arrived, blocked, jump_start, landed, "
             "climb_start, climb_end, anim_event, "
-            "anim_finished, zone_enter/exit (entities with a mover or collider). Events naming an entity "
+            "anim_finished, zone_enter/exit (entities with a mover or collider) and cell_enter (a mover "
+            "entered a new grid cell; `cell` is that cell). Events naming an entity "
             "destroyed before they are read are dropped. At most 4096 are kept; older ones are dropped "
             "with a warning when nobody reads them.")
         .method(
@@ -810,14 +967,16 @@ void bindEntities(TypeBinder<WorldRef>& type) {
                 w.engine->queueDraw(worldDraw(*w.engine, w.lock(), options));
             },
             "fun(options?: {rect?: Rect, target?: string, camera?: {target?: Vec3, yaw?: number, "
-            "pitch?: number, distance?: number, fov?: number, shake?: Vec3}, post?: table})",
+            "pitch?: number, distance?: number, fov?: number, orthographic?: boolean, ortho_height?: "
+            "number, shake?: Vec3}, post?: table})",
             "Render this world this frame (call from draw; several worlds draw in call order). `rect` = "
             "{x, y, w, h} in canvas pixels draws it into that part of the screen (picture-in-picture). "
             "`target` draws it off-screen instead, at the rect's size (default: the whole canvas; x and y "
             "are "
             "unused), for fe.canvas.image('rt:<target>') to show (minimaps, 3D portraits). `camera` replaces "
-            "the world's camera for this draw only; unset fields copy the world camera, and it does not "
-            "shake unless `shake` is given. Like the world camera it is interpolated between the values of "
+            "the world's camera for this draw only (`orthographic` and `ortho_height` as on Camera); unset "
+            "fields copy the world camera, and it does not shake unless `shake` is given. Like the world "
+            "camera it is interpolated between the values of "
             "the last two ticks (per world, target and order of such draws), so pass tick values such as "
             "entity.position. `post` overrides environment post fields for this draw only (a minimap "
             "without depth of field or bloom: post = {depth_of_field = false, bloom = false}).")
@@ -916,6 +1075,27 @@ void bindCamera(Engine& engine) {
                 c.get().fov = lua::within(lua::as<float>(v, "fov"), 1.0f, 170.0f, "fov");
             },
             "number", "Vertical field of view in degrees (1 to 170).")
+        .property(
+            "orthographic", [](const CameraRef& c) { return c.get().orthographic; },
+            [](const CameraRef& c, sol::object v) {
+                c.get().orthographic = lua::as<bool>(v, "orthographic");
+            },
+            "boolean",
+            "Parallel projection from the same orbit position (pixel-exact 2D views; default false). The "
+            "view covers `ortho_height` world units vertically; distance then only sets the near and far "
+            "planes. Shadows, picking, `project` and `ray` follow it.")
+        .property(
+            "ortho_height",
+            [](const CameraRef& c) { return c.get().effectiveOrthoHeight(); },
+            [](const CameraRef& c, sol::object v) {
+                const auto height = lua::as<float>(v, "ortho_height");
+                c.get().orthoHeight =
+                    height <= 0 ? 0.0f : lua::within(height, 0.01f, 100000.0f, "ortho_height");
+            },
+            "number",
+            "World units visible vertically when orthographic (0.01 to 100000). 0 (the default) derives it "
+            "from distance and fov, the height a perspective view covers at the target, so toggling "
+            "`orthographic` keeps the framing; reading returns the height in effect.")
         .property(
             "shake", [](const CameraRef& c) { return lua::table(c.engine->lua().lua(), c.get().shake); },
             [](const CameraRef& c, sol::object v) { c.get().shake = lua::vec3(v); }, "Vec3",

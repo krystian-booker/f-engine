@@ -53,11 +53,17 @@ private:
     std::array<glm::mat4, LightShadowTiles> lightShadows_{};
     std::vector<LightShadowTile> lightTiles_;
     std::vector<LightShadowCandidate> shadowCandidates_;
+    std::vector<LightShadowSlot> shadowSlots_;
+    std::vector<std::size_t> shadowOrder_;
+    std::vector<LightShadowView> shadowViews_;
     bgfx::TextureHandle atlas_ = BGFX_INVALID_HANDLE, lightAtlas_ = BGFX_INVALID_HANDLE;
     bool shadows_ = false;
     std::vector<SceneLight> sceneLights_;
     LightGrid grid_;
     Texture lights_, cells_;
     glm::ivec2 cellTextureSize_{0};
+    // What the light and cell textures hold: static lights upload nothing per frame.
+    std::vector<glm::vec4> uploadedLights_;
+    std::vector<float> uploadedCells_;
 };
 } // namespace fe

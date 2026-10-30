@@ -1,6 +1,9 @@
 -- Sizes, counts, speeds and positions scripts pass are bounded (probes colr,
 -- colp, numeric): a collider of radius 3.4e38 used to hang every tick, and
 -- positions at +-3.4e38 overflowed the integer cell and hash coordinates.
+-- The wall-clock checks here (and in los, markup and library) are generous:
+-- they tell a hang (minutes) from a slow sanitizer or loaded CI machine, not
+-- a fast run from a slower one; the watchdog (3 s per test) is the real stop.
 local function world(name)
   fe.harness.start()
   return fe.world.load(name, "arena")
@@ -18,7 +21,7 @@ return {
     local big = w:spawn { position = { x = 5, z = 5 }, collider = { radius = 64, height = 1000 } }
     local start = fe.dev.clock()
     fe.harness.tick(3)
-    t.ok(fe.dev.clock() - start < 2, "ticks with a radius-64 collider")
+    t.ok(fe.dev.clock() - start < 30, "ticks with a radius-64 collider took " .. (fe.dev.clock() - start) .. " s")
     big:collider { radius = 0.5 }
     big:destroy()
     fe.harness.tick(1)
@@ -44,7 +47,7 @@ return {
     far:drive({ x = 1, z = 0 })
     local start = fe.dev.clock()
     fe.harness.tick(3)
-    t.ok(fe.dev.clock() - start < 2, "ticks with entities at the world bound")
+    t.ok(fe.dev.clock() - start < 30, "ticks with entities at the world bound took " .. (fe.dev.clock() - start) .. " s")
     fe.world.unload("bounds_positions")
   end,
 

@@ -40,6 +40,13 @@ public:
     [[nodiscard]] float duckGain() const { return gain_.load(); }
     // The bus carried sound within the last HoldSeconds (it keys ducking).
     [[nodiscard]] bool audible() const { return silentFrames_.load() < HoldSeconds * rate_; }
+    // A soft peak limiter after the effects (the master bus has it on): the
+    // gain drops within LimiterAttack of a peak over the ceiling and recovers
+    // over LimiterRelease; what still passes is soft-clipped towards full
+    // scale, so a loud mix never hard-clips the device.
+    void setLimiter(bool on) { limiter_ = on; }
+    [[nodiscard]] bool limiter() const { return limiter_.load(); }
+    [[nodiscard]] float limiterGain() const { return limiterGain_.load(); }
 
     // Interleaved stereo in, interleaved stereo out (may alias).
     void process(const float* in, float* out, std::uint32_t frames) {
@@ -57,6 +64,10 @@ public:
         float gain = gain_.load();
         const float depth = std::max(amount, 1 - gain);
         const float down = depth / attackFrames_.load(), up = depth / releaseFrames_.load();
+        const bool limiter = limiter_.load();
+        float limit = limit_;
+        const float limiterRecover = 1.0f / (LimiterRelease * rate_);
+        const float limiterAttack = 1.0f / (LimiterAttack * rate_);
 
         for (std::uint32_t offset = 0; offset < frames;) {
             const auto count = std::min<std::uint32_t>(Chunk, frames - offset);
@@ -96,18 +107,42 @@ public:
                     r += (wr - r) * wet;
                 }
                 gain = gain > target ? std::max(target, gain - down) : std::min(target, gain + up);
-                out[i * 2] = l * gain;
-                out[i * 2 + 1] = r * gain;
+                l *= gain;
+                r *= gain;
+                if (limiter) {
+                    const float peak = std::max(std::abs(l), std::abs(r));
+                    const float wanted = peak > LimiterCeiling ? LimiterCeiling / peak : 1.0f;
+                    limit = wanted < limit ? std::max(wanted, limit - limiterAttack)
+                                           : std::min(1.0f, limit + limiterRecover);
+                    l = softClip(l * limit);
+                    r = softClip(r * limit);
+                }
+                out[i * 2] = l;
+                out[i * 2 + 1] = r;
             }
             offset += count;
         }
         gain_ = gain;
+        limit_ = limiter ? limit : 1.0f;
+        limiterGain_ = limit_;
     }
 
 private:
     static constexpr float MaxCutoff = 20000, MinCutoff = 20, SilenceThreshold = 1e-4f, HoldSeconds = 0.05f;
+    static constexpr float LimiterCeiling = 0.95f, LimiterAttack = 0.001f, LimiterRelease = 0.2f;
     static constexpr std::uint32_t Chunk = 32;
     static constexpr double MinGlide = 0.005;
+
+    // Above the ceiling the curve bends towards (never reaching) full scale.
+    static float softClip(float x) {
+        const float a = std::abs(x);
+        if (a <= LimiterCeiling) {
+            return x;
+        }
+        const float over = (a - LimiterCeiling) / (1.0f - LimiterCeiling);
+        const float y = LimiterCeiling + (1.0f - LimiterCeiling) * std::tanh(over);
+        return x < 0 ? -y : y;
+    }
 
     struct Glide {
         float value = 0, target = 0, step = 0;
@@ -253,9 +288,12 @@ private:
     std::atomic<const BusDsp*> key_{nullptr};
     std::atomic<float> duckAmount_{0}, attackFrames_{1}, releaseFrames_{1}, gain_{1};
     std::atomic<std::uint32_t> silentFrames_{1u << 30};
+    std::atomic<bool> limiter_{false};
+    std::atomic<float> limiterGain_{1};
 
     // Mixer thread state.
     std::uint32_t seen_ = 0;
+    float limit_ = 1;
     Glide cutoff_, mix_, room_, damping_;
     bool lowpassOn_ = false, filtering_ = false, reverbActive_ = false;
     std::array<Svf, 2> svf_{};

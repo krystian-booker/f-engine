@@ -1,10 +1,14 @@
 --- Shop screen: buy and sell with quantity selection and an equipment
 --- comparison for party members. `screen.open(shop_id)` waits until the
 --- player leaves (returns nothing). Needs the RPG kit.
+---
+--- Prices come from `screen.price(item, kind, shop)` (`kind` is "buy" or
+--- "sell"): the item's price times the shop's `buy_rate` or `sell_rate`.
+--- Replace it for discounts (a town's reputation, an Inquire that haggles).
+--- The RPG kit is required inside the functions that use it, so this file
+--- (and `fe.ui`) loads without the kit.
 local data = require("fe.data")
 local i18n = require("fe.i18n")
-local inventory = require("fe.rpg.inventory")
-local party = require("fe.rpg.party")
 local tablex = require("fe.tablex")
 local ui = require("fe.ui")
 
@@ -15,10 +19,22 @@ i18n.defaults({ fe = { shop = {
   cannot_equip = "{name} can't equip",
 } } })
 
-local function buy_price(shop, item) return math.ceil(item.price * shop.buy_rate) end
-local function sell_price(shop, item) return math.floor(item.price * shop.sell_rate) end
+--- The price of an item in a shop: `kind` "buy" (rounded up) or "sell"
+--- (rounded down). Replace for discounts and mark-ups.
+---@param item table the item record
+---@param kind "buy"|"sell"
+---@param shop table the shop record
+---@return integer
+function screen.price(item, kind, shop)
+  if kind == "sell" then return math.floor(item.price * shop.sell_rate) end
+  return math.ceil(item.price * shop.buy_rate)
+end
+
+local function buy_price(shop, item) return screen.price(item, "buy", shop) end
+local function sell_price(shop, item) return screen.price(item, "sell", shop) end
 
 local function quantity(max, unit)
+  local inventory = require("fe.rpg.inventory")
   local count = 1
   local view = { name = "quantity", blocks_update = true }
   function view:update()
@@ -38,6 +54,7 @@ end
 
 local function equip_hint(item)
   if item.kind ~= "equipment" then return "" end
+  local party = require("fe.rpg.party")
   local lines = {}
   for _, actor in ipairs(party.members()) do
     if actor:can_equip(item.id, item.equip.slot) then
@@ -57,6 +74,7 @@ local function equip_hint(item)
 end
 
 function screen.open(shop_id)
+  local inventory = require("fe.rpg.inventory")
   local shop = data.get("shops", shop_id)
   while true do
     local _, mode = ui.choose({ { label = ui.t("fe.shop.buy"), value = "buy" }, { label = ui.t("fe.shop.sell"), value = "sell" },

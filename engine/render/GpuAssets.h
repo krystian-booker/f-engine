@@ -64,11 +64,30 @@ enum class TextureUse {
 // one in a format the GPU samples (see `fengine_assetc cook`).
 constexpr std::size_t TextureUseCount = 6;
 
+// A cooked texture used in place of an image file, and when it was written.
+struct CookedTexture {
+    std::filesystem::path file;
+    std::filesystem::file_time_type modified;
+    bool operator==(const CookedTexture&) const = default;
+};
+
+// A model texture, shared by every part of every model that names the same
+// image file with the same colour space and mip setting (a tileset used by
+// ten props uploads once). Parts hold it, so it lives while any does.
+struct ModelTexture {
+    Texture texture;
+    CookedTexture cooked;
+    std::filesystem::path original;  // the image file a cooked texture may replace
+    std::shared_ptr<Image> embedded; // a .glb's image, held so its address stays unique
+    bool stale = false;              // its cooked file changed: users re-upload
+};
+
 struct GpuPart {
     VertexBuffer vertices;
     IndexBuffer indices;
     bgfx::TextureHandle albedo = BGFX_INVALID_HANDLE, normal = BGFX_INVALID_HANDLE,
                         emission = BGFX_INVALID_HANDLE;
+    std::array<std::shared_ptr<const ModelTexture>, 3> textures; // what the handles above come from
     Material material;
     int node = 0;
     glm::vec3 min{0}, max{0}; // bounds: world space for baked map chunks, node space otherwise
@@ -110,10 +129,12 @@ class GpuAssets {
 public:
     explicit GpuAssets(AssetCache& assets);
     [[nodiscard]] AssetCache& cpu() { return assets_; }
-    // Drops the GPU copies of assets that were reloaded or whose LUT file or
-    // cooked texture changed; the rest stay. It does nothing (and touches no
-    // file) unless the asset cache's generation or file changes moved since
-    // the last call: files only change through the development file watcher.
+    // Drops the GPU copies of assets that were reloaded or evicted from the
+    // asset cache (the CPU asset is gone) or whose LUT file or cooked texture
+    // changed; the rest stay, and a model keeps its textures unless one of
+    // its own cooked files changed. It does nothing (and touches no file)
+    // unless the asset cache's generation or file changes moved since the
+    // last call: files only change through the development file watcher.
     void sync();
     // Changes whenever sync() may have dropped or replaced something, so
     // handles cached elsewhere (on components) are valid while it is unchanged.
@@ -132,15 +153,9 @@ public:
     [[nodiscard]] bgfx::TextureHandle flatNormal() const { return flatNormal_.get(); }
 
 private:
-    // A cooked texture used in place of an image file, and when it was written.
-    struct Cooked {
-        std::filesystem::path file;
-        std::filesystem::file_time_type modified;
-        bool operator==(const Cooked&) const = default;
-    };
     struct ImageEntry {
         std::shared_ptr<const Image> source;
-        Cooked cooked;
+        CookedTexture cooked;
         std::filesystem::path original; // the image file a cooked texture may replace
         Texture texture;
     };
@@ -149,12 +164,14 @@ private:
         std::filesystem::file_time_type modified;
         Texture texture;
     };
-    bgfx::TextureHandle modelTexture(const ModelImage& image, bool srgb, bgfx::TextureHandle fallback);
+    // Null when the material has no such image. `mips` false uploads the
+    // image without a mip chain (and ignores a cooked file, which has one).
+    std::shared_ptr<const ModelTexture> modelTexture(const ModelImage& image, bool srgb, bool mips);
     // Creates a texture from the cooked file next to `original` when it exists
-    // and the GPU samples its format; records it in `entry`.
-    bool uploadCooked(const std::filesystem::path& original, bool srgb, ImageEntry& entry,
-                      std::uint64_t flags);
-    [[nodiscard]] static Cooked cookedState(const std::filesystem::path& original);
+    // and the GPU samples its format; records what was used in `cooked`.
+    bool uploadCooked(const std::filesystem::path& original, bool srgb, std::uint64_t flags,
+                      Texture& texture, CookedTexture& cooked);
+    [[nodiscard]] static CookedTexture cookedState(const std::filesystem::path& original);
     AssetCache& assets_;
     std::uint64_t generation_ = 0, fileChanges_ = 0, revision_ = 0;
     Texture white_, flatNormal_;
@@ -162,7 +179,8 @@ private:
     std::unordered_map<std::string, SpriteSheet> sheets_;
     std::map<std::pair<const Font*, int>, std::pair<std::uint32_t, Texture>> fontPages_;
     std::map<std::pair<std::string, bool>, std::unique_ptr<GpuModel>> models_;
-    std::map<std::pair<const Image*, bool>, ImageEntry> modelTextures_;
+    // Keyed by image file (or an embedded image's identity), sRGB, mips.
+    std::map<std::tuple<std::string, bool, bool>, std::shared_ptr<ModelTexture>> modelTextures_;
     std::map<std::string, LutEntry> luts_;
     std::set<std::string> failed_;
 };

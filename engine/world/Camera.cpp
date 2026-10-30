@@ -18,27 +18,42 @@ float lerpAngle(float a, float b, float t) {
 }
 } // namespace
 
+float Camera::orthoHeightFor(float distance, float fov, float orthoHeight) {
+    if (orthoHeight > 0) {
+        return orthoHeight;
+    }
+    return 2.0f * distance * std::tan(glm::radians(std::clamp(fov, 1.0f, 170.0f)) * 0.5f);
+}
+
+Camera::State Camera::current() const {
+    return {target, yaw, pitch, distance, fov, orthoHeightFor(distance, fov, orthoHeight)};
+}
+
 void Camera::beginTick() {
     if (!initialized_) {
         snap();
         return;
     }
-    previous_ = {target, yaw, pitch, distance, fov};
+    previous_ = current();
 }
 
 void Camera::snap() {
-    previous_ = {target, yaw, pitch, distance, fov};
+    previous_ = current();
     initialized_ = true;
 }
 
 Camera::State Camera::blend(double alpha) const {
     if (!initialized_) {
-        return {target, yaw, pitch, distance, fov};
+        return current();
     }
     const auto t = static_cast<float>(std::clamp(alpha, 0.0, 1.0));
-    return {glm::mix(previous_.target, target, t), lerpAngle(previous_.yaw, yaw, t),
-            glm::mix(previous_.pitch, pitch, t), glm::mix(previous_.distance, distance, t),
-            glm::mix(previous_.fov, fov, t)};
+    const auto now = current();
+    return {glm::mix(previous_.target, now.target, t),
+            lerpAngle(previous_.yaw, now.yaw, t),
+            glm::mix(previous_.pitch, now.pitch, t),
+            glm::mix(previous_.distance, now.distance, t),
+            glm::mix(previous_.fov, now.fov, t),
+            glm::mix(previous_.orthoHeight, now.orthoHeight, t)};
 }
 
 float Camera::interpolatedYaw(double alpha) const {
@@ -51,6 +66,14 @@ float Camera::interpolatedFov(double alpha) const {
 
 float Camera::interpolatedDistance(double alpha) const {
     return blend(alpha).distance;
+}
+
+float Camera::viewHeight(double alpha) const {
+    const auto s = blend(alpha);
+    if (orthographic) {
+        return s.orthoHeight;
+    }
+    return orthoHeightFor(s.distance, s.fov, 0);
 }
 
 glm::vec3 Camera::focus(double alpha) const {
@@ -73,6 +96,11 @@ glm::mat4 Camera::view(double alpha) const {
 }
 
 glm::mat4 Camera::projection(float aspect, bool homogeneousDepth, double alpha) const {
+    if (orthographic) {
+        const float h = blend(alpha).orthoHeight * 0.5f, w = h * aspect;
+        return homogeneousDepth ? glm::orthoRH_NO(-w, w, -h, h, nearPlane, farPlane)
+                                : glm::orthoRH_ZO(-w, w, -h, h, nearPlane, farPlane);
+    }
     const float f = glm::radians(std::clamp(blend(alpha).fov, 1.0f, 170.0f));
     return homogeneousDepth ? glm::perspectiveRH_NO(f, aspect, nearPlane, farPlane)
                             : glm::perspectiveRH_ZO(f, aspect, nearPlane, farPlane);
@@ -88,11 +116,19 @@ glm::vec3 Camera::forward(double alpha) const {
 }
 
 glm::vec3 Camera::project(glm::vec3 point, float aspect, double alpha) const {
-    const auto clip = projection(aspect, true, alpha) * view(alpha) * glm::vec4(point, 1);
+    const auto viewMatrix = view(alpha);
+    const auto clip = projection(aspect, true, alpha) * viewMatrix * glm::vec4(point, 1);
     if (clip.w <= 1e-6f) {
         return {0, 0, 2};
     }
-    return glm::vec3(clip) / clip.w;
+    auto ndc = glm::vec3(clip) / clip.w;
+    // An orthographic projection has no vanishing point: a point behind the
+    // eye still lands on the screen, so it is flagged the way a perspective
+    // one flags a point behind its near plane.
+    if (orthographic && (viewMatrix * glm::vec4(point, 1)).z > 0) {
+        ndc.z = 2;
+    }
+    return ndc;
 }
 
 void Camera::ray(glm::vec2 ndc, float aspect, glm::vec3& origin, glm::vec3& direction, double alpha) const {

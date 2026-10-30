@@ -1,8 +1,10 @@
 #include "engine/core/AssetCache.h"
+#include "engine/core/NumberFormat.h"
 #include "engine/services/Canvas.h"
 #include "engine/text/TextSystem.h"
 #include <doctest/doctest.h>
 #include <fstream>
+#include <limits>
 
 using namespace fe;
 
@@ -340,4 +342,72 @@ TEST_CASE("resolved markup is bounded per parse") {
     };
     const auto glyphs = parseMarkup("{a}", 0xffffffff, palette, nested);
     CHECK(glyphs.size() > MaxResolvedBytes / 2);
+}
+
+TEST_CASE("{size} and {b} nest: closing tags restore the enclosing style") {
+    ColorPalette palette;
+    const auto glyphs = parseMarkup("{size:2}a{size:3}b{/size}c{/size}d{b}e{b}f{/b}g{/b}h{/b}i", 0xffffffff, palette);
+    REQUIRE(glyphs.size() == 9);
+    CHECK(glyphs[0].scale == doctest::Approx(2));
+    CHECK(glyphs[1].scale == doctest::Approx(3));
+    CHECK(glyphs[2].scale == doctest::Approx(2)); // back to the outer size, not 1
+    CHECK(glyphs[3].scale == doctest::Approx(1));
+    CHECK(glyphs[4].bold);
+    CHECK(glyphs[5].bold);
+    CHECK(glyphs[6].bold); // one {/b} of two
+    CHECK_FALSE(glyphs[7].bold);
+    CHECK_FALSE(glyphs[8].bold); // a stray {/b} is harmless
+    // Pages written back as markup keep the nested sizes.
+    const auto again = parseMarkup(toMarkup(glyphs, 0xffffffff), 0xffffffff, palette);
+    REQUIRE(again.size() == glyphs.size());
+    for (std::size_t i = 0; i < glyphs.size(); ++i) {
+        CHECK(again[i].scale == glyphs[i].scale);
+        CHECK(again[i].bold == glyphs[i].bold);
+    }
+    CHECK(parseMarkup("{/size}x", 0xffffffff, palette)[0].scale == doctest::Approx(1));
+}
+
+TEST_CASE("a ruby base broken by the layout is kept whole across a page break") {
+    const FontSet font({std::make_shared<BoxFont>(10, 8, 6, false)});
+    TextStyle style;
+    style.font = &font;
+    style.size = 10;
+    style.wrapWidth = 18; // three characters: the five-character base cannot fit a line
+    const auto glyphs = parseMarkup("ab {ruby:cdefg|x} h", 0xffffffff, ColorPalette{});
+    const auto layout = layoutText(glyphs, style);
+    REQUIRE(layout.lines >= 3);
+    CHECK(layout.lineOfUnit[3] != layout.lineOfUnit[7]); // the base spans lines
+    const auto pages = paginateText(glyphs, style, 2);
+    REQUIRE(pages.size() >= 2);
+    for (const auto& page : pages) {
+        // Every page's markup holds its ruby whole (or not at all), without a newline inside the base.
+        const auto markup = toMarkup(page, 0xffffffff);
+        const auto ruby = markup.find("{ruby:");
+        if (ruby != std::string::npos) {
+            CHECK(markup.substr(ruby, 14) == "{ruby:cdefg|x}");
+        }
+        for (const auto& g : page) {
+            CHECK_FALSE((g.rubyContinues && &g != &page.front() && (&g)[-1].newline()));
+        }
+    }
+    CHECK(toMarkup(pages[1], 0xffffffff).find("{ruby:cdefg|x}") != std::string::npos);
+    CHECK(toMarkup(pages[0], 0xffffffff).find("ruby") == std::string::npos);
+}
+
+TEST_CASE("numbers format with a language's separators") {
+    CHECK(formatNumber(1234567.891, 2, "en-US") == "1,234,567.89");
+    CHECK(formatNumber(1234567.891, 2, "de") == "1.234.567,89");
+    CHECK(formatNumber(1234567.891, 2, "fr-FR") == "1 234 567,89");
+    CHECK(formatNumber(1234567.891, 2, "pt_BR") == "1.234.567,89");
+    CHECK(formatNumber(1234567.891, 0, "ja") == "1,234,568");
+    CHECK(formatNumber(-1234.5, 1, "ru") == "-1 234,5");
+    CHECK(formatNumber(999, 0, "sv") == "999");
+    CHECK(formatNumber(1000, 0, "tr") == "1.000");
+    CHECK(formatNumber(0.125, 2, "nl") == "0,13");
+    CHECK(formatNumber(-0.001, 2, "en") == "0.00"); // no negative zero
+    CHECK(formatNumber(42, 3, "xx-YY") == "42.000");  // unknown languages format as English
+    CHECK_THROWS((void)formatNumber(1, 21, "en"));
+    CHECK_THROWS((void)formatNumber(std::numeric_limits<double>::infinity(), 0, "en"));
+    CHECK(numberSeparators("ES").decimal == ",");
+    CHECK(numberSeparators("zh-Hant-TW").group == ",");
 }

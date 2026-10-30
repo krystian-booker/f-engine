@@ -160,22 +160,41 @@ function grid.face(battle, b, direction)
   battle:present("facing", b)
 end
 
+--- The `cell_entered(battle, unit, cell)` rule hook, run in every layer
+--- (general to specific) once a unit stands on a new cell of its move;
+--- "stop" from any layer ends the move there (a trap, a hidden pit).
+function grid.cell_entered(battle, b, cell)
+  local stop = false
+  for _, layer in ipairs(tablex.copy(battle.rule_layers)) do
+    local fn = layer.cell_entered
+    if fn and fn(battle, b, cell) == "stop" then stop = true end
+  end
+  return stop and "stop" or nil
+end
+
 --- Walk a unit along a path of cells (grid.reachable paths: a step may be
 --- marked `jump` or `climb`, which "step" passes on in `to`); it ends
---- facing its last step.
+--- facing its last step. After each step `grid.cell_entered` runs; when it
+--- says "stop" the unit stays on that cell and the rest of the path is
+--- dropped. Returns true when the whole path was walked, false when a hook
+--- stopped it.
 function grid.walk(battle, b, path)
   for _, cell in ipairs(path) do
     local from = b.cell
     battle:present("step", { battler = b, from = from, to = cell })
     grid.place(battle, b, cell)
     if cell.x ~= from.x or cell.z ~= from.z then b.facing = grid.direction_between(from, cell) end
+    if grid.cell_entered(battle, b, cell) == "stop" then return false end
   end
+  return true
 end
 
 --- Movement rules for world:reachable (`blocked` adds cells nobody may
 --- enter). The unit's jump stat (settings.default_jump without one) limits
 --- how far it climbs up (and one more down), steps and gap jumps alike;
---- settings.gap_jump allows gap jumps and settings.ladders ladders.
+--- settings.gap_jump allows gap jumps and settings.ladders ladders. The
+--- rules then pass through `settings.step_rules(battle, unit, rules)`, so
+--- a game can give flyers and mounts their own tag costs and limits.
 function grid.step_rules(battle, b, blocked)
   local stop_blocked, no_stop = {}, {}
   for _, other in ipairs(battle:living()) do
@@ -187,9 +206,11 @@ function grid.step_rules(battle, b, blocked)
   local jump = b:stat("jump")
   if jump <= 0 then jump = settings.default_jump end
   local gap = settings.gap_jump
-  return { max_up = jump, max_down = jump + 1, blocked = stop_blocked, no_stop = no_stop,
-    blocked_tags = settings.blocked_tags, tag_costs = settings.tag_costs, ladders = settings.ladders,
-    jump = gap and { distance = gap.distance, diagonal = gap.diagonal } or nil }
+  local rules = { max_up = jump, max_down = jump + 1, blocked = stop_blocked, no_stop = no_stop,
+    blocked_tags = tablex.copy(settings.blocked_tags), tag_costs = tablex.copy(settings.tag_costs),
+    ladders = settings.ladders, jump = gap and { distance = gap.distance, diagonal = gap.diagonal } or nil }
+  if settings.step_rules then rules = settings.step_rules(battle, b, rules) or rules end
+  return rules
 end
 
 function grid.move_points(b)
@@ -246,7 +267,11 @@ local directions = { { x = 0, z = -1 }, { x = 1, z = 0 }, { x = 0, z = 1 }, { x 
 --- Cells a skill can target from a cell (default: the user's). Line and
 --- cone ranges cover all four directions: units turn to face their target
 --- when they act. Range `height` limits the height difference; `los`
---- skills need a clear line of sight, past the terrain and obstacles.
+--- skills need a clear line of sight (from settings.eye_height above the
+--- shooter's cell to settings.target_height above the target's), past the
+--- terrain and obstacles. A `range(battle, unit, skill, cells, from)`
+--- rule hook (most specific layer) may then return another list, for a
+--- bow that reaches further from high ground.
 function grid.range_cells(battle, user, skill, from)
   from = from or user.cell
   local world = battle.tactical.world
@@ -264,15 +289,18 @@ function grid.range_cells(battle, user, skill, from)
     cells = world:area(from, shape, r.min or 0, r.max or 0)
   end
   local h0 = grid.cell_height(world, from)
-  return tablex.filter(cells, function(c)
+  cells = tablex.filter(cells, function(c)
     if r.height and math.abs(grid.cell_height(world, c) - h0) > r.height then return false end
     if skill.los then
-      local eye = { x = from.x + 0.5, y = h0 + 1.2, z = from.z + 0.5 }
-      local goal = { x = c.x + 0.5, y = grid.cell_height(world, c) + 0.8, z = c.z + 0.5 }
+      local eye = { x = from.x + 0.5, y = h0 + settings.eye_height, z = from.z + 0.5 }
+      local goal = { x = c.x + 0.5, y = grid.cell_height(world, c) + settings.target_height, z = c.z + 0.5 }
       if not world:line_of_sight(eye, goal, from.layer or 0) or not grid.clear_line(battle, from, c) then return false end
     end
     return true
   end)
+  local hook = battle.rule and battle:rule("range")
+  if hook then cells = hook(battle, user, skill, cells, from) or cells end
+  return cells
 end
 
 --- Units a skill aimed at `cell` would affect, and the cells it covers.

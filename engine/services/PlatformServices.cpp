@@ -12,8 +12,10 @@ void checkName(const std::string& name, const char* what) {
 }
 } // namespace
 
-LocalPlatformServices::LocalPlatformServices(std::filesystem::path file)
-    : file_(std::move(file)), data_({{"unlocked", Json::object()}, {"stats", Json::object()}}) {
+LocalPlatformServices::LocalPlatformServices(std::filesystem::path file,
+                                             std::chrono::milliseconds writeInterval)
+    : file_(std::move(file)), writeInterval_(writeInterval),
+      data_({{"unlocked", Json::object()}, {"stats", Json::object()}}) {
     std::error_code ec;
     if (file_.empty() || !std::filesystem::exists(file_, ec)) {
         return;
@@ -61,7 +63,10 @@ void LocalPlatformServices::setStat(const std::string& name, double value) {
         throw std::invalid_argument("Stat '" + name + "' must be a finite number");
     }
     auto& stats = data_["stats"];
-    if (stats.contains(name) && stats[name].get<double>() == value) {
+    // A stored value that is not a number (an edited or foreign file) counts
+    // as 0 and is overwritten.
+    const auto found = stats.find(name);
+    if (found != stats.end() && found->is_number() && found->get<double>() == value) {
         return;
     }
     stats[name] = value;
@@ -78,7 +83,13 @@ std::optional<double> LocalPlatformServices::stat(const std::string& name) const
 }
 
 void LocalPlatformServices::update() {
-    if (dirty_ && std::chrono::steady_clock::now() - written_ >= std::chrono::seconds(1)) {
+    if (dirty_ && std::chrono::steady_clock::now() - written_ >= writeInterval_) {
+        write();
+    }
+}
+
+void LocalPlatformServices::flush() {
+    if (dirty_) {
         write();
     }
 }

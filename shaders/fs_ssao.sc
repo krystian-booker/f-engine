@@ -2,12 +2,14 @@ $input v_texcoord0
 #include <bgfx_shader.sh>
 SAMPLER2D(s_depth, 0);
 #include "post.sh"
-// [0] tan(half fov) x, y; [1] radius (world units), strength, bias
+// [0] tan(half fov) x, y (an orthographic view's half extents), orthographic (0/1);
+// [1] radius (world units), strength, bias
 uniform vec4 u_ssao[2];
 
 vec3 viewPosition(vec2 uv) {
     float d = linearDepth(texture2D(s_depth, uv).r);
-    return vec3((uv * 2.0 - 1.0) * u_ssao[0].xy * d, d);
+    float spread = u_ssao[0].z > 0.5 ? 1.0 : d;
+    return vec3((uv * 2.0 - 1.0) * u_ssao[0].xy * spread, d);
 }
 
 // Half resolution ambient occlusion: twelve samples spiralling through a
@@ -32,7 +34,8 @@ void main() {
     for (int i = 0; i < 12; ++i) {
         float angle = noise + float(i) * 2.39996323;
         vec2 offset = vec2(cos(angle), sin(angle)) * radius * sqrt((float(i) + 0.5) / 12.0);
-        vec3 s = viewPosition(uv + offset / (2.0 * p.z * u_ssao[0].xy));
+        float spread = u_ssao[0].z > 0.5 ? 1.0 : p.z;
+        vec3 s = viewPosition(uv + offset / (2.0 * spread * u_ssao[0].xy));
         vec3 v = s - p;
         float distance = length(v);
         float range = smoothstep(0.0, 1.0, radius / max(abs(p.z - s.z), 0.0001));

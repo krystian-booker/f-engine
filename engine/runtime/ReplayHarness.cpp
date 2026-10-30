@@ -2,6 +2,7 @@
 #include "engine/assets/Image.h"
 #include "engine/core/FixedStep.h"
 #include "engine/runtime/Engine.h"
+#include "engine/script/LuaHost.h"
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -57,6 +58,18 @@ std::uint64_t ReplayHarness::lastTick() const {
     return commands_.empty() ? 0 : commands_.back().at("tick").get<std::uint64_t>() + offset_;
 }
 
+void ReplayHarness::feedInputs(Engine& engine, const Json& inputs) {
+    if (inputs.is_array()) {
+        for (const auto& pair : inputs) {
+            engine.input().feed(pair.at(0).get<std::string>(), pair.at(1).get<float>());
+        }
+        return;
+    }
+    for (const auto& [input, value] : inputs.items()) {
+        engine.input().feed(input, value.get<float>());
+    }
+}
+
 bool ReplayHarness::evaluate(Engine& engine, const std::string& expression, std::string& detail) {
     detail = engine.lua().console("(" + expression + ") == true");
     return detail == "true";
@@ -75,22 +88,21 @@ ReplayHarness::Effects ReplayHarness::apply(std::uint64_t tick, Engine& engine) 
                 waitStarted_ = tick;
             }
             std::string detail;
-            if (!evaluate(engine, command.at("wait_for").get<std::string>(), detail)) {
-                if (tick - waitStarted_ > command.value("timeout", 600u)) {
-                    failures_.push_back("Timed out waiting for: " +
-                                        command.at("wait_for").get<std::string>() + " (" + detail + ")");
-                    waiting_ = false;
-                    ++next_;
-                }
+            const bool satisfied = evaluate(engine, command.at("wait_for").get<std::string>(), detail);
+            if (!satisfied && tick - waitStarted_ <= command.value("timeout", 600u)) {
                 break;
+            }
+            if (!satisfied) {
+                // Timed out: the failure is recorded and the command's other
+                // fields still run, as they would have after the wait.
+                failures_.push_back("Timed out waiting for: " + command.at("wait_for").get<std::string>() +
+                                    " (" + detail + ")");
             }
             offset_ += tick - waitStarted_;
             waiting_ = false;
         }
         if (command.contains("input")) {
-            for (const auto& [input, value] : command.at("input").items()) {
-                engine.input().feed(input, value.get<float>());
-            }
+            feedInputs(engine, command.at("input"));
         }
         if (command.contains("lua")) {
             const auto code = command.at("lua").get<std::string>();
@@ -255,10 +267,7 @@ std::filesystem::path referenceFor(const std::filesystem::path& compare, std::st
 }
 
 void ReplayRecorder::input(const std::string& name, float value) {
-    if (pendingInput_.empty() || pendingInput_.back().contains(name)) {
-        pendingInput_.push_back(Json::object());
-    }
-    pendingInput_.back()[name] = value;
+    pendingInput_.push_back(Json::array({name, value}));
 }
 
 void ReplayRecorder::mouse(glm::vec2 canvasPosition) {
@@ -284,8 +293,9 @@ void ReplayRecorder::stamp(std::uint64_t tick) {
     if (pendingWheel_ != 0) {
         commands_.push_back({{"tick", tick}, {"wheel", pendingWheel_}});
     }
-    for (auto& input : pendingInput_) {
-        commands_.push_back({{"tick", tick}, {"input", std::move(input)}});
+    if (!pendingInput_.empty()) {
+        commands_.push_back({{"tick", tick}, {"input", std::move(pendingInput_)}});
+        pendingInput_ = Json::array();
     }
     if (!pendingText_.empty()) {
         commands_.push_back({{"tick", tick}, {"text", std::move(pendingText_)}});
@@ -295,7 +305,6 @@ void ReplayRecorder::stamp(std::uint64_t tick) {
                              {"text", std::move(pendingComposition_->first)},
                              {"cursor", pendingComposition_->second}});
     }
-    pendingInput_.clear();
     pendingMouse_.reset();
     pendingWheel_ = 0;
     pendingText_.clear();

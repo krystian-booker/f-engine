@@ -461,4 +461,242 @@ return {
     t.eq(job.status, "done")
     t.eq(scene.find("menu"), nil)
   end,
+
+  ["the field keeps running while a line is on screen: camera, events and parallel pages"] = function(t)
+    fresh()
+    record.calls = {}
+    field.start("arena", "start")
+    placed("watcher", 4.5, { { script = "tests.support.record", trigger = "parallel" } })
+    local touched = 0
+    local plate = field.world:spawn({ id = "plate", position = { x = 4.5, z = 7.5 }, collider = { radius = 0.3, solid = false } })
+    plate:data().on_touch = function() touched = touched + 1 end
+    t.tick(2)
+    local job = task.spawn(function() dialogue.say("Guide", "Walk with me.", { speed = 0 }) end)
+    t.tick(1)
+    t.eq(dialogue.current().line.text, "Walk with me.")
+    t.eq(dialogue.current().blocks_update, false, "the box does not block the field")
+    t.ok(not field.can_control(), "field input is gated while the box is on top")
+    local calls_before = #record.calls
+    local camera_before = field.rig.cam.target.x
+    field.player:move_to({ x = 4.5, z = 7.5 })
+    t.wait_until(function() return not field.player:moving() end, 300, "the player walks while the line shows")
+    t.tick(2)
+    t.eq(job.status, "running", "the line is still on screen")
+    t.ok(#record.calls > calls_before, "the parallel page kept running")
+    t.ok(field.rig.cam.target.x > camera_before + 1, "the camera kept following the player")
+    t.eq(touched, 1, "world events were drained: the plate was touched")
+    local chosen
+    job:cancel()
+    job = task.spawn(function() chosen = dialogue.choice({ "Yes", "No" }) end)
+    t.tick(2)
+    t.eq(scene.top().name, "menu")
+    t.eq(scene.top().blocks_update, false, "the choice menu does not block the field either")
+    press(t, "key:Z")
+    t.eq(chosen, 1)
+    scene.clear()
+  end,
+
+  ["auto pages wait for a field lock and start when it lifts"] = function(t)
+    fresh()
+    record.calls = {}
+    field.start("arena", "start")
+    local unlock = field.lock()
+    placed("greeter", 6.5, { { script = "tests.support.record", trigger = "auto" } })
+    t.tick(4)
+    t.eq(#record.calls, 0, "no auto page starts under a lock")
+    unlock()
+    t.tick(2)
+    t.eq(#record.calls, 1)
+    t.eq(record.calls[1].trigger, "auto")
+    local release = event.block()
+    placed("second", 7.5, { { script = "tests.support.record", trigger = "auto" } })
+    t.tick(3)
+    t.eq(#record.calls, 1, "a blocking event holds auto pages too")
+    release()
+    t.tick(2)
+    t.eq(#record.calls, 2)
+    scene.clear()
+  end,
+
+  ["pages attached with no active page hide the entity at once; props hide their mesh"] = function(t)
+    fresh()
+    local world = fe.world.load("attach", "arena")
+    local npc = world:spawn({ id = "later", position = { x = 3.5, z = 5.5 }, collider = { radius = 0.3 },
+      sprite = { animation = "@fe/assets/ui/spark.anim.json" } })
+    event.attach(npc, { { when = { flag = "appears" }, script = "tests.support.greet" } })
+    t.eq(event.page(npc), nil)
+    t.ok(not npc:sprite().visible, "hidden from the start")
+    t.ok(npc:can_occupy(npc.position), "not solid: another entity may stand there")
+    state.set_flag("appears")
+    event.refresh(npc)
+    t.ok(npc:sprite().visible)
+    local calls = {}
+    local fake = {
+      mesh = function(_, settings) calls[#calls + 1] = { "mesh", settings.visible } end,
+      sprite = function(_, settings) calls[#calls + 1] = { "sprite", settings.visible } end,
+      collider = function(_, settings) calls[#calls + 1] = { "collider", settings.solid } end,
+    }
+    event.apply(fake, nil, { mesh = true, solid = true })
+    t.eq(calls, { { "mesh", false }, { "collider", false } }, "a mesh prop hides its mesh and adds no sprite")
+    calls = {}
+    event.apply(fake, { script = "x" }, { mesh = true })
+    t.eq(calls, { { "mesh", true }, { "collider", true } })
+    fe.world.unload("attach")
+  end,
+
+  ["a touch suppressed under a lock fires when the lock lifts, if the player still stands there"] = function(t)
+    fresh()
+    field.start("arena", "start")
+    t.tick(2)
+    local touched = 0
+    local p = field.player.position
+    local plate = field.world:spawn({ id = "plate", position = { x = p.x + 0.3, z = p.z }, collider = { radius = 0.3, solid = false } })
+    plate:data().on_touch = function() touched = touched + 1 end
+    local unlock = field.lock()
+    field.touch(plate)
+    t.eq(touched, 0)
+    t.tick(3)
+    t.eq(touched, 0, "still locked")
+    unlock()
+    t.tick(1)
+    t.eq(touched, 1, "fired when the lock lifted")
+    local far = field.world:spawn({ id = "far", position = { x = 8.5, z = 7.5 }, collider = { radius = 0.3, solid = false } })
+    far:data().on_touch = function() touched = touched + 10 end
+    unlock = field.lock()
+    field.touch(far)
+    unlock()
+    t.tick(1)
+    t.eq(touched, 1, "a touch the player walked away from is dropped")
+    scene.clear()
+  end,
+
+  ["a script warp cancels a pending detached door warp"] = function(t)
+    fresh()
+    field.settings.autosave = false
+    field.start("arena", "start")
+    local door = task.detached("warp", field.warp, "arena", "east", { duration = 1 })
+    t.tick(5)
+    t.ok(door:running())
+    local script = task.spawn(function() field.warp("arena", "start", { duration = 0.1 }) end)
+    t.eq(door.status, "cancelled", "one warp at a time")
+    t.wait_until(function() return script.status ~= "running" end, 200)
+    t.eq(script.status, "done")
+    t.near(field.player.position.x, 2.5, 0.01, "the script's destination won")
+    t.eq(field.locks, 0)
+    t.eq(fe.screen.get().fade[4], 0)
+    field.settings.autosave = true
+    scene.clear()
+  end,
+
+  ["hidden items are found once; locked chests need their key or flag"] = function(t)
+    fresh()
+    field.start("arena", "start")
+    local given = {}
+    local disconnect = field.treasure:connect(function(item, count, money) given[#given + 1] = { item, count, money } return true end, 10)
+    local spot = field.types.hidden_item(field.world, { id = "spot", position = { x = 4.5, z = 5.5 }, layer = 0,
+      props = { item = "herb", count = 2 } })
+    t.ok(spot ~= nil and spot:valid())
+    spot:data().interact(spot)
+    t.eq(given, { { "herb", 2, nil } })
+    t.ok(state.flag("hidden:arena:spot"))
+    t.ok(not spot:valid(), "the spot is gone once searched")
+    t.eq(field.types.hidden_item(field.world, { id = "spot", position = { x = 4.5, z = 5.5 }, layer = 0, props = { item = "herb" } }), nil,
+      "and is not spawned again")
+    local has_key = false
+    event.condition("item", function(id) return id == "iron_key" and has_key end)
+    local chest = field.types.chest(field.world, { id = "box", position = { x = 5.5, z = 5.5 }, layer = 0,
+      props = { item = "gem", locked = true, key = "iron_key" } })
+    local function finished() return dialogue.current() and dialogue.current().finished end
+    local job = task.spawn(function() chest:data().interact(chest) end)
+    t.tick(1)
+    t.eq(dialogue.current().line.text, "It's locked.")
+    t.wait_until(finished, 60)
+    press(t, "key:Z")
+    t.eq(job.status, "done")
+    t.eq(#given, 1, "nothing given")
+    has_key = true
+    job = task.spawn(function() chest:data().interact(chest) end)
+    t.tick(1)
+    t.eq(dialogue.current().line.text, "Unlocked with iron_key.")
+    t.wait_until(finished, 60)
+    press(t, "key:Z")
+    t.eq(job.status, "done")
+    t.eq(given[2], { "gem", 1, nil })
+    t.ok(state.flag("unlocked:arena:box"))
+    local flagged = field.types.chest(field.world, { id = "crate", position = { x = 6.5, z = 5.5 }, layer = 0,
+      props = { item = "coin", locked = true } })
+    state.set_flag("unlocked:arena:crate")
+    job = task.spawn(function() flagged:data().interact(flagged) end)
+    t.tick(1)
+    t.eq(job.status, "done", "a chest unlocked by its flag opens without a word")
+    t.eq(given[3], { "coin", 1, nil })
+    event.conditions.item = nil
+    disconnect()
+    scene.clear()
+  end,
+
+  ["field.start builds the player through field.make_player"] = function(t)
+    fresh()
+    local original = field.make_player
+    local got
+    field.make_player = function(world, point, sprite)
+      got = { map = world.map_id, point = point, sprite = sprite }
+      local player = original(world, point, sprite)
+      player:tag("custom")
+      return player
+    end
+    field.start("arena", "start")
+    field.make_player = original
+    t.eq(got.map, "arena")
+    t.near(got.point.position.x, 2.5, 0.01)
+    t.eq(got.sprite, field.player_sprite())
+    t.ok(field.player:has_tag("custom"), "the entity it returns is the player")
+    t.near(field.player:mover().speed, field.settings.walk_speed, 0.01, "the default mover walks at walk_speed")
+    scene.clear()
+  end,
+
+  ["menu pages may name a module function to run"] = function(t)
+    fresh()
+    local menu = require("fe.ui.screens.menu")
+    local ran = 0
+    menu.test_page = function() ran = ran + 1 end
+    table.insert(menu.pages, 1, { id = "named", label = "Named", run = "test_page" })
+    t.eq(menu.page_run(menu.page("named")), menu.test_page)
+    t.eq(menu.page_run(menu.page("items")), menu.items_page, "the built-in pages name theirs")
+    local job = task.spawn(menu.open)
+    t.tick(1)
+    press(t, "key:Z")
+    t.eq(ran, 1, "resolved on the module when chosen")
+    menu.test_page = function() ran = ran + 10 end
+    press(t, "key:Z")
+    t.eq(ran, 11, "a replaced module function is what runs")
+    table.remove(menu.pages, 1)
+    menu.test_page = nil
+    t.ok(not pcall(menu.page_run, { id = "x", run = "no_such_page" }), "an unknown name raises")
+    press(t, "key:Escape")
+    t.tick(1)
+    t.eq(job.status, "done")
+  end,
+
+  ["a menu page that starts gameplay runs after the menu's pause is released"] = function(t)
+    fresh()
+    field.start("arena", "start")
+    local menu = require("fe.ui.screens.menu")
+    local ran_paused, ran_in
+    table.insert(menu.pages, 1, { id = "travel_test", label = "Travel", closes = true, run = function()
+      ran_paused = field.world.paused
+      ran_in = task.current().parent
+    end })
+    local job = task.spawn(menu.open)
+    t.tick(2)
+    t.ok(field.world.paused)
+    press(t, "key:Z")
+    t.tick(2)
+    table.remove(menu.pages, 1)
+    t.eq(job.status, "done", "the menu closed")
+    t.eq(scene.find("menu"), nil)
+    t.eq(ran_paused, false, "the page ran with the field world running")
+    t.eq(ran_in, nil, "in a detached task")
+    scene.clear()
+  end,
 }

@@ -91,6 +91,7 @@ add_library(fengine_core STATIC
   engine/core/GameConfig.cpp
   engine/core/Json.cpp
   engine/core/Log.cpp
+  engine/core/NumberFormat.cpp
   engine/core/Pack.cpp
   engine/core/Paths.cpp
   engine/assets/Image.cpp
@@ -115,7 +116,11 @@ add_library(fengine_core STATIC
   engine/services/SaveStore.cpp
   engine/platform/FileWatcher.cpp
   engine/script/Binder.cpp
+  engine/script/GcHold.cpp
   engine/script/LuaHost.cpp
+  engine/script/LuaJson.cpp
+  engine/script/ModulePatcher.cpp
+  engine/script/bindings/Convert.cpp
   engine/script/bindings/CoreBindings.cpp
   engine/script/bindings/EntityBindings.cpp
   engine/script/bindings/PlatformBindings.cpp
@@ -123,8 +128,10 @@ add_library(fengine_core STATIC
   engine/script/bindings/UiBindings.cpp
   engine/script/bindings/WorldBindings.cpp
   engine/runtime/Engine.cpp
+  engine/runtime/EmitterAudio.cpp
   engine/runtime/Headless.cpp
   engine/runtime/ReplayHarness.cpp
+  engine/runtime/WorldLoader.cpp
   engine/editor/MapEdits.cpp
 )
 target_include_directories(fengine_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")

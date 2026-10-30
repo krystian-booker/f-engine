@@ -59,6 +59,45 @@ return {
     end)
   end,
 
+  ["voice and effect ids resolve through the catalog, paths play as they are, files are looked up once"] = function(t)
+    local saved_exists, saved_read = fe.fs.exists, fe.json.read
+    local lookups = {}
+    fe.fs.exists = function(path)
+      lookups[#lookups + 1] = path
+      return path == "catalog.json" or path == "game.json" or path == "audio/hello.wav"
+    end
+    fe.json.read = function() return { voice = { mira_hello = "audio/hello.wav" }, sfx = { ping = { file = "game.json", volume = 0.3 } } } end
+    local ok, err = pcall(function()
+      sound.load("catalog.json")
+      local played = {}
+      with_audio({ sound = function(path, options) played[#played + 1] = { path, options.bus, options.volume }; return 1 end }, function()
+        t.eq(sound.voice("mira_hello"), 1)
+        t.eq(played[1], { "audio/hello.wav", "voice", nil }, "a catalog id")
+        t.eq(sound.voice("game.json"), 1)
+        t.eq(played[2][1], "game.json", "a path")
+        t.eq(sound.voice("nobody_home"), nil, "an unknown id is quiet")
+        t.eq(sound.play("ping", { pitch = 1.2 }), 1)
+        t.eq(played[3], { "game.json", nil, 0.3 })
+        lookups = {}
+        for _ = 1, 5 do sound.play("ping") end
+        for _ = 1, 5 do sound.play("missing.wav") end
+        t.eq(#lookups, 1, "a file is looked up once, also when it is missing")
+      end)
+    end)
+    fe.json.read = function() return { voice = {}, sfx = {} } end
+    sound.load("catalog.json")
+    fe.fs.exists, fe.json.read = saved_exists, saved_read
+    sound.forget_files()
+    if not ok then error(err, 0) end
+  end,
+
+  ["set_voice checks the ranges fe.audio.sound takes"] = function(t)
+    fe.audio.set_voice(1, { volume = 4, pan = -1, pitch = 0.1 })
+    t.error(function() fe.audio.set_voice(1, { volume = 4.5 }) end, "volume must be from 0 to 4")
+    t.error(function() fe.audio.set_voice(1, { pan = 2 }) end, "pan must be from %-1 to 1")
+    t.error(function() fe.audio.set_voice(1, { pitch = 0 }) end, "pitch must be from 0.1 to 4")
+  end,
+
   ["muffle and pause drive the bus effect and global pause"] = function(t)
     sound.muffle(true, { cutoff = 700 })
     t.eq(fe.audio.bus_effect("music").lowpass, 700)

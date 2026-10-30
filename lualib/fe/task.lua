@@ -112,6 +112,16 @@ local function carry(child, from, stop)
   end
 end
 
+-- The traceback of an error `task.ensure` caught in `t` and raised again:
+-- used by `finish` when the same error value ends the task, so the report
+-- shows where it was raised rather than where it was passed on.
+local function recorded_traceback(t, message)
+  local pending = t.pending_error
+  t.pending_error = nil
+  if pending and pending.error == message then return pending.traceback end
+  return nil
+end
+
 local function finish(t, status, message)
   if t.status ~= "running" then
     return
@@ -119,7 +129,7 @@ local function finish(t, status, message)
   t.status = status
   if status == "failed" then
     t.error = message
-    t.traceback = fe.dev.traceback(t.thread, tostring(message))
+    t.traceback = recorded_traceback(t, message) or fe.dev.traceback(t.thread, tostring(message))
     if not t.quiet then
       fe.log.error("Task '" .. t.name .. "' failed:\n" .. t.traceback)
     end
@@ -353,7 +363,17 @@ end
 ---@param cleanup fun()
 function task.ensure(fn, cleanup)
   local run = task.cleanup(cleanup)
-  local results = table.pack(pcall(fn))
+  local current = task.current()
+  local results = table.pack(xpcall(fn, function(err)
+    -- Keep the traceback of where the error was raised: the error value
+    -- travels on unchanged (tables included) and `finish` reports this
+    -- traceback when the same value ends the task. A nested ensure has
+    -- already recorded the same error, so the innermost record wins.
+    if current and not (current.pending_error and current.pending_error.error == err) then
+      current.pending_error = { error = err, traceback = fe.dev.traceback(nil, tostring(err)) }
+    end
+    return err
+  end))
   run()
   if not results[1] then
     error(results[2], 0)
@@ -491,7 +511,17 @@ function Task:set_parent(parent)
     error("task '" .. parent.name .. "' has ended, so it cannot take '" .. self.name .. "'", 2)
   end
   if old then
-    carry(self, old)
+    -- Carry only what the ancestors it leaves behind gave it: ancestors it
+    -- shares with the new parent still reach it, so they would count twice.
+    local shared = {}
+    local ancestor = parent
+    while ancestor do
+      shared[ancestor] = true
+      ancestor = ancestor.parent
+    end
+    local stop = old
+    while stop and not shared[stop] do stop = stop.parent end
+    carry(self, old, stop)
     for i, other in ipairs(old.children) do
       if other == self then
         table.remove(old.children, i)

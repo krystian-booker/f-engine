@@ -4,11 +4,32 @@
 --- Markup can use {t:key} once `i18n.install()` has registered the text
 --- resolver (fe.starter does this).
 ---
+--- Plural and select forms: `{count|one:item|other:items}` picks a form by
+--- the argument. For a number the form is `=n` (an exact value, `=0`),
+--- else the language's plural category from `i18n.plural_rules` ("one" or
+--- "other" for English and the default; "one" covers 0 and 1 in French),
+--- else `other`; for any other value (a string such as a gender) the form
+--- with that name, else `other`. Inside a form `#` stands for the value:
+--- `"{count|one:# item|other:# items}"`.
+---
 --- Lookup order: the current language, the fallback language, then default
 --- strings registered with `i18n.defaults` (the kits register their English
 --- UI text under "fe.*" keys), then the key itself. A game translates or
 --- rewords kit text by adding those keys to its lang files.
-local i18n = { language = nil, fallback = "en" }
+local i18n = {
+  language = nil,
+  fallback = "en",
+  --- Plural category of a number per language: fn(n) -> "zero" | "one" |
+  --- "two" | "few" | "many" | "other". Languages not listed use `default`.
+  plural_rules = {
+    default = function(n) return math.abs(n) == 1 and "one" or "other" end,
+    fr = function(n) return math.abs(n) < 2 and "one" or "other" end,
+    pt = function(n) return math.abs(n) < 2 and "one" or "other" end,
+    ja = function() return "other" end,
+    zh = function() return "other" end,
+    ko = function() return "other" end,
+  },
+}
 
 local tables = {}
 local defaults = {}
@@ -44,8 +65,37 @@ function i18n.defaults(strings)
   flatten("", strings, defaults)
 end
 
+--- The plural category of `n` in the current language (see `plural_rules`).
+---@param n number
+---@return string
+function i18n.plural(n)
+  local rules = i18n.plural_rules
+  local code = i18n.language or i18n.fallback
+  local rule = rules[code] or rules[code:match("^(%a+)") or code] or rules.default
+  return rule(n)
+end
+
+-- The form of `{name|form:text|...}` for a value (see the header).
+local function select_form(value, forms)
+  local options = {}
+  for form in forms:gmatch("[^|]+") do
+    local name, text = form:match("^%s*([^:]+):(.*)$")
+    if name then options[name] = text end
+  end
+  local chosen
+  if type(value) == "number" then
+    chosen = options["=" .. tostring(value)] or options[i18n.plural(value)]
+  elseif value ~= nil then
+    chosen = options[tostring(value)]
+  end
+  chosen = chosen or options.other
+  if not chosen then return nil end
+  return (chosen:gsub("#", value ~= nil and tostring(value) or "#"))
+end
+
 --- Translate a key; missing keys fall back as described above, so
---- untranslated text is visible during development.
+--- untranslated text is visible during development. `args` fill `{name}`
+--- placeholders and `{name|form:text|...}` plural and select forms.
 ---@param key string
 ---@param args? table<string, any>
 ---@return string
@@ -53,12 +103,31 @@ function i18n.t(key, args)
   local current = i18n.language and load_table(i18n.language)
   local text = (current and current[key]) or (load_table(i18n.fallback) or {})[key] or defaults[key] or key
   if args then
+    text = text:gsub("{([%w_]+)|([^{}]*)}", function(name, forms)
+      return select_form(args[name], forms) or ("{" .. name .. "}")
+    end)
     text = text:gsub("{([%w_]+)}", function(name)
       local value = args[name]
       return value ~= nil and tostring(value) or "{" .. name .. "}"
     end)
   end
   return text
+end
+
+--- Format a number with the current language's decimal and digit-group
+--- separators (`fe.app.format_number`): `i18n.number(1234.5)` is "1,234.50"
+--- in English and "1.234,50" in German. `options.decimals` fixes the
+--- fraction digits (default 0 for whole numbers, else 2); `options.locale`
+--- overrides the language (default the current language, else the system's).
+---@param n number
+---@param options? {decimals?: integer, locale?: string}
+---@return string
+function i18n.number(n, options)
+  local locale = options and options.locale or i18n.language
+  if locale == nil then
+    return fe.app.format_number(n, options)
+  end
+  return fe.app.format_number(n, { decimals = options and options.decimals, locale = locale })
 end
 
 --- Forget cached tables (call after lang files change).

@@ -23,6 +23,7 @@ std::array<float, ShadowCascadeCount + 1> cascadeSplits(const ShadowCamera& came
 ShadowCascades fitShadowCascades(const ShadowCamera& camera, const ShadowSettings& settings) {
     const auto splits = cascadeSplits(camera);
     const float tanY = std::tan(camera.fovY * 0.5f), tanX = tanY * camera.aspect;
+    const float halfY = camera.orthoHeight * 0.5f, halfX = halfY * camera.aspect;
     const auto sun = glm::normalize(settings.sunDirection);
     const auto lightView =
         glm::lookAtRH(glm::vec3(0), sun, std::abs(sun.y) > 0.99f ? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0));
@@ -42,9 +43,11 @@ ShadowCascades fitShadowCascades(const ShadowCamera& camera, const ShadowSetting
         glm::vec3 centre(0);
         for (int i = 0; i < 8; ++i) {
             const float d = (i & 4) ? d1 : d0;
+            const float extentX = camera.orthographic ? halfX : d * tanX;
+            const float extentY = camera.orthographic ? halfY : d * tanY;
             corners[static_cast<std::size_t>(i)] = camera.position + camera.forward * d +
-                                                   camera.right * (((i & 1) ? 1.0f : -1.0f) * d * tanX) +
-                                                   camera.up * (((i & 2) ? 1.0f : -1.0f) * d * tanY);
+                                                   camera.right * (((i & 1) ? 1.0f : -1.0f) * extentX) +
+                                                   camera.up * (((i & 2) ? 1.0f : -1.0f) * extentY);
             centre += corners[static_cast<std::size_t>(i)] / 8.0f;
         }
         float radius = 0;
@@ -101,14 +104,16 @@ float lightShadowPriority(const LightSettings& light, glm::vec3 focus) {
     return light.intensity * brightness / (1.0f + beyond);
 }
 
-std::vector<LightShadowSlot> chooseShadowLights(const std::vector<LightShadowCandidate>& candidates,
-                                                int tileBudget) {
-    std::vector<std::size_t> order(candidates.size());
+void chooseShadowLights(const std::vector<LightShadowCandidate>& candidates, std::vector<LightShadowSlot>& slots,
+                        std::vector<std::size_t>& order, int tileBudget) {
+    order.resize(candidates.size());
     std::iota(order.begin(), order.end(), 0);
-    std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
-        return candidates[a].priority > candidates[b].priority;
+    // Ties keep candidate order (the index breaks them), without stable_sort's buffer.
+    std::sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+        const float pa = candidates[a].priority, pb = candidates[b].priority;
+        return pa != pb ? pa > pb : a < b;
     });
-    std::vector<LightShadowSlot> slots;
+    slots.clear();
     int next = 0;
     for (const auto index : order) {
         const auto& candidate = candidates[index];
@@ -119,6 +124,13 @@ std::vector<LightShadowSlot> chooseShadowLights(const std::vector<LightShadowCan
         slots.push_back({index, next, tiles});
         next += tiles;
     }
+}
+
+std::vector<LightShadowSlot> chooseShadowLights(const std::vector<LightShadowCandidate>& candidates,
+                                                int tileBudget) {
+    std::vector<LightShadowSlot> slots;
+    std::vector<std::size_t> order;
+    chooseShadowLights(candidates, slots, order, tileBudget);
     return slots;
 }
 
@@ -133,8 +145,8 @@ int cubeFace(glm::vec3 d) {
     return d.z >= 0 ? 4 : 5;
 }
 
-std::vector<LightShadowView> lightShadowViews(const LightSettings& light, int firstTile,
-                                              bool homogeneousDepth, bool originBottomLeft) {
+void lightShadowViews(const LightSettings& light, int firstTile, bool homogeneousDepth, bool originBottomLeft,
+                      std::vector<LightShadowView>& views) {
     static const std::array<std::pair<glm::vec3, glm::vec3>, 6> faces = {{{{1, 0, 0}, {0, -1, 0}},
                                                                           {{-1, 0, 0}, {0, -1, 0}},
                                                                           {{0, 1, 0}, {0, 0, 1}},
@@ -144,16 +156,14 @@ std::vector<LightShadowView> lightShadowViews(const LightSettings& light, int fi
     const float fov = lightFov(light);
     const float farPlane = std::max(light.radius, 0.1f);
     const float nearPlane = std::clamp(farPlane * 0.01f, 0.02f, 0.25f);
-    std::vector<std::pair<glm::vec3, glm::vec3>> directions;
-    if (light.type == LightType::Point) {
-        directions.assign(faces.begin(), faces.end());
-    } else {
+    std::array<std::pair<glm::vec3, glm::vec3>, 6> directions = faces;
+    std::size_t count = faces.size();
+    if (light.type != LightType::Point) {
         const auto forward = glm::normalize(light.direction);
-        directions.emplace_back(forward,
-                                std::abs(forward.y) > 0.99f ? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0));
+        directions[0] = {forward, std::abs(forward.y) > 0.99f ? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0)};
+        count = 1;
     }
-    std::vector<LightShadowView> views;
-    for (std::size_t i = 0; i < directions.size(); ++i) {
+    for (std::size_t i = 0; i < count; ++i) {
         const auto& [forward, up] = directions[i];
         LightShadowView out;
         out.view = glm::lookAtRH(light.position, light.position + forward, up);
@@ -166,6 +176,12 @@ std::vector<LightShadowView> lightShadowViews(const LightSettings& light, int fi
         out.sample = toTile * glm::perspectiveRH_ZO(fov, 1.0f, nearPlane, farPlane) * out.view;
         views.push_back(out);
     }
+}
+
+std::vector<LightShadowView> lightShadowViews(const LightSettings& light, int firstTile,
+                                              bool homogeneousDepth, bool originBottomLeft) {
+    std::vector<LightShadowView> views;
+    lightShadowViews(light, firstTile, homogeneousDepth, originBottomLeft, views);
     return views;
 }
 

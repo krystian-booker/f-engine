@@ -21,11 +21,13 @@
 ---   calculate formula -> ctx.amount (damage and heal effects)
 ---   modify    multipliers (affinity, critical, guard, terrain...)
 ---   apply     last hooks before the change; then the effect's handler
----             changes the target
+---             changes the target (neither runs for previews, so apply
+---             hooks may have side effects)
 ---   after     sees ctx.result (not run for previews)
 --- Any hook may set ctx.cancelled; later phases and the handler are then
---- skipped and the result is {cancelled = true}. Within a phase hooks run by
---- priority (higher first), then in registration order.
+--- skipped and the result is {cancelled = true} (presenters show it as
+--- nullified; it has no amount). Within a phase hooks run by priority
+--- (higher first), then in registration order.
 ---
 --- Hooks are global (`effects.hook`, idempotent when given an id, so module
 --- reloads replace rather than duplicate them) or belong to one battle
@@ -34,17 +36,35 @@
 --- other module's.
 --- Effects resolved with `environmental = true` (state ticks, terrain
 --- hazards) always hit, never crit and skip positional bonuses.
+---
+--- Each handler may register a schema for its records
+--- (`effects.schema(type, fields)`, a record spec as fe.schema takes it);
+--- `effects.validate(effect, path)` checks a record against it, which
+--- fe.rpg.database does for every skill, item and state when the tables
+--- load. Records of a type with a handler but no schema pass; a type
+--- without a handler is an error.
 local data = require("fe.data")
+local schema = require("fe.schema")
 local signal = require("fe.signal")
 local tablex = require("fe.tablex")
 
 local effects = {
   handlers = {},
   formulas = {},
+  schemas = {},
+  providers = {},
   hooks = { before = {}, hit = {}, calculate = {}, modify = {}, apply = {}, after = {} },
   --- Emitted with each result table after it is applied.
   applied = signal.new(),
-  settings = { variance = 0.1, critical_multiplier = 1.5, minimum_damage = 1 },
+  settings = {
+    variance = 0.1,
+    critical_multiplier = 1.5,
+    minimum_damage = 1,
+    --- Caps on one hit's damage and healing, applied after variance and
+    --- every multiplier (Octopath's 9999). nil: no cap.
+    max_damage = nil,
+    max_heal = nil,
+  },
 }
 
 --- Insert a hook entry into a phase list (higher priority first, then
@@ -80,6 +100,54 @@ end
 
 function effects.handler(type_name, fn) effects.handlers[type_name] = fn end
 function effects.formula(name, fn) effects.formulas[name] = fn end
+
+--- Fields an effect record of `type_name` may carry, as an fe.schema
+--- record (open: extra fields are kept). `{ref = "states"}` fields are
+--- checked against the loaded tables by effects.validate.
+function effects.schema(type_name, fields) effects.schemas[type_name] = fields end
+
+--- The module that registers the handler for `type_name` when it is not a
+--- built-in one: effects.validate requires it on demand, so data tables
+--- can be checked before the kit providing the type has been loaded
+--- (the tactical kit's `push`). Games register their own the same way.
+function effects.provider(type_name, module_name) effects.providers[type_name] = module_name end
+effects.provider("push", "fe.battle.tactical.rules")
+
+--- Check an effect record: its type must have a handler (loading its
+--- provider module if one is registered), and its fields must fit the
+--- handler's schema when it registered one. Returns the list of problems
+--- (empty when fine); defaults are filled in place.
+---@param effect table
+---@param path? string
+---@return string[]
+function effects.validate(effect, path)
+  path = path or "effect"
+  if type(effect) ~= "table" then return { path .. ": expected a table" } end
+  if type(effect.type) ~= "string" then return { path .. ".type: missing" } end
+  if not effects.handlers[effect.type] and effects.providers[effect.type] then require(effects.providers[effect.type]) end
+  if not effects.handlers[effect.type] then return { path .. ".type: no effect handler for '" .. effect.type .. "'" } end
+  local fields = effects.schemas[effect.type]
+  if not fields then return {} end
+  local _, errors, refs = schema.validate({ record = fields }, effect, path)
+  for _, ref in ipairs(refs) do
+    if data.has_table(ref.table) and not data.find(ref.table, ref.id) then
+      errors[#errors + 1] = ref.path .. ": unknown " .. ref.table .. " '" .. ref.id .. "'"
+    end
+  end
+  return errors
+end
+
+-- Fields shared by the amount effects (damage and heal).
+local amount_fields = {
+  formula = { type = "any", optional = true, doc = "Formula name, module.function or a number" },
+  power = { type = "number", optional = true },
+  resource = { type = "string", optional = true, doc = "Resource affected (hp by default)" },
+  variance = { type = "number", min = 0, optional = true },
+  element = { type = "string", optional = true },
+  damage_type = { type = "string", optional = true },
+  accuracy = { type = "number", optional = true, doc = "Base hit chance in percent" },
+  always_hit = { type = "boolean", optional = true },
+}
 
 -- Global hooks merged with the battle's own (by priority; globals first on ties).
 local function phase_hooks(phase, battle)
@@ -187,6 +255,7 @@ end, 90, "fe.effects.affinity")
 effects.handler("damage", function(ctx)
   local amount = math.floor(math.max(0, (ctx.preview and ctx.amount or vary(ctx, ctx.amount)) * ctx.multiplier) + 0.5)
   if amount < effects.settings.minimum_damage and ctx.multiplier > 0 then amount = effects.settings.minimum_damage end
+  if effects.settings.max_damage then amount = math.min(amount, effects.settings.max_damage) end
   local resource = ctx.effect.resource or "hp"
   if ctx.preview then return { amount = amount, resource = resource } end
   local actual = -ctx.target:change_resource(resource, -amount)
@@ -204,6 +273,7 @@ end)
 
 effects.handler("heal", function(ctx)
   local amount = math.floor(math.max(0, (ctx.preview and ctx.amount or vary(ctx, ctx.amount)) * ctx.multiplier) + 0.5)
+  if effects.settings.max_heal then amount = math.min(amount, effects.settings.max_heal) end
   local resource = ctx.effect.resource or "hp"
   if ctx.preview then return { amount = amount, resource = resource } end
   if resource == "hp" and not ctx.target:alive() then return { amount = 0, resource = resource } end
@@ -258,29 +328,63 @@ effects.handler("script", function(ctx)
   return require(module_name)[fn_name](ctx) or {}
 end)
 
+effects.schema("damage", tablex.merge({
+  no_critical = { type = "boolean", optional = true },
+  drain = { type = "number", optional = true, doc = "Share of the damage dealt restored to the user" },
+}, amount_fields))
+effects.schema("heal", amount_fields)
+effects.schema("resource", {
+  resource = { type = "string", optional = true, doc = "mp by default" },
+  amount = { type = "number", optional = true },
+  fraction = { type = "number", optional = true, doc = "Share of the resource's maximum instead of amount" },
+})
+effects.schema("add_state", {
+  state = { type = { ref = "states" } },
+  chance = { type = "number", min = 0, max = 1, optional = true },
+  turns = { type = "integer", min = 0, optional = true },
+  accuracy = { type = "number", optional = true },
+  always_hit = { type = "boolean", optional = true },
+})
+effects.schema("remove_state", {
+  state = { type = { ref = "states" }, optional = true },
+  tag = { type = "string", optional = true, doc = "Remove every state carrying this tag instead" },
+})
+effects.schema("buff", {
+  stat = "string",
+  add = { type = "number", optional = true },
+  mul = { type = "number", optional = true },
+  turns = { type = "integer", min = 1, optional = true },
+  id = { type = "string", optional = true },
+  cap = { type = "integer", min = 1, optional = true },
+})
+effects.schema("revive", { fraction = { type = "number", min = 0, max = 1, optional = true } })
+effects.schema("script", { fn = { type = "string", doc = "module.function receiving ctx" } })
+
 local calculated = { damage = "physical", heal = "heal" }
 
 --- Resolve a skill or item use.
---- With `preview = true` nothing changes: damage and healing report the
---- expected amount and `hit_chance` (forecast panels).
+--- With `preview = true` nothing changes: only the before, hit, calculate
+--- and modify phases run; damage and healing report the expected amount
+--- and `hit_chance` (forecast panels, AI), other effects their `chance`.
 --- Without `random`, effects always land and never crit (deterministic).
+--- Every result carries its `effect` record.
 ---@param spec {user: table, targets: table[], source: table, effects?: table[], battle?: table, random?: RandomStream, hits?: integer, multiplier?: number, preview?: boolean, environmental?: boolean}
----@return table[] results {target, type, missed?, critical?, amount?, ...}
+---@return table[] results {target, type, effect, missed?, cancelled?, critical?, amount?, ...}
 function effects.resolve(spec)
   local results = {}
   local list = spec.effects or spec.source.effects or {}
   local hits = spec.hits or spec.source.hits or 1
+  local weapon = spec.source.uses_weapon and spec.user.weapon and spec.user:weapon()
   for _, target in ipairs(spec.targets) do
     for hit = 1, hits do
       for _, effect in ipairs(list) do
-        local weapon = spec.user.weapon and spec.user:weapon()
         local ctx = {
           user = spec.user, target = target, source = spec.source, effect = effect, battle = spec.battle,
           random = spec.random, hit = hit, multiplier = spec.multiplier or 1, amount = 0, preview = spec.preview,
           environmental = spec.environmental,
-          element = effect.element or spec.source.element or (spec.source.uses_weapon and weapon and weapon.equip.element),
+          element = effect.element or spec.source.element or (weapon and weapon.equip.element) or nil,
           damage_type = effect.damage_type or spec.source.damage_type
-            or (spec.source.uses_weapon and weapon and (weapon.equip.damage_type or weapon.equip.type)),
+            or (weapon and (weapon.equip.damage_type or weapon.equip.type)) or nil,
         }
         local alive_before = target:alive()
         local handler = effects.handlers[effect.type]
@@ -293,7 +397,7 @@ function effects.resolve(spec)
             run_hooks("calculate", ctx)
           end
           run_hooks("modify", ctx)
-          run_hooks("apply", ctx)
+          if not ctx.preview then run_hooks("apply", ctx) end
         end
         local result
         if ctx.cancelled then
@@ -315,6 +419,7 @@ function effects.resolve(spec)
         result.target = target
         result.user = spec.user
         result.type = effect.type
+        result.effect = effect
         result.hit = hit
         result.knocked_out = alive_before and not target:alive()
         ctx.result = result

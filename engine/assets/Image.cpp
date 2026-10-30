@@ -80,16 +80,24 @@ Image Image::halved(bool srgb) const {
                 static_cast<std::size_t>(y0 * width + x0) * 4, static_cast<std::size_t>(y0 * width + x1) * 4,
                 static_cast<std::size_t>(y1 * width + x0) * 4, static_cast<std::size_t>(y1 * width + x1) * 4};
             auto* target = &out.rgba[(static_cast<std::size_t>(y) * out.width + x) * 4];
-            for (std::size_t c = 0; c < 4; ++c) {
+            // Colour is weighted by alpha, so the (often black) colour of
+            // transparent texels does not darken the edges of cutouts as the
+            // mips get smaller; alpha itself is a plain average.
+            float alphaSum = 0;
+            for (const auto s : samples) {
+                alphaSum += static_cast<float>(rgba[s + 3]) / 255.0f;
+            }
+            for (std::size_t c = 0; c < 3; ++c) {
                 float sum = 0;
                 for (const auto s : samples) {
                     const auto value = rgba[s + c];
-                    sum += srgb && c < 3 ? toLinear[value] : static_cast<float>(value) / 255.0f;
+                    const float linear = srgb ? toLinear[value] : static_cast<float>(value) / 255.0f;
+                    sum += alphaSum > 0 ? linear * static_cast<float>(rgba[s + 3]) / 255.0f : linear;
                 }
-                const float average = sum * 0.25f;
-                target[c] = srgb && c < 3 ? linearToSrgb(average)
-                                          : static_cast<std::uint8_t>(average * 255.0f + 0.5f);
+                const float average = alphaSum > 0 ? sum / alphaSum : sum * 0.25f;
+                target[c] = srgb ? linearToSrgb(average) : static_cast<std::uint8_t>(average * 255.0f + 0.5f);
             }
+            target[3] = static_cast<std::uint8_t>(alphaSum * 0.25f * 255.0f + 0.5f);
         }
     }
     return out;

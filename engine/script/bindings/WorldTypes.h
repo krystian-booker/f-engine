@@ -1,5 +1,7 @@
 #pragma once
 #include "engine/runtime/Engine.h"
+#include "engine/script/Binder.h"
+#include "engine/world/World.h"
 #include <memory>
 #include <tuple>
 
@@ -73,6 +75,14 @@ struct CameraRef {
 // `alpha`; the flag is false when the point is behind the camera.
 std::tuple<float, float, bool> projectToCanvas(Engine& engine, const Camera& camera, glm::vec3 point,
                                                double alpha = 1);
+
+// The planning rules of world:path and entity:move_to from their `rules`
+// table (an options table; nil gives the defaults).
+struct StepRules;
+StepRules stepRules(LuaHost& host, World& world, const sol::object& value);
+// The tag bits of a list of tag names (nil = none); a name the grid's tag
+// list lacks is an error naming `what`.
+std::uint32_t gridTagBits(const Grid& grid, const sol::object& names, const char* what);
 
 void bindEntity(Engine& engine);
 void bindCamera(Engine& engine);

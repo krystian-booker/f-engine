@@ -1,8 +1,11 @@
 #include "engine/core/Log.h"
+#include "engine/core/NumberFormat.h"
 #include "engine/core/Paths.h"
 #include "engine/core/Random.h"
 #include "engine/runtime/Engine.h"
 #include "engine/script/bindings/Convert.h"
+#include "engine/world/World.h"
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <ctime>
@@ -77,7 +80,43 @@ VsyncMode vsyncMode(const sol::object& value) {
 }
 
 int windowSize(const sol::object& value, const char* what) {
-    return static_cast<int>(lua::integer(value, what));
+    return lua::as<int>(value, what);
+}
+
+// fe.dev.zone names are kept in the profiler for the run; a script that
+// invents names (per entity, per frame) would grow it without end.
+constexpr std::size_t MaxZones = 256;
+
+// fe.fs.user_*: files a game keeps in <user data>/files (mods, exports,
+// replays), each at most MaxUserFileBytes, all together within UserFilesBudget.
+constexpr std::uintmax_t MaxUserFileBytes = std::uintmax_t{16} << 20;
+constexpr std::uintmax_t UserFilesBudget = std::uintmax_t{256} << 20;
+
+std::filesystem::path userFilesRoot(Engine& engine) {
+    return engine.saves().directory() / "files";
+}
+
+// A path inside <user data>/files; the folder itself for "" or ".".
+std::filesystem::path userFile(Engine& engine, const std::string& path) {
+    const auto resolved = resolveInside(userFilesRoot(engine), path.empty() ? "." : path);
+    if (std::filesystem::path(path).filename().string().ends_with(".tmp")) {
+        throw std::runtime_error("User file names may not end in .tmp (the atomic writer's temporary)");
+    }
+    return resolved;
+}
+
+// Bytes of every file below the user files folder, except `excluded`.
+std::uintmax_t userFilesSize(const std::filesystem::path& root, const std::filesystem::path& excluded) {
+    std::uintmax_t total = 0;
+    std::error_code ec;
+    for (std::filesystem::recursive_directory_iterator it(root, ec), end; !ec && it != end;
+         it.increment(ec)) {
+        std::error_code fileError;
+        if (it->is_regular_file(fileError) && !std::filesystem::equivalent(it->path(), excluded, fileError)) {
+            total += it->file_size(fileError);
+        }
+    }
+    return total;
 }
 
 DisplayRequest displayRequest(const sol::table& settings) {
@@ -117,6 +156,7 @@ sol::table displayTable(sol::state_view lua, const DisplayState& display) {
                    : display.vsync == VsyncMode::On ? "on"
                                                     : "adaptive";
     out["monitor"] = display.monitor;
+    out["hdr"] = display.hdr;
     auto monitors = lua.create_table();
     for (const auto& monitor : display.monitors) {
         auto entry = modeTable(lua, monitor.desktop);
@@ -134,9 +174,14 @@ sol::table displayTable(sol::state_view lua, const DisplayState& display) {
     return out;
 }
 
+// A path inside the game folder, or inside lualib/fe for '@fe/...' ('@fe/'
+// alone is that folder).
 std::filesystem::path gameFile(const LuaHost& host, const std::string& path) {
-    return path.starts_with("@fe/") ? resolveInside(host.libraryRoot() / "fe", path.substr(4))
-                                    : resolveInside(host.gameRoot(), path);
+    if (path.starts_with("@fe/")) {
+        const auto rest = path.substr(4);
+        return resolveInside(host.libraryRoot() / "fe", rest.empty() ? "." : rest);
+    }
+    return resolveInside(host.gameRoot(), path);
 }
 
 void bindDev(Engine& engine) {
@@ -180,12 +225,40 @@ void bindDev(Engine& engine) {
         .fn(
             "zone",
             [&engine](const std::string& name, sol::object milliseconds) {
-                engine.stats().zones[name] = lua::as<double>(milliseconds, "milliseconds");
+                auto& zones = engine.stats().zones;
+                const auto value = lua::as<double>(milliseconds, "milliseconds");
+                if (!zones.contains(name) && zones.size() >= MaxZones) {
+                    throw std::runtime_error("fe.dev.zone keeps at most 256 names; reuse them");
+                }
+                zones[name] = value;
             },
-            "fun(name: string, milliseconds: number)", "Record a timing shown in the profiler.")
+            "fun(name: string, milliseconds: number)",
+            "Record a timing shown in the profiler (at most 256 distinct names per run).")
         .fn(
             "clock", [&host] { return host.now(); }, "fun(): number",
             "High-resolution seconds for profiling.")
+        .fn(
+            "stats",
+            [&engine](sol::this_state state) {
+                sol::state_view lua(state);
+                const auto& stats = engine.stats();
+                std::size_t entities = 0, particles = 0;
+                for (const auto& entry : engine.worlds()) {
+                    entities += entry.second->registry().view<Transform>().size();
+                    particles += entry.second->particles().size();
+                }
+                return lua.create_table_with(
+                    "frame_ms", stats.frame, "lua_update_ms", stats.luaUpdate, "lua_draw_ms", stats.luaDraw,
+                    "draw_calls", static_cast<lua_Integer>(stats.drawCalls), "entities",
+                    static_cast<lua_Integer>(entities), "particles", static_cast<lua_Integer>(particles),
+                    "memory_kb", static_cast<lua_Integer>(engine.lua().lua().memory_used() / 1024));
+            },
+            "fun(): {frame_ms: number, lua_update_ms: number, lua_draw_ms: number, draw_calls: integer, "
+            "entities: integer, particles: integer, memory_kb: integer}",
+            "Last frame's timings and counts (quality settings, debug overlays): milliseconds between the "
+            "last two frames, the time spent in main.update and main.draw, the worlds' draw calls, entities "
+            "and particles across loaded worlds, and Lua memory in KiB. frame_ms and draw_calls are 0 in "
+            "headless runs.")
         .fn(
             "errors",
             [&host](sol::this_state state) {
@@ -322,8 +395,8 @@ void bindTimeAndRandom(Engine& engine) {
             "fun(seed?: integer): RandomStream",
             "New stream; without a seed it derives one from the run seed.")
         .fn(
-            "seed", [&engine] { return static_cast<double>(engine.seed() & 0xffffffffffffULL); },
-            "fun(): integer", "The run's base seed.");
+            "seed", [&engine] { return static_cast<lua_Integer>(engine.seed() & 0xffffffffffffULL); },
+            "fun(): integer", "The run's base seed (an integer; its low 48 bits).");
 }
 
 void bindData(Engine& engine) {
@@ -380,13 +453,94 @@ void bindData(Engine& engine) {
             [&host](sol::this_state state, const std::string& path) {
                 sol::state_view lua(state);
                 auto out = lua.create_table();
-                const auto folder = resolveInside(host.gameRoot(), path.empty() ? "." : path);
+                const auto folder = gameFile(host, path.empty() ? "." : path);
                 for (const auto& name : listFolder(folder)) {
                     out.add(name);
                 }
                 return out;
             },
-            "fun(folder: string): string[]", "Sorted entries of a folder; folders end with '/'.");
+            "fun(folder: string): string[]",
+            "Sorted entries of a folder inside the game folder ('@fe/' for lualib, like read and exists); "
+            "folders end with '/'.")
+        .fn(
+            "user_list",
+            [&engine](sol::this_state state, sol::object folder) {
+                sol::state_view lua(state);
+                auto out = lua.create_table();
+                const auto path = userFile(engine, lua::opt<std::string>(folder, "folder").value_or(""));
+                std::vector<std::string> names;
+                std::error_code ec;
+                for (const auto& entry : std::filesystem::directory_iterator(path, ec)) {
+                    std::error_code kind;
+                    if (entry.is_directory(kind)) {
+                        names.push_back(entry.path().filename().string() + "/");
+                    } else if (entry.is_regular_file(kind) && entry.path().extension() != ".tmp") {
+                        names.push_back(entry.path().filename().string());
+                    }
+                }
+                std::sort(names.begin(), names.end());
+                for (const auto& name : names) {
+                    out.add(name);
+                }
+                return out;
+            },
+            "fun(folder?: string): string[]",
+            "Sorted entries of a folder inside the user files folder (<user data>/files; the folder itself "
+            "when omitted); folders end with '/'. A missing folder lists nothing. For mods and other content "
+            "the player drops in: a game lists `mods/`, reads each `mods/<name>/mod.json` with user_read and "
+            "merges what it describes.")
+        .fn(
+            "user_read",
+            [&engine](const std::string& path) -> sol::optional<std::string> {
+                const auto file = userFile(engine, path);
+                std::error_code ec;
+                if (!std::filesystem::is_regular_file(file, ec)) {
+                    return sol::nullopt;
+                }
+                return readFile(file);
+            },
+            "fun(path: string): string?",
+            "The bytes of a file inside the user files folder (binary-safe), or nil when there is none. "
+            "Paths with '..' or NUL raise.")
+        .fn(
+            "user_write",
+            [&engine](const std::string& path, const std::string& bytes) {
+                const auto file = userFile(engine, path);
+                if (file == std::filesystem::weakly_canonical(userFilesRoot(engine))) {
+                    throw std::runtime_error("user_write needs a file path");
+                }
+                if (bytes.size() > MaxUserFileBytes) {
+                    throw std::runtime_error("A user file holds at most " +
+                                             std::to_string(MaxUserFileBytes >> 20) + " MiB; " + path +
+                                             " would be " + std::to_string(bytes.size()) + " bytes");
+                }
+                const auto used = userFilesSize(userFilesRoot(engine), file);
+                if (used + bytes.size() > UserFilesBudget) {
+                    throw std::runtime_error("The user files folder holds at most " +
+                                             std::to_string(UserFilesBudget >> 20) + " MiB; writing " + path +
+                                             " would bring it to " +
+                                             std::to_string((used + bytes.size()) >> 10) + " KiB");
+                }
+                writeTextAtomic(file, bytes);
+            },
+            "fun(path: string, bytes: string)",
+            "Write a file inside the user files folder, atomically (a crash leaves the old or the new "
+            "file), creating folders on the way; any bytes. A file holds at most 16 MiB and the folder "
+            "256 MiB in all; past either the write raises and nothing changes.")
+        .fn(
+            "user_remove",
+            [&engine](const std::string& path) {
+                const auto file = userFile(engine, path);
+                if (file == std::filesystem::weakly_canonical(userFilesRoot(engine))) {
+                    throw std::runtime_error(
+                        "user_remove needs a file or folder inside the user files folder");
+                }
+                std::error_code ec;
+                return std::filesystem::remove_all(file, ec) > 0 && !ec;
+            },
+            "fun(path: string): boolean",
+            "Delete a file, or a folder with everything in it, inside the user files folder; false when "
+            "there was none.");
 }
 
 void bindApp(Engine& engine) {
@@ -419,8 +573,6 @@ void bindApp(Engine& engine) {
         .fn(
             "fullscreen",
             [&engine](sol::this_state state) {
-                lua::atMostArguments(state, 0,
-                                     "fe.app.fullscreen() only reads; use fe.app.set_fullscreen(mode)");
                 return displayTable(state, engine.display())["fullscreen"].get<sol::object>();
             },
             "fun(): false|'borderless'|'exclusive'", "The fullscreen mode (as in fe.app.display()).")
@@ -436,13 +588,15 @@ void bindApp(Engine& engine) {
         .fn(
             "display", [&engine](sol::this_state state) { return displayTable(state, engine.display()); },
             "fun(): {fullscreen: false|'borderless'|'exclusive', width: integer, height: integer, vsync: "
-            "'on'|'off'|'adaptive', monitor: integer, monitors: {name: string, width: integer, height: "
-            "integer, "
+            "'on'|'off'|'adaptive', monitor: integer, hdr: boolean, monitors: {name: string, width: "
+            "integer, height: integer, "
             "refresh: number}[], modes: {width: integer, height: integer, refresh: number}[]}",
             "Window and monitor settings. width and height are the window size in screen units, or the "
             "exclusive fullscreen mode; monitor indexes monitors; modes are the exclusive fullscreen modes "
             "of "
-            "that monitor, largest first. Headless runs report one monitor the size of game.json's window.")
+            "that monitor, largest first. hdr is true when the frame is presented to a high dynamic range "
+            "back buffer (game.json hdr_output or --hdr, and the renderer supports one). Headless runs "
+            "report one monitor the size of game.json's window.")
         .fn(
             "set_display",
             [&engine](sol::table settings) { engine.requestDisplay(displayRequest(settings)); },
@@ -457,6 +611,24 @@ void bindApp(Engine& engine) {
             "locale", [&engine] { return engine.locale(); }, "fun(): string",
             "The player's preferred language and region as a BCP 47 tag, such as 'en-US' or 'ja' (from the "
             "operating system; 'en-US' in headless runs).")
+        .fn(
+            "format_number",
+            [&engine](sol::object number, sol::object options) {
+                const auto value = lua::as<double>(number, "number");
+                int decimals = value == std::floor(value) && std::abs(value) < 9007199254740992.0 ? 0 : 2;
+                std::string locale = engine.locale();
+                if (const auto spec = lua::options(options, "format_number options")) {
+                    decimals = lua::within(lua::get(*spec, "decimals", decimals), 0, 20, "decimals");
+                    locale = lua::get(*spec, "locale", locale);
+                }
+                return formatNumber(value, decimals, locale);
+            },
+            "fun(number: number, options?: {decimals?: integer, locale?: string}): string",
+            "The number with the decimal and digit-group separators of a language: `locale` is a BCP 47 "
+            "tag (default fe.app.locale()), of which the language subtag chooses from a built-in table (en, "
+            "de, fr, es, it, pt, ja, zh, ko, ru, pl, nl, sv, tr; others format as English; languages that "
+            "group with a space use a no-break space). `decimals` (0 to 20) is 0 for a whole number and 2 "
+            "otherwise by default; the number is rounded to it. fe.i18n.number uses the current language.")
         .fn(
             "capture",
             [&engine](const std::string& path) {

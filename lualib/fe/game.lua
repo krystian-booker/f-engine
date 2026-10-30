@@ -20,9 +20,11 @@
 ---     until `game.resume()`; `game.pause(world)` pauses one world. Both
 ---     return a release function, and a pause taken in a task ends with that
 ---     task at the latest. `game.paused` is true while a pause of every
----     world is held. UI, scenes and tasks that are not bound to a paused
----     world keep running (see `task.bind`), so pause screens work; playtime
----     stops.
+---     world is held, and also while every loaded world is paused by any
+---     means (per-world pauses, or `world.paused` set by hand; checked when
+---     the game syncs the worlds, each tick). UI, scenes and tasks that are
+---     not bound to a paused world keep running (see `task.bind`), so pause
+---     screens work; playtime stops.
 ---   * `game.time_scale` multiplies gameplay dt and every world's time
 ---     scale (slow motion). It applies once: a task bound to a world runs
 ---     on that world's time (which already includes it), any other task on
@@ -89,11 +91,22 @@ local function wanted(name)
   return paused, scale
 end
 
+local function held_all()
+  for _, target in pairs(holds) do
+    if target == true then return true end
+  end
+  return false
+end
+
 --- Push the game's pause and time scale to every loaded world (the game
---- calls this each tick and whenever they change).
+--- calls this each tick and whenever they change), then update
+--- `game.paused`: a pause of every world is held, or every loaded world is
+--- paused by any means.
 function game.sync_worlds()
   local seen = {}
-  for _, name in ipairs(fe.world.list()) do
+  local names = fe.world.list()
+  local all_paused = #names > 0
+  for _, name in ipairs(names) do
     local world = fe.world.get(name)
     local paused, scale = wanted(name)
     local last = applied[name]
@@ -102,22 +115,20 @@ function game.sync_worlds()
     if last.time_scale ~= scale then world.time_scale = scale end
     applied[name] = { world = world, paused = paused, time_scale = scale }
     seen[name] = true
+    if not world.paused then all_paused = false end
   end
   for name in pairs(applied) do
     if not seen[name] then applied[name] = nil end
   end
+  local now_paused = held_all() or all_paused
+  if now_paused ~= game.paused then
+    game.paused = now_paused
+    game.pause_changed:emit(now_paused)
+  end
 end
 
 local function refresh_paused()
-  local paused = false
-  for _, target in pairs(holds) do
-    if target == true then paused = true end
-  end
   game.sync_worlds()
-  if paused ~= game.paused then
-    game.paused = paused
-    game.pause_changed:emit(paused)
-  end
 end
 
 --- Pause every world (no argument) or one world (a World or its name).

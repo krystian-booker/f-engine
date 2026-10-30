@@ -17,12 +17,15 @@ std::size_t SpriteBatch::MaterialHash::operator()(const Material& m) const {
     const auto mix = [&](std::size_t value) {
         hash ^= value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2);
     };
-    for (const auto idx : {m.atlas.idx, m.palette.idx, m.normal.idx, m.emissive.idx, m.program.idx}) {
+    for (const auto idx :
+         {m.atlas.idx, m.palette.idx, m.normal.idx, m.emissive.idx, m.program.idx, m.shadowProgram.idx}) {
         mix(idx);
     }
     mix(std::hash<float>{}(m.texel.x));
     mix(std::hash<float>{}(m.texel.y));
+    mix(std::hash<float>{}(m.outlineWidth));
     mix(m.paletteSwap ? 1 : 0);
+    mix(std::hash<const ShaderParams*>{}(m.params));
     return hash;
 }
 
@@ -100,44 +103,66 @@ void SpriteBatch::draw(std::uint16_t view, const std::vector<int>& quads, bgfx::
         bgfx::setTexture(0, uniforms.albedo.get(), m.atlas);
         std::uint64_t state = ShadowState;
         float cutoff = OpaqueCutoff, output = 0;
+        // The colour passes take a game shader, the shadow and silhouette
+        // passes its shadow variant; the engine's `program` otherwise.
+        bgfx::ProgramHandle chosen = program;
         switch (pass) {
         case Pass::Shadow:
+            if (bgfx::isValid(m.shadowProgram)) {
+                chosen = m.shadowProgram;
+            }
             break;
         case Pass::Opaque:
             state = OpaqueState;
+            if (bgfx::isValid(m.program)) {
+                chosen = m.program;
+            }
             break;
         case Pass::Transparent:
             state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_DEPTH_TEST_LESS |
                     blendFunction(first.blend);
             cutoff = BlendCutoff;
             output = blendOutput(first.blend);
+            if (bgfx::isValid(m.program)) {
+                chosen = m.program;
+            }
             break;
         case Pass::Silhouette:
             state = SilhouetteState;
             output = SilhouetteOutput;
+            if (bgfx::isValid(m.shadowProgram)) {
+                chosen = m.shadowProgram;
+            }
             break;
         }
-        if (lighting) {
+        const bool custom = chosen.idx != program.idx;
+        // The engine's shadow pass is vs_shadow/fs_shadow (u_material); every
+        // other program pairs with vs_sprite and reads the sprite uniforms.
+        if (pass != Pass::Shadow || custom) {
             const bool normalMap = bgfx::isValid(m.normal), emissive = bgfx::isValid(m.emissive);
             bgfx::setTexture(1, uniforms.palette.get(), m.palette);
             bgfx::setTexture(5, uniforms.spriteNormal.get(), normalMap ? m.normal : context.flatNormal);
             bgfx::setTexture(6, uniforms.spriteEmissive.get(), emissive ? m.emissive : context.white);
-            lighting->bind(uniforms);
+            if (lighting) {
+                lighting->bind(uniforms);
+            }
             const glm::vec4 sprite[Uniforms::SpriteCount] = {
                 glm::vec4(m.texel, m.paletteSwap ? 1.0f : 0.0f, cutoff),
-                glm::vec4(output, normalMap ? 1.0f : 0.0f, emissive ? 1.0f : 0.0f, 0)};
+                glm::vec4(output, normalMap ? 1.0f : 0.0f, emissive ? 1.0f : 0.0f, m.outlineWidth)};
             bgfx::setUniform(uniforms.sprite.get(), sprite, Uniforms::SpriteCount);
         } else {
             const glm::vec4 shadowMaterial[Uniforms::MaterialCount] = {
                 glm::vec4(1), glm::vec4(cutoff, 0, 0, 0), glm::vec4(0)};
             bgfx::setUniform(uniforms.material.get(), shadowMaterial, Uniforms::MaterialCount);
         }
-        bgfx::setState(state);
-        const bool custom = bgfx::isValid(m.program) && (pass == Pass::Opaque || pass == Pass::Transparent);
         if (custom) {
+            static const ShaderParams zero{};
             bgfx::setUniform(uniforms.info.get(), &context.info);
+            bgfx::setUniform(uniforms.params.get(), (m.params ? *m.params : zero).data(),
+                             Uniforms::ParamsCount);
         }
-        submitDraw(view, custom ? m.program : program, calls);
+        bgfx::setState(state);
+        submitDraw(view, chosen, calls);
         start = end;
     }
 }

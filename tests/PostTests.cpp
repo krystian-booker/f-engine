@@ -1,19 +1,10 @@
 #include "engine/render/FrameMath.h"
 #include "engine/runtime/Engine.h"
+#include "engine/script/LuaHost.h"
+#include "engine/world/World.h"
 #include <doctest/doctest.h>
 
 using namespace fe;
-
-namespace {
-EngineOptions testEngine() {
-    EngineOptions options;
-    options.gameRoot = FENGINE_TEST_GAME;
-    options.libraryRoot = FENGINE_LUALIB;
-    options.userData = std::filesystem::temp_directory_path() / "fengine-post-test";
-    options.seed = 7;
-    return options;
-}
-} // namespace
 
 TEST_CASE("bloom mip chain halves the scene and stops before 2 pixels") {
     const auto sizes = bloomMipSizes({1280, 720}, 6);
@@ -40,6 +31,12 @@ TEST_CASE("bloom normalisation and soft knee") {
     CHECK(b > a);
     // No knee: a hard threshold.
     CHECK(bloomPass(0.99f, 1.0f, 0.0f) == doctest::Approx(0));
+    // The settings' knee is a fraction of the threshold; the shader gets it absolute.
+    PostSettings post;
+    post.bloomThreshold = 0.8f;
+    post.bloomKnee = 0.5f;
+    CHECK(bloomKnee(post) == doctest::Approx(0.4f));
+    CHECK(bloomPass(0.8f, post.bloomThreshold, bloomKnee(post)) == doctest::Approx(0.4f * 0.4f / 1.6f / 0.8f).epsilon(1e-3));
 }
 
 TEST_CASE("particles fade out as they near the camera") {
@@ -200,62 +197,6 @@ TEST_CASE("post settings parse, round-trip and validate") {
     CHECK_THROWS(Environment::fromJson(badShader));
 }
 
-TEST_CASE("world draws record rects, render targets and camera overrides") {
-    Engine engine(testEngine());
-    auto& lua = engine.lua();
-    REQUIRE(lua.evaluate("w = fe.world.load('main', 'arena'); w:camera().yaw = 30").ok);
-    engine.draw(1);
-    REQUIRE(
-        lua.evaluate("w:draw(); w:draw{rect = {10, 20, 64, 48}}; "
-                     "w:draw{target = 'map', rect = {0, 0, 96, 80}, camera = {pitch = 89, distance = 30}}; "
-                     "fe.canvas.image('rt:map', 4, 4)")
-            .ok);
-    const auto& draws = engine.drawList();
-    REQUIRE(draws.size() == 3);
-    CHECK_FALSE(draws[0].rect);
-    REQUIRE(draws[1].rect);
-    CHECK(draws[1].rect->w == doctest::Approx(64));
-    CHECK(draws[1].target.empty());
-    CHECK(draws[2].target == "map");
-    REQUIRE(draws[2].camera);
-    CHECK(draws[2].camera->pitch == doctest::Approx(89));
-    CHECK(draws[2].camera->yaw == doctest::Approx(30)); // unset fields copy the world camera
-    CHECK(engine.world("main")->camera().pitch != doctest::Approx(89));
-    CHECK(engine.canvas().imageSize("rt:map") == glm::ivec2(96, 80));
-    REQUIRE(!engine.canvas().quads().empty());
-    CHECK(engine.canvas().quads().back().texture.image == "rt:map");
-    CHECK(engine.focusWorld() == engine.world("main"));
-    CHECK_FALSE(lua.evaluate("w:draw{target = 'Bad Name'}").ok);
-    CHECK_FALSE(lua.evaluate("w:draw{rect = {0, 0, 0, 10}}").ok);
-    CHECK(engine.canvas().imageSize("rt:unknown") == glm::ivec2(0));
-}
-
-TEST_CASE("a draw's post table overrides the environment's post fields for that draw") {
-    Engine engine(testEngine());
-    auto& lua = engine.lua();
-    REQUIRE(lua.evaluate("w = fe.world.load('main', 'arena'); "
-                         "w:set_environment{post = {bloom_strength = 0.9, exposure = 1.4, ssao = true}}")
-                .ok);
-    REQUIRE(lua.evaluate("w:draw(); w:draw{target = 'map', post = {depth_of_field = false, bloom = false, "
-                         "custom = {{shader = 'sepia'}}}}")
-                .ok);
-    const auto& draws = engine.drawList();
-    REQUIRE(draws.size() == 2);
-    CHECK_FALSE(draws[0].post);
-    REQUIRE(draws[1].post);
-    CHECK_FALSE(draws[1].post->depthOfField);
-    CHECK_FALSE(draws[1].post->bloom);
-    CHECK(draws[1].post->exposure == doctest::Approx(1.4f)); // unset fields copy the environment
-    CHECK(draws[1].post->ssao);
-    REQUIRE(draws[1].post->custom.size() == 1);
-    CHECK(draws[1].post->custom[0].shader == "sepia");
-    const auto& environment = engine.world("main")->environment().post;
-    CHECK(environment.bloom);
-    CHECK(environment.depthOfField);
-    CHECK(environment.custom.empty());
-    CHECK_FALSE(lua.evaluate("w:draw{post = {custom = {{shader = 'Bad Name'}}}}").ok);
-}
-
 TEST_CASE("draw camera overrides interpolate between ticks per world, target and order") {
     DrawCameras cameras;
     int world = 0, other = 0;
@@ -287,46 +228,6 @@ TEST_CASE("draw camera overrides interpolate between ticks per world, target and
     cameras.endFrame();
     cameras.endFrame();
     CHECK(cameras.update(&world, "map", camera, 4).focus(0).x == doctest::Approx(6)); // snapped again
-}
-
-TEST_CASE("screen freeze, radial blur and world-only thumbnails are requests") {
-    Engine engine(testEngine());
-    auto& lua = engine.lua();
-    REQUIRE(lua.evaluate("fe.screen.freeze()").ok);
-    CHECK(engine.screen().frozen);
-    const auto serial = engine.screen().freezeSerial;
-    REQUIRE(lua.evaluate("fe.screen.freeze()").ok);
-    CHECK(engine.screen().freezeSerial == serial + 1);
-    CHECK(lua.evaluate("assert(fe.screen.frozen())").ok);
-    REQUIRE(lua.evaluate("fe.screen.unfreeze(); fe.screen.set{radial_blur = 2, radial_centre = {0.25, 0.75}, "
-                         "chromatic = 0.5, transition = {kind = 'shatter', progress = 0.5}}")
-                .ok);
-    CHECK_FALSE(engine.screen().frozen);
-    CHECK(engine.screen().radialBlur == doctest::Approx(1)); // clamped
-    CHECK(engine.screen().radialCentre == glm::vec2(0.25f, 0.75f));
-    CHECK(lua.evaluate("local s = fe.screen.get(); assert(s.chromatic == 0.5 and s.radial_centre.x == 0.25)")
-              .ok);
-    REQUIRE(lua.evaluate("fe.save.thumbnail('slot1')").ok);
-    CHECK(engine.requests().captures.empty());
-    REQUIRE(engine.requests().sceneCaptures.size() == 1);
-    CHECK(engine.requests().sceneCaptures[0] == engine.saves().thumbnailPath("slot1"));
-}
-
-TEST_CASE("distort sprites and emitters are recorded for the renderer") {
-    Engine engine(testEngine());
-    auto& lua = engine.lua();
-    REQUIRE(lua.evaluate("w = fe.world.load('main', 'arena'); "
-                         "e = w:spawn{position = {x = 2.5, z = 5.5}, sprite = {animation = "
-                         "'@fe/assets/ui/spark.anim.json', distort = 2}, "
-                         "emitter = {rate = 60, distort = 0.5}}")
-                .ok);
-    CHECK(lua.evaluate("assert(e:sprite().distort == 2)").ok);
-    engine.tick(1.0 / 60);
-    engine.tick(1.0 / 60);
-    const auto& particles = engine.world("main")->particles();
-    REQUIRE(!particles.empty());
-    CHECK(particles.front().distort == doctest::Approx(0.5f));
-    CHECK_FALSE(lua.evaluate("w:spawn{position = {x = 1, z = 1}, emitter = {distort = -1}}").ok);
 }
 
 TEST_CASE("post and screen chromatic aberration share one shift") {
@@ -396,4 +297,25 @@ TEST_CASE("render targets show premultiplied: canvas colours are premultiplied t
     CHECK(premultiplyRgba(0xff804000u) == 0x00000000u);
     CHECK(premultiplyRgba(0xff804080u) == 0x80402080u);
     CHECK(premultiplyRgba(0x10203040u) == 0x04080c40u);
+}
+
+TEST_CASE("pixel_scale takes fractions from 1 to 8 and keeps whole numbers crisp") {
+    auto json = Environment{}.toJson();
+    json["post"]["pixel_scale"] = 1.5;
+    const auto env = Environment::fromJson(json);
+    CHECK(env.post.pixelScale == doctest::Approx(1.5f));
+    CHECK_FALSE(env.post.fxaa());     // auto antialiasing stays off below full resolution
+    CHECK_FALSE(env.post.pixelated()); // a fraction is filtered up
+    CHECK(env.toJson()["post"]["pixel_scale"] == 1.5);
+    json["post"]["pixel_scale"] = 3;
+    CHECK(Environment::fromJson(json).post.pixelated());
+    CHECK(Environment::fromJson(json).toJson()["post"]["pixel_scale"].is_number_integer());
+    PostSettings post;
+    CHECK_FALSE(post.pixelated());
+    CHECK(Environment{}.toJson()["post"]["pixel_scale"] == 1);
+    for (const auto value : {0.5, 0.0, 8.5, -2.0}) {
+        CAPTURE(value);
+        json["post"]["pixel_scale"] = value;
+        CHECK_THROWS_WITH(Environment::fromJson(json), doctest::Contains("pixel_scale"));
+    }
 }

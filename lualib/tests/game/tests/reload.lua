@@ -17,8 +17,10 @@ local ui = require("fe.ui")
 
 local kits = {
   "signal.lua", "task.lua", "scene.lua", "state.lua", "save.lua", "game.lua", "i18n.lua", "input.lua", "config.lua",
-  "schema.lua", "data.lua", "event.lua", "camera.lua", "dialogue.lua", "cutscene.lua", "field.lua", "follower.lua",
-  "daynight.lua", "quest.lua", "story.lua", "devtools.lua", "ui/theme.lua", "ui/init.lua", "ui/screens/menu.lua",
+  "schema.lua", "data.lua", "event.lua", "camera.lua", "dialogue.lua", "cutscene.lua", "field.lua",
+  "field/placements.lua", "field/followers.lua", "follower.lua", "daynight.lua", "quest.lua", "story.lua",
+  "worldmap.lua", "sound.lua", "timeline.lua", "devtools.lua", "ui/theme.lua", "ui/init.lua", "ui/screens/menu.lua",
+  "ui/screens/backlog.lua", "ui/screens/config.lua", "ui/screens/save.lua", "ui/screens/shop.lua", "vehicle.lua",
 }
 
 local function press(t, key)
@@ -43,6 +45,8 @@ return {
     scene.clear()
     field.reset()
     for _, module in ipairs({ "fe.quest", "fe.story", "fe.cutscene", "fe.ui.screens.menu" }) do require(module) end
+    local vehicle = require("fe.vehicle")
+    vehicle.define("reload_boat", { sprite = "@fe/assets/ui/spark.anim.json", required_tags = { "water" } })
     field.start("arena", "start")
     daynight.set_hour(8)
     follower.join("pal", { name = "Pal", sprite = "@fe/assets/ui/spark.anim.json" })
@@ -64,6 +68,22 @@ return {
     local edited_keys = daynight.keys
     daynight.keys = { { hour = 0, ambient = { 1, 1, 1 } } }
     camera.defaults = { pitch = 1, yaw = 0, distance = 1, fov = 1, height = 0, smoothing = 1 }
+    -- Pretend the file used to say walk_speed = 99 (live and baseline agree)
+    -- while the game changed `followers` at runtime (above): a reload adopts
+    -- the first and keeps the second.
+    local file_walk = field.file_defaults.settings.walk_speed
+    field.settings.walk_speed, field.file_defaults.settings.walk_speed = 99, 99
+    dialogue.style.auto_delay, dialogue.file_defaults.style.auto_delay = 9, 9
+    dialogue.style.lines = 5
+    local file_text = ui.theme.file_defaults.text
+    ui.theme.text, ui.theme.file_defaults.text = 0x123456ff, 0x123456ff
+    ui.theme.set({ muted = 0x111111ff })
+    local menu = require("fe.ui.screens.menu")
+    local order_before = {}
+    for i, page in ipairs(menu.pages) do order_before[i] = page.id end
+    local custom_run = function() end
+    table.insert(menu.pages, 1, { id = "custom", label = "Custom", run = custom_run })
+    local items_run = menu.items_page
 
     for _, file in ipairs(kits) do
       t.ok(fe.harness.reload("@fe/" .. file), file)
@@ -73,7 +93,25 @@ return {
     t.eq(listeners(), before, "no listener was added twice")
     t.ok(state.flag("before_reload"))
     t.eq(save.version, 3)
-    t.eq(field.settings.followers, 2)
+    t.eq(field.settings.followers, 2, "a setting the game changed is kept")
+    t.eq(field.settings.walk_speed, file_walk, "an edited setting is adopted")
+    t.eq(field.file_defaults.settings.walk_speed, file_walk)
+    t.eq(dialogue.style.auto_delay, dialogue.file_defaults.style.auto_delay, "dialogue.style too")
+    t.eq(dialogue.style.lines, 5)
+    dialogue.style.lines = dialogue.file_defaults.style.lines
+    t.eq(ui.theme.text, file_text, "theme colours are adopted")
+    t.eq(ui.theme.muted, 0x111111ff, "unless the game set them")
+    t.eq(menu.pages[1].id, "custom", "a page the game inserted keeps its place")
+    t.eq(menu.pages[1].run, custom_run, "and its function")
+    local order_after = {}
+    for i = 2, #menu.pages do order_after[i - 1] = menu.pages[i].id end
+    t.eq(order_after, order_before, "the file's pages follow in their order")
+    t.ok(menu.items_page ~= items_run, "with fresh page functions")
+    t.eq(menu.page("items").run, "items_page", "pages name their module function")
+    t.ok(menu.page("items").run ~= menu.page("skills").run, "paired by id, not by position")
+    t.eq(menu.page_run(menu.page("items")), menu.items_page, "resolved on the module when opened")
+    table.remove(menu.pages, 1)
+    ui.theme.set({ muted = ui.theme.file_defaults.muted })
     t.eq(daynight.hour(), 8)
     t.eq(#daynight.keys, #edited_keys, "__reload adopts the file's keyframes")
     t.eq(camera.defaults.pitch, 40, "__reload adopts the file's camera defaults")
@@ -104,6 +142,8 @@ return {
     fe.input.feed("key:Right", 0)
     t.tick(2)
     t.ok(field.player.position.x > x + 0.5, "the field still moves the player")
+    t.eq(field.control, vehicle.hooks.control.wrapper, "the vehicle kit's hook is in place once")
+    t.ok(vehicle.hooks.control.base ~= vehicle.hooks.control.wrapper)
     local events = 0
     local disconnect = state.changed:connect(function() events = events + 1 end)
     state.set_flag("after_reload")
@@ -121,6 +161,22 @@ return {
     save.version = 1
     ui.clear_toasts()
     scene.clear()
+  end,
+
+  ["a theme reload keeps the high-contrast override on top"] = function(t)
+    input.use_defaults()
+    config.set("high_contrast", true)
+    t.eq(ui.theme.current, "high_contrast")
+    local file_text = ui.theme.file_defaults.text
+    ui.theme.presets.default.text, ui.theme.file_defaults.text = 0x123456ff, 0x123456ff
+    t.ok(fe.harness.reload("@fe/ui/theme.lua"))
+    t.eq(ui.theme.current, "high_contrast")
+    t.eq(ui.theme.text, 0xffffffff, "the override still shows")
+    t.eq(ui.theme.skin, false)
+    t.eq(ui.theme.presets.default.text, file_text, "the base colour underneath was adopted")
+    config.set("high_contrast", false)
+    t.eq(ui.theme.text, file_text, "and shows once the override lifts")
+    config.dirty = false
   end,
 
   ["reloading fe.daynight shows the keyframes; a reloaded field keeps refreshing pages"] = function(t)

@@ -2,6 +2,7 @@
 #include "engine/core/Json.h"
 #include "engine/nav/Query.h"
 #include "engine/world/MapData.h"
+#include <array>
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 #include <optional>
@@ -56,6 +57,7 @@ struct Sprite {
     glm::vec4 tint{1};
     glm::vec4 flash{1, 1, 1, 0};   // rgb + strength
     glm::vec4 outline{0, 0, 0, 0}; // rgba, alpha 0 = off
+    float outlineWidth = 1;        // atlas texels the outline reaches out, 0.5 to 4
     glm::vec4 silhouette{0};       // rgba drawn where map geometry or meshes hide the sprite; alpha 0 = off
     std::optional<bool> pixelSnap; // unset: the environment's pixel_snap
     std::string palette;           // palette image (rows of colors)
@@ -103,26 +105,65 @@ struct Waypoint {
     StepKind kind = StepKind::Walk;
 };
 
+// What a mover is doing. A followed route may pass through a jump or a
+// climb: the motion is Jump or Climb while the arc or the ladder lasts and
+// goes back to the route (or ends with `arrived`) afterwards. Launch is a
+// ballistic flight under gravity, never part of a route.
+enum class Motion : std::uint8_t { None, Route, Jump, Climb, Launch };
+
+// A jump in flight: a parabola from `from` to `to` over `duration` seconds,
+// landing on layer `layer`.
+struct JumpArc {
+    glm::vec3 from{0}, to{0};
+    float height = 1, duration = 0.5f, time = 0;
+    int fromLayer = 0, layer = 0;
+};
+
+// A ladder climb: straight segments through `points` at their speeds, from
+// `start` (on `fromLayer`) to the last point (on `layer`).
+struct LadderClimb {
+    std::vector<std::pair<glm::vec3, float>> points;
+    glm::vec3 start{0};
+    glm::vec2 facing{0, -1};
+    int fromLayer = 0, layer = 0;
+};
+
+// A ballistic flight (MovementSystem::launch): `velocity` in units/second,
+// falling under MovementTuning::gravity, from `fromLayer`.
+struct Ballistic {
+    glm::vec3 velocity{0};
+    int fromLayer = 0;
+};
+
 struct Mover {
+    // Settings
     float speed = 2.5f, maxStep = 0.6f, radius = 0.2f;
     float climbSpeed = 1.5f; // ladder climbing, units/second
     JumpRules jump;          // gap jumps when planning paths (distance 0 = none)
     bool collide = true;
+    // Cells per side the body covers, anchored at its cell and extending
+    // towards +x and +z (StepRules::footprint); 1 = one cell.
+    int footprint = 1;
+    // Flying: stands on and paths over unwalkable cells and height steps;
+    // grid bounds and blocked tags still hold (StepRules::fly).
+    bool fly = false;
+    // Passability class, flying or not: cells carrying one of blockedTags,
+    // or (when requiredTags is not zero) none of requiredTags, can be neither
+    // stood on nor pathed through (StepRules::blockedTags/requiredTags). A
+    // boat is {fly = true, requiredTags = water}.
+    std::uint32_t blockedTags = 0, requiredTags = 0;
     glm::vec2 drive{0}; // direct steering for this tick (units/second)
+
+    // State, owned by MovementSystem
+    Motion motion = Motion::None;
+    bool onRoute = false; // the jump or climb is a step of `waypoints`: `arrived` follows it
     std::vector<Waypoint> waypoints;
-    bool active = false;
     double stuckTime = 0;
-    // Jump arc
-    bool jumping = false;
-    glm::vec3 jumpFrom{0}, jumpTo{0};
-    float jumpHeight = 1, jumpDuration = 0.5f, jumpTime = 0;
-    int jumpLayer = 0;
-    // Ladder climb: straight segments through `climbPoints` at their speeds;
-    // the layer becomes `climbLayer` at the end.
-    bool climbing = false;
-    std::vector<std::pair<glm::vec3, float>> climbPoints;
-    glm::vec2 climbFacing{0, -1};
-    int climbLayer = 0;
+    JumpArc arc;
+    LadderClimb climb;
+    Ballistic flight;
+    bool moved = false; // displaced by its own walking, jumping or climbing this tick
+    GridPos cell{0, 0, -1}; // last cell reported with cell_enter (layer -1 = none yet)
 };
 
 // A moving surface (rafts, lifts). Its top is the entity's position; the
@@ -141,6 +182,14 @@ struct AudioEmitter {
 
 struct Props {
     Json value = Json::object();
+};
+
+// Numbers a game shader reads as `u_params[4]` (sprites and meshes with a
+// `shader`): 16 values, zero until a script sets them. Simulation data like
+// every other component, so saves, hot reload and tests see them; the
+// renderer only reads them.
+struct MaterialParams {
+    std::array<glm::vec4, 4> values{};
 };
 
 // Lua registry reference for a script-side data table (managed by bindings).

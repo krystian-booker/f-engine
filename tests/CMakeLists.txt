@@ -7,6 +7,8 @@ add_executable(fengine_tests
   ScriptTests.cpp
   RenderTests.cpp
   PostTests.cpp
+  EngineTests.cpp
+  MiscTests.cpp
   EditorTests.cpp
   ReplayTests.cpp
   PlatformTests.cpp

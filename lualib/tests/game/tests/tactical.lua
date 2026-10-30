@@ -22,6 +22,7 @@ end
 -- Arena (12 x 10): walls at x = 5 for z = 1..5, water at x = 2..3, z = 7..8.
 local function setup(options)
   if not data.has_table("skills") then require("fe.rpg.database").load() end
+  require("fe.input").use_defaults()
   state.reset()
   party.reset()
   party.join("hero")
@@ -235,12 +236,19 @@ return {
     world:set_cell({ x = 2, z = 2, layer = 0 }, { add_tags = { "grass" } })
     tactical.place(b, slime, { x = 2, z = 3, layer = 0 })
     hero:set_resource("mp", 0)
+    local fire = data.get("skills", "fire")
+    local cell = { x = 2, z = 2, layer = 0 }
     b:add_rules({ plan = function(_, unit)
-      return { action = { kind = "skill", user = unit, skill = "fire", targets = {}, cell = { x = 2, z = 2, layer = 0 } } }
+      return { action = { kind = "skill", user = unit, skill = "fire", targets = tactical.affected(b, unit, fire, cell), cell = cell } }
     end })
     hero.auto = true
     require("fe.battle.tactical.rules").take_turn(b, hero)
     t.ok(not has_tag(world, 2, 2, "burning"), "fire costs 4 MP the hero does not have")
+    hero:set_resource("mp", 10)
+    b:effect_hook("before", function(ctx) ctx.cancelled = true end)
+    require("fe.battle.tactical.rules").take_turn(b, hero)
+    t.ok(not has_tag(world, 2, 2, "burning"), "a fire that hit nobody burns nothing")
+    b.effect_hooks.before = {}
     hero:set_resource("mp", 10)
     require("fe.battle.tactical.rules").take_turn(b, hero)
     t.ok(has_tag(world, 2, 2, "burning"))
@@ -263,6 +271,7 @@ return {
 
   ["tactical battles run through fe.battle.start with the game's rules"] = function(t)
     if not data.has_table("skills") then require("fe.rpg.database").load() end
+    require("fe.input").use_defaults()
     state.reset()
     party.reset()
     party.join("hero")
@@ -274,17 +283,20 @@ return {
     local seen = {}
     battle_kit.rules = {
       on_start = function() seen.game = true end,
-      outcome = function(b) if b.round > 6 then return "draw" end end,
+      outcome = function(b) if b.round > 12 then return "draw" end end,
     }
     local started
     local disconnect = battle_kit.started:connect(function(b) started = b end)
     local outcome
     local job = task.spawn(function()
       outcome = battle_kit.start({ presentation = "fe.battle.tactical", troop = "arena_slimes", auto = true,
-        allow_defeat = true })
+        allow_defeat = true, random = fe.random.new(1) })
     end)
     t.wait_until(function() return started ~= nil end, 120)
     t.ok(tactical.active == started)
+    local left = tactical.unit(started, "left")
+    t.ok(left ~= nil and left.cell.x == 3 and left.facing.x == 1, "troop members keep their id and facing")
+    t.eq(#started:participants(), 2)
     local reinforcement = started:add({ enemy = "slime", side = "enemy", cell = { x = 9, z = 8, layer = 0 },
       facing = { x = 0, z = -1 } })
     t.ok(tactical.unit_at(started, { x = 9, z = 8 }) == reinforcement, "reinforcements take their cell")
@@ -293,7 +305,8 @@ return {
     disconnect()
     battle_kit.rules = game_rules
     t.ok(seen.game, "the game's rules ran")
-    t.ok(outcome == "victory" or outcome == "defeat" or outcome == "draw", tostring(outcome))
+    t.eq(outcome, "victory", "two slimes are no match for the hero and the scout")
+    t.ok(party.actor("hero"):exp() > 0 and party.actor("scout"):exp() > 0, "both fighters were rewarded")
     t.eq(#world:query({ tag = "unit" }), 0, "unit sprites are removed from the field world")
     t.eq(tactical.active, nil)
     field.world = nil
@@ -491,6 +504,7 @@ return {
 
   ["a battle on the field world reverts every terrain change when it ends, mock battles too"] = function(t)
     if not data.has_table("skills") then require("fe.rpg.database").load() end
+    require("fe.input").use_defaults()
     state.reset()
     party.reset()
     party.join("hero")
@@ -509,7 +523,9 @@ return {
               if unit:is_party() and not battle.data.burned then
                 battle.data.burned = true
                 unit:set_resource("mp", 50)
-                return { action = { kind = "skill", user = unit, skill = "fire", targets = {}, cell = { x = 2, z = 2, layer = 0 } } }
+                local cell = { x = 2, z = 2, layer = 0 }
+                return { action = { kind = "skill", user = unit, skill = "fire", cell = cell,
+                  targets = tactical.affected(battle, unit, data.get("skills", "fire"), cell) } }
               end
               return {}
             end,
@@ -567,7 +583,8 @@ return {
               if unit:is_party() and not battle.data.burned then
                 battle.data.burned = true
                 unit:set_resource("mp", 50)
-                return { action = { kind = "skill", user = unit, skill = "fire", targets = {}, cell = G } }
+                return { action = { kind = "skill", user = unit, skill = "fire", cell = G,
+                  targets = tactical.affected(battle, unit, data.get("skills", "fire"), G) } }
               end
               return {}
             end,
@@ -680,6 +697,7 @@ return {
   end,
 
   ["movement keeps jump marks and the presenter jumps them; ladders and gap jumps are settings"] = function(t)
+    require("fe.input").use_defaults()
     local b, hero, scout, slime, world = setup()
     local settings = tactical.settings
     tactical.place(b, slime, { x = 10, z = 8, layer = 0 })
@@ -715,6 +733,215 @@ return {
     settings.gap_jump = false
     require("fe.scene").remove(presenter.scene)
     for _, u in ipairs(b.battlers) do presenter:despawn(u) end
+    teardown()
+  end,
+
+  ["a cell_entered hook stops a move on a trap; the turn's action still happens"] = function(t)
+    local b, hero, scout, slime = setup()
+    local entered, after = {}, 0
+    b.rules.cell_entered = function(battle, unit, cell)
+      entered[#entered + 1] = { unit, cell.x, cell.z }
+      if unit == hero and cell.x == 2 and cell.z == 3 then
+        unit:change_resource("hp", -5)
+        return "stop"
+      end
+    end
+    b.rules.after_action = function() after = after + 1 end
+    local hp = hero:resource("hp")
+    local path = { { x = 2, z = 4, layer = 0 }, { x = 2, z = 3, layer = 0 }, { x = 2, z = 2, layer = 0 } }
+    t.eq(tactical.walk(b, hero, path), false, "the walk was interrupted")
+    t.eq({ hero.cell.x, hero.cell.z }, { 2, 3 }, "the unit stays on the trap cell")
+    t.eq(hero:resource("hp"), hp - 5)
+    t.eq(#entered, 2, "the cells after the trap are never entered")
+    t.eq(entered[1][2], 2) t.eq(entered[1][3], 4)
+    -- Acting after the interrupted move still runs the action hooks.
+    tactical.place(b, slime, { x = 2, z = 2, layer = 0 })
+    b:perform({ kind = "skill", user = hero, skill = "attack", targets = { slime }, cell = slime.cell })
+    t.eq(after, 1)
+    -- A hook that never says "stop" leaves the walk whole; the AI's and the
+    -- player's moves both go through tactical.walk.
+    b.rules.cell_entered = function() end
+    t.eq(tactical.walk(b, scout, { { x = 4, z = 4, layer = 0 }, { x = 4, z = 3, layer = 0 } }), true)
+    t.eq({ scout.cell.x, scout.cell.z }, { 4, 3 })
+    teardown()
+  end,
+
+  ["reinforcements with no free cell wait for one"] = function(t)
+    local b, hero, scout, slime = setup()
+    local grid = require("fe.battle.tactical.grid")
+    local nearest_free = grid.nearest_free
+    grid.nearest_free = function() return nil end
+    tactical.reinforce(b, { enemy = "slime", id = "late", cell = { x = 9, z = 8, layer = 0 }, turn = 1, required = true })
+    b.round = 1
+    b:notify("on_round", 1)
+    t.eq(#b.tactical.reinforcements, 1, "still pending")
+    t.eq(tactical.unit(b, "late"), nil)
+    slime:set_resource("hp", 0)
+    b:settle()
+    t.eq(b:outcome(), nil, "a required one still holds off victory")
+    grid.nearest_free = nearest_free
+    b:notify("on_turn_start", hero)
+    t.eq(#b.tactical.reinforcements, 0)
+    local late = tactical.unit(b, "late")
+    t.ok(late ~= nil and tactical.unit_at(b, { x = 9, z = 8 }) == late, "it arrives as soon as a cell is free")
+    t.ok(scout ~= nil)
+    teardown()
+  end,
+
+  ["terrain reacts to counters and follow-ups, but only when something was hit"] = function(t)
+    local b, hero, scout, slime, world = setup()
+    local reactions = require("fe.battle.reactions")
+    b.rules.reaction = reactions.counter({ skill = "frost", requires = "counter" })
+    local brute = b:add({ enemy = "brute", side = "enemy" })
+    tactical.place(b, hero, { x = 2, z = 7, layer = 0 }) -- standing in the water
+    tactical.place(b, brute, { x = 2, z = 8, layer = 0 })
+    tactical.face(b, brute, { x = 0, z = -1 })
+    b:perform({ kind = "skill", user = hero, skill = "attack", targets = { brute }, cell = brute.cell })
+    t.eq(b.log[#b.log].skill, "frost", "the brute countered")
+    t.ok(has_tag(world, 2, 7, "ice"), "and its frost froze the water under the hero")
+    b.rules.reaction = nil
+    -- A follow-up with an elemental skill burns the target's cell.
+    party.actor("scout"):learn("ember_shot")
+    tactical.place(b, brute, { x = 9, z = 1, layer = 0 })
+    tactical.place(b, hero, { x = 2, z = 8, layer = 0 })
+    tactical.place(b, slime, { x = 3, z = 8, layer = 0 })
+    tactical.place(b, scout, { x = 4, z = 8, layer = 0 })
+    slime:buff({ stat = "defense", add = 500 }, 99)
+    world:set_cell({ x = 3, z = 8, layer = 0 }, { add_tags = { "grass" } })
+    local action = { kind = "skill", user = hero, skill = "attack", targets = { slime }, cell = slime.cell }
+    tactical.follow_ups(b, action, b:perform(action))
+    t.eq(b.log[#b.log].skill, "ember_shot")
+    t.ok(has_tag(world, 3, 8, "burning"), "the follow-up's fire burns the grass")
+    -- A spell that missed everyone changes nothing.
+    world:set_cell({ x = 2, z = 2, layer = 0 }, { add_tags = { "grass" } })
+    tactical.place(b, slime, { x = 2, z = 3, layer = 0 })
+    tactical.place(b, hero, { x = 2, z = 5, layer = 0 })
+    hero:set_resource("mp", 20)
+    local cell = { x = 2, z = 2, layer = 0 }
+    local remove = b:effect_hook("hit", function(ctx) ctx.missed = true end)
+    b:perform({ kind = "skill", user = hero, skill = "fire", cell = cell,
+      targets = tactical.affected(b, hero, data.get("skills", "fire"), cell) })
+    t.ok(not has_tag(world, 2, 2, "burning"), "missed everyone: the grass stays")
+    remove()
+    b:perform({ kind = "skill", user = hero, skill = "fire", cell = cell,
+      targets = tactical.affected(b, hero, data.get("skills", "fire"), cell) })
+    t.ok(has_tag(world, 2, 2, "burning"))
+    teardown()
+  end,
+
+  ["movement rules pass through settings.step_rules; a range hook extends reach"] = function(t)
+    local b, hero = setup()
+    local settings = tactical.settings
+    t.ok(not reaches(tactical.reachable(b, hero), 2, 8), "water costs extra: too far")
+    settings.step_rules = function(_, unit, rules)
+      if unit == hero then rules.tag_costs.water = 0 end
+    end
+    t.ok(reaches(tactical.reachable(b, hero), 2, 8), "a wader crosses it")
+    settings.step_rules = function() end
+    t.eq(settings.tag_costs.water, 1, "the shared settings were not changed")
+    local longshot = data.get("skills", "longshot")
+    t.ok(not reaches(tactical.range_cells(b, hero, longshot), 9, 5))
+    b.rules.range = function(_, unit, skill, cells)
+      if skill.id == "longshot" and unit == hero then cells[#cells + 1] = { x = 9, z = 5, layer = 0 } end
+      return cells
+    end
+    t.ok(reaches(tactical.range_cells(b, hero, longshot), 9, 5), "the hook reached further")
+    t.ok(not reaches(tactical.range_cells(b, hero, data.get("skills", "fire")), 9, 5))
+    teardown()
+  end,
+
+  ["the forecast shows height, facing and counter chances, is cached per cell, and nullified hits"] = function(t)
+    local b, hero, scout, slime, world = setup()
+    local reactions = require("fe.battle.reactions")
+    b.rules.reaction = reactions.counter({ chance = 0.4 })
+    local presenter = tactical.Presenter.new(b, {})
+    b.presenter = presenter
+    tactical.face(b, slime, { x = 1, z = 0 }) -- back turned to the hero
+    world:set_cell(hero.cell, { height = 2 })
+    local attack = data.get("skills", "attack")
+    local forecast = presenter:forecast_for(hero, attack, slime.cell)
+    t.ok(forecast.positional[slime].from_behind)
+    t.ok(forecast.positional[slime].height_bonus > 0)
+    t.near(forecast.counter[slime], 0.4)
+    t.ok(presenter:forecast_for(hero, attack, slime.cell) == forecast, "cached while nothing happened")
+    b:present("round", 1)
+    t.ok(presenter:forecast_for(hero, attack, slime.cell) ~= forecast, "an event refreshes it")
+    local text = table.concat(tactical.forecast_lines(forecast), "\n")
+    t.ok(text:find("Back", 1, true) and text:find("High ground", 1, true) and text:find("Counter 40%", 1, true), text)
+    world:set_cell(hero.cell, { height = 0 })
+    presenter:start(b)
+    local job = task.spawn(function()
+      presenter:results({ results = { { cancelled = true, type = "damage", target = slime } } })
+    end)
+    t.tick(1)
+    t.eq(#presenter.popups, 1)
+    t.eq(presenter.popups[1].text, "Nullified")
+    t.wait_until(function() return job.status ~= "running" end, 120)
+    t.eq(job.status, "done", tostring(job.error))
+    require("fe.scene").remove(presenter.scene)
+    for _, u in ipairs(b.battlers) do presenter:despawn(u) end
+    t.ok(scout ~= nil)
+    teardown()
+  end,
+
+  ["the AI prunes destinations by range, shares previews and keeps to its budget"] = function(t)
+    local b, hero, scout, slime = setup()
+    local ai = require("fe.battle.tactical.ai")
+    local grid = require("fe.battle.tactical.grid")
+    local weights = tactical.settings.ai
+    local previews, ranges = 0, 0
+    local expected, range_cells = ai.expected, grid.range_cells
+    ai.expected = function(...) previews = previews + 1 return expected(...) end
+    grid.range_cells = function(...) ranges = ranges + 1 return range_cells(...) end
+    local plan = tactical.plan(b, slime)
+    t.ok(plan.action ~= nil and plan.action.targets[1].side == "party", "a reachable target is attacked")
+    t.eq(plan.previews, previews)
+    t.ok(previews <= weights.max_previews, "within the default budget")
+    local cells = tactical.reachable(b, slime)
+    t.ok(ranges < #cells, "destinations out of every target's range are never range-tested: "
+      .. ranges .. " of " .. #cells)
+    -- Memoised: a previewed (skill, target, height, side) is not forecast again
+    -- from another destination; with two foes and four sides that is at most 8
+    -- previews per skill, far fewer than destinations x targets.
+    t.ok(previews <= 8 * #tablex.filter(slime:skills(), function(s) return not s.passive end) + 8,
+      "previews are shared between destinations: " .. previews)
+    -- Out of budget: the best plan so far is used.
+    local saved = weights.max_previews
+    weights.max_previews = 1
+    previews = 0
+    local short = tactical.plan(b, slime)
+    t.eq(previews, 1, "the budget stops the search")
+    t.eq(short.previews, 1)
+    t.ok(short.action ~= nil and short.action.targets[1].side == "party", "the first good option is kept")
+    -- A target too far for every skill: nothing is previewed at all.
+    tactical.place(b, hero, { x = 9, z = 1, layer = 0 })
+    tactical.place(b, scout, { x = 9, z = 2, layer = 0 })
+    weights.max_previews = saved
+    previews = 0
+    local far = tactical.plan(b, slime)
+    t.eq(previews, 0, "no destination is within range of a target")
+    t.eq(far.action, nil)
+    t.ok(far.move ~= nil and #far.move > 0, "so the unit closes in")
+    ai.expected, grid.range_cells = expected, range_cells
+    teardown()
+  end,
+
+  ["the AI values buffs, debuffs and states"] = function(t)
+    local b, hero, scout, slime = setup()
+    local ai = require("fe.battle.tactical.ai")
+    t.ok(ai.expected(b, hero, data.get("skills", "might"), { hero }) > 0, "a buff on an ally")
+    local hex = data.get("skills", "hex")
+    t.ok(ai.expected(b, hero, hex, { slime }) > 0, "a disabling state on a foe")
+    t.ok(ai.expected(b, hero, hex, { scout }) < 0, "but not on a friend")
+    slime:add_state("sleep")
+    t.eq(ai.expected(b, hero, hex, { slime }), 0, "nothing gained from a state the target has")
+    slime:remove_state("sleep")
+    local weights = tactical.settings.ai
+    local saved = weights.state
+    weights.state = 0
+    weights.disable = 0
+    t.eq(ai.expected(b, hero, hex, { slime }), 0, "the weights are settings")
+    weights.state, weights.disable = saved, 0.6
     teardown()
   end,
 }

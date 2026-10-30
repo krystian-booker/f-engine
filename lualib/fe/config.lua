@@ -12,6 +12,7 @@
 --- `display = {width, height, vsync, monitor}`) go to `fe.app.set_display`.
 local input = require("fe.input")
 local signal = require("fe.signal")
+local tablex = require("fe.tablex")
 
 local config = {
   values = {
@@ -119,11 +120,31 @@ function config.save()
   config.dirty = false
 end
 
---- Change one setting and apply it (call `config.save()` to persist).
+-- What one changed setting pushes to the engine (anything else is read by
+-- its users through `config.changed`).
+local appliers = {
+  master = function(v) fe.audio.set_bus_volume("master", v.master) end,
+  music = function(v) fe.audio.set_bus_volume("music", v.music) end,
+  sfx = function(v) fe.audio.set_bus_volume("sfx", v.sfx) end,
+  voice = function(v) fe.audio.set_bus_volume("voice", v.voice) end,
+  fullscreen = apply_display,
+  display = apply_display,
+  language = function(v)
+    local i18n = require("fe.i18n")
+    if v.language and i18n.language ~= v.language then i18n.set_language(v.language) end
+  end,
+}
+
+--- Change one setting and apply it (call `config.save()` to persist). Only
+--- that setting is pushed to the engine, and nothing happens (the file is
+--- not marked dirty, `changed` does not fire) when the value is the same.
 function config.set(key, value)
+  if tablex.deep_equal(config.values[key], value) then return end
   config.values[key] = value
   config.dirty = true
-  config.apply()
+  local applier = appliers[key]
+  if applier then applier(config.values) end
+  config.changed:emit()
 end
 
 function config.get(key)

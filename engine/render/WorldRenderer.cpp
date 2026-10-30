@@ -6,6 +6,7 @@
 #include <cstring>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <tuple>
 
 namespace fe {
 namespace {
@@ -43,19 +44,23 @@ constexpr std::uint16_t ShadowInstanceStride = 64; // model matrix
 // GpuAssets::revision() and their names match the component's.
 struct SpriteDrawCache {
     std::uint64_t revision = 0;
-    std::string animation, palette, shader;
+    std::string animation, palette, shader, clipName;
     const SpriteSheet* sheet = nullptr;
+    const SpriteClip* clip = nullptr; // the sheet's clip for clipName
     bgfx::TextureHandle indexAtlas = BGFX_INVALID_HANDLE, paletteTexture = BGFX_INVALID_HANDLE;
     float paletteRows = 1;
-    int shaderSlot = -1;
+    int shaderSlot = -1; // programs are asked of CustomShaders per frame: poll() may replace them
 };
 
 struct MeshDrawCache {
     std::uint64_t revision = 0;
-    std::string model, shader;
+    std::string model, shader, animation;
     const GpuModel* gpu = nullptr;
     int shaderSlot = -1;
+    int animationIndex = -1; // Model::animation(animation)
 };
+
+const ShaderParams ZeroParams{};
 
 // Per particle sprite index (ParticleSystem::sprites()): its sheet and the
 // clip particles play ("idle", else the first; SpriteAnimation::clip()).
@@ -126,6 +131,7 @@ void WorldRenderer::render(World& world, std::size_t slot, double alpha, double 
     cameraUp_ = glm::normalize(glm::cross(cameraRight_, camera.forward(alpha)));
     nearPlane_ = camera.nearPlane;
     farPlane_ = camera.farPlane;
+    orthographic_ = camera.orthographic;
     spriteNormal_ = glm::normalize(-camera.forward(alpha) * 0.6f + glm::vec3(0, 0.4f, 0));
     opaqueCopied_ = false;
     info_ = glm::vec4(1.0f / glm::vec2(target.size), static_cast<float>(time),
@@ -137,12 +143,19 @@ void WorldRenderer::render(World& world, std::size_t slot, double alpha, double 
     sprites_.clear();
     distortQuads_.clear();
     target.distorted = false;
+    params_ = nullptr;
+    registry_ = &world.registry();
+    if (const auto found = shaderParams_.find(&world); found != shaderParams_.end()) {
+        auto& entries = found->second;
+        std::erase_if(entries, [&](const auto& entry) { return !world.registry().valid(entry.first); });
+        params_ = entries.empty() ? nullptr : &entries;
+    }
 
     setupViews(world, views, target, view, projection);
     drawSky(world, camera.focus(alpha));
     if (const auto* map = gpu_.model(world.geometryPath(), true)) {
         for (const auto& part : map->parts) {
-            addPart(part, Identity, glm::vec4(1), true, std::nullopt, -1);
+            addPart(part, Identity, glm::vec4(1), true, std::nullopt, -1, nullptr);
         }
     }
     drawMeshes(world, alpha);
@@ -241,7 +254,8 @@ void WorldRenderer::drawSky(World& world, glm::vec3 focus) {
 }
 
 void WorldRenderer::addPart(const GpuPart& part, const glm::mat4& transform, const glm::vec4& tint,
-                            bool castShadow, std::optional<BlendMode> blend, int shader) {
+                            bool castShadow, std::optional<BlendMode> blend, int shader,
+                            const ShaderParams* params) {
     glm::vec3 lo, hi;
     transformBounds(transform, part.min, part.max, lo, hi);
     const auto& material = part.material;
@@ -249,10 +263,9 @@ void WorldRenderer::addPart(const GpuPart& part, const glm::mat4& transform, con
     const BlendMode mode = water
                                ? BlendMode::Alpha
                                : blend.value_or(material.transparent ? BlendMode::Alpha : BlendMode::Opaque);
-    if (castsShadow(castShadow, mode)) {
-        casters_.push_back({&part, transform, lo, hi});
-    }
-    if (!frustum_.visible(lo, hi)) {
+    const bool caster = castsShadow(castShadow, mode);
+    const bool visible = frustum_.visible(lo, hi);
+    if (!caster && !visible) {
         return;
     }
     if (shader < 0 && !material.shader.empty()) {
@@ -268,12 +281,22 @@ void WorldRenderer::addPart(const GpuPart& part, const glm::mat4& transform, con
     }
     PartDraw draw{&part, transform, glm::mat4(glm::transpose(glm::inverse(glm::mat3(transform)))),
                   tint,  mode,      shader};
+    draw.params = shader >= 0 ? params : nullptr;
+    if (shader >= 0 && bgfx::isValid(custom_.shadowProgram(shader, ShaderVertex::World))) {
+        draw.shadowShader = shader;
+    }
+    if (caster) {
+        casters_.push_back({draw, lo, hi});
+    }
+    if (!visible) {
+        return;
+    }
     if (blended(mode)) {
         if (water && !opaqueCopied_) {
             target_->copyOpaque(views_->transparent);
             opaqueCopied_ = true;
         }
-        transparent_.push_back({{mode, glm::length((lo + hi) * 0.5f - cameraPosition_)},
+        transparent_.push_back({{mode, glm::length((lo + hi) * 0.5f - cameraPosition_), water},
                                 false,
                                 static_cast<int>(parts_.size())});
         parts_.push_back(draw);
@@ -321,6 +344,7 @@ void WorldRenderer::bindPart(const PartDraw& draw, std::uint64_t state, bool ins
         frame.time = static_cast<float>(time_);
         frame.nearPlane = nearPlane_;
         frame.farPlane = farPlane_;
+        frame.orthographic = orthographic_;
         frame.horizon = environment_->sky.horizon;
         frame.sceneCopy = opaqueCopied_;
         frame.originBottomLeft = bgfx::getCaps()->originBottomLeft;
@@ -335,6 +359,8 @@ void WorldRenderer::bindPart(const PartDraw& draw, std::uint64_t state, bool ins
     }
     if (draw.shader >= 0) {
         bgfx::setUniform(uniforms_.info.get(), glm::value_ptr(info_));
+        bgfx::setUniform(uniforms_.params.get(), (draw.params ? *draw.params : ZeroParams).data(),
+                         Uniforms::ParamsCount);
     }
     bgfx::setState(state | cull(m));
 }
@@ -347,9 +373,9 @@ void WorldRenderer::submitPart(std::uint16_t view, const PartDraw& draw, std::ui
 void WorldRenderer::drawOpaqueParts() {
     keys_.clear();
     for (const auto& draw : opaque_) {
-        keys_.emplace_back(draw.part, draw.shader);
+        keys_.emplace_back(draw.part, draw.shader, draw.params);
     }
-    groupByFirstUse(keys_, order_);
+    groupByFirstUse(keys_, order_, rank_);
     for (std::size_t first = 0; first < order_.size();) {
         std::size_t last = first + 1;
         while (last < order_.size() && keys_[static_cast<std::size_t>(order_[last])] ==
@@ -401,9 +427,12 @@ void WorldRenderer::drawCasters() {
 void WorldRenderer::castShadow(std::uint16_t view, const std::vector<int>& casters) {
     keys_.clear();
     for (const auto index : casters) {
-        keys_.emplace_back(casters_[static_cast<std::size_t>(index)].part, 0);
+        // A game shadow shader keeps casters apart by shader and parameters;
+        // the engine's depth-only pass groups by part alone.
+        const auto& draw = casters_[static_cast<std::size_t>(index)].draw;
+        keys_.emplace_back(draw.part, draw.shadowShader, draw.shadowShader >= 0 ? draw.params : nullptr);
     }
-    groupByFirstUse(keys_, order_);
+    groupByFirstUse(keys_, order_, rank_);
     const auto bind = [&](const GpuPart& part) {
         const auto& material = part.material;
         const glm::vec4 shadowMaterial[Uniforms::MaterialCount] = {
@@ -414,16 +443,42 @@ void WorldRenderer::castShadow(std::uint16_t view, const std::vector<int>& caste
         bgfx::setUniform(uniforms_.material.get(), shadowMaterial, Uniforms::MaterialCount);
         bgfx::setState(ShadowState | cull(material));
     };
-    const auto caster = [&](std::size_t k) -> const Caster& {
-        return casters_[static_cast<std::size_t>(casters[static_cast<std::size_t>(order_[k])])];
+    const auto caster = [&](std::size_t k) -> const PartDraw& {
+        return casters_[static_cast<std::size_t>(casters[static_cast<std::size_t>(order_[k])])].draw;
     };
     for (std::size_t first = 0; first < order_.size();) {
         std::size_t last = first + 1;
-        while (last < order_.size() && caster(last).part == caster(first).part) {
+        while (last < order_.size() &&
+               keys_[static_cast<std::size_t>(order_[last])] == keys_[static_cast<std::size_t>(order_[first])]) {
             ++last;
         }
         const auto count = static_cast<std::uint32_t>(last - first);
-        if (count == 1 || bgfx::getAvailInstanceDataBuffer(count, ShadowInstanceStride) < count) {
+        const auto& head = caster(first);
+        if (head.shadowShader >= 0) {
+            // The game's fs_<name>_shadow: the colour pass's vertex shader and
+            // bindings (textures, u_material, u_params), depth only.
+            const auto single = custom_.shadowProgram(head.shadowShader, ShaderVertex::World);
+            const auto grouped = custom_.shadowProgram(head.shadowShader, ShaderVertex::WorldInstanced);
+            if (count == 1 || !bgfx::isValid(grouped) ||
+                bgfx::getAvailInstanceDataBuffer(count, InstanceStride) < count) {
+                for (std::size_t k = first; k < last; ++k) {
+                    bindPart(caster(k), ShadowState, false);
+                    submitDraw(view, single, *calls_);
+                }
+            } else {
+                bgfx::InstanceDataBuffer instances;
+                bgfx::allocInstanceDataBuffer(&instances, count, InstanceStride);
+                auto* out = instances.data;
+                for (std::size_t k = first; k < last; ++k) {
+                    std::memcpy(out, glm::value_ptr(caster(k).transform), sizeof(glm::mat4));
+                    std::memcpy(out + sizeof(glm::mat4), glm::value_ptr(caster(k).tint), sizeof(glm::vec4));
+                    out += InstanceStride;
+                }
+                bindPart(head, ShadowState, true);
+                bgfx::setInstanceDataBuffer(&instances);
+                submitDraw(view, grouped, *calls_);
+            }
+        } else if (count == 1 || bgfx::getAvailInstanceDataBuffer(count, ShadowInstanceStride) < count) {
             for (std::size_t k = first; k < last; ++k) {
                 bgfx::setTransform(glm::value_ptr(caster(k).transform));
                 bind(*caster(k).part);
@@ -437,12 +492,47 @@ void WorldRenderer::castShadow(std::uint16_t view, const std::vector<int>& caste
                 std::memcpy(out, glm::value_ptr(caster(k).transform), sizeof(glm::mat4));
                 out += ShadowInstanceStride;
             }
-            bind(*caster(first).part);
+            bind(*head.part);
             bgfx::setInstanceDataBuffer(&instances);
             submitDraw(view, shadowInstanced_.get(), *calls_);
         }
         first = last;
     }
+}
+
+bool WorldRenderer::anyViewSees(glm::vec3 min, glm::vec3 max, bool caster) const {
+    if (frustum_.visible(min, max)) {
+        return true;
+    }
+    if (!caster) {
+        return false;
+    }
+    for (std::size_t c = 0; lighting_->shadows() && c < ShadowCascadeCount; ++c) {
+        if (lighting_->cascadeFrusta()[c].visible(min, max)) {
+            return true;
+        }
+    }
+    for (const auto& tile : lighting_->lightTiles()) {
+        if (tile.frustum.visible(min, max)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+const ShaderParams* WorldRenderer::paramsOf(entt::entity entity) const {
+    // A MaterialParams component (entity:shader_params) wins over values set
+    // through setShaderParams; its storage is stable for the frame.
+    if (registry_) {
+        if (const auto* material = registry_->try_get<MaterialParams>(entity)) {
+            return &material->values;
+        }
+    }
+    if (!params_) {
+        return nullptr;
+    }
+    const auto found = params_->find(entity);
+    return found == params_->end() ? nullptr : &found->second;
 }
 
 void WorldRenderer::drawMeshes(World& world, double alpha) {
@@ -467,15 +557,29 @@ void WorldRenderer::drawMeshes(World& world, double alpha) {
         if (!model) {
             continue;
         }
+        if (cache.animation != mesh.animation) {
+            cache.animation = mesh.animation;
+            cache.animationIndex = model->source->animation(mesh.animation);
+        }
         const auto& transform = registry.get<Transform>(entity);
         const float turn = std::remainder(transform.yaw - transform.previousYaw, glm::two_pi<float>());
         const auto base = glm::translate(glm::mat4(1), world.interpolated(entity, alpha)) *
                           glm::rotate(glm::mat4(1), transform.previousYaw + turn * t, glm::vec3(0, 1, 0)) *
                           glm::scale(glm::mat4(1), transform.scale);
-        model->source->pose(model->source->animation(mesh.animation), mesh.time, pose_);
+        if (cache.animationIndex < 0) {
+            // At rest the model's bounds are known: a mesh that is neither in
+            // view nor in a shadow volume is skipped before it is posed.
+            glm::vec3 lo, hi;
+            transformBounds(base, model->source->min, model->source->max, lo, hi);
+            if (!anyViewSees(lo, hi, mesh.castShadow)) {
+                continue;
+            }
+        }
+        model->source->pose(cache.animationIndex, mesh.time, pose_);
+        const auto* params = paramsOf(entity);
         for (const auto& part : model->parts) {
             addPart(part, base * pose_[static_cast<std::size_t>(part.node)], mesh.tint, mesh.castShadow,
-                    mesh.blend, cache.shaderSlot);
+                    mesh.blend, cache.shaderSlot, params);
         }
     }
 }
@@ -497,6 +601,7 @@ void WorldRenderer::collectSprites(World& world, double alpha) {
             cache.animation = s.animation;
             cache.palette = s.palette;
             cache.sheet = gpu_.spriteSheet(s.animation);
+            cache.clip = nullptr;
             const bool palette = cache.sheet && !s.palette.empty();
             cache.indexAtlas = palette ? gpu_.image(cache.sheet->atlasPath, TextureUse::SpriteIndex)
                                        : bgfx::TextureHandle BGFX_INVALID_HANDLE;
@@ -512,9 +617,14 @@ void WorldRenderer::collectSprites(World& world, double alpha) {
             continue;
         }
         const auto& animation = *sheet->animation;
+        if (!cache.clip || cache.clipName != s.clip) {
+            cache.clipName = s.clip;
+            cache.clip = &animation.clip(s.clip);
+        }
         const auto& transform = registry.get<Transform>(entity);
         const auto feet = world.interpolated(entity, alpha);
-        auto placement = placeSprite(s, animation, feet, transform.facing, camera, alpha, pixelsPerUnit_);
+        auto placement =
+            placeSpriteClip(s, animation, *cache.clip, feet, transform.facing, camera, alpha, pixelsPerUnit_);
         if (s.pixelSnap.value_or(environment_->pixelSnap)) {
             placement.anchor =
                 snapToPixel(placement.anchor, viewProjection_, cameraRight_, cameraUp_, target_->size);
@@ -533,9 +643,16 @@ void WorldRenderer::collectSprites(World& world, double alpha) {
         material.normal = sheet->normal;
         material.emissive = sheet->emissive;
         material.texel = 1.0f / atlas;
+        material.outlineWidth = s.outlineWidth;
         material.paletteSwap = palette;
+        bgfx::ProgramHandle distortProgram = BGFX_INVALID_HANDLE;
         if (cache.shaderSlot >= 0) {
             material.program = custom_.program(cache.shaderSlot, ShaderVertex::Sprite);
+            material.shadowProgram = custom_.shadowProgram(cache.shaderSlot, ShaderVertex::Sprite);
+            material.params = paramsOf(entity);
+            if (s.distort > 0) {
+                distortProgram = custom_.distortProgram(cache.shaderSlot, ShaderVertex::Sprite);
+            }
         }
         const float paletteRows = cache.paletteRows;
         const BlendMode blend = spriteBlend(s.blend, s.tint.a);
@@ -565,7 +682,7 @@ void WorldRenderer::collectSprites(World& world, double alpha) {
         const bool visible = frustum_.visible(lo - glm::vec3(0.1f), hi + glm::vec3(0.1f));
         if (s.distort > 0) {
             if (visible) {
-                addDistortion(material.atlas, material.texel, quad, s.distort);
+                addDistortion(material.atlas, material.texel, quad, s.distort, distortProgram, material.params);
             }
             continue;
         }
@@ -704,7 +821,6 @@ void WorldRenderer::drawSprites() {
     auto byMaterial = [&](int a, int b) {
         return quads[static_cast<std::size_t>(a)].material < quads[static_cast<std::size_t>(b)].material;
     };
-    const SpriteBatch::Context shadowContext{uniforms_, nullptr, gpu_.white(), gpu_.flatNormal(), info_};
     const SpriteBatch::Context context{uniforms_, lighting_, gpu_.white(), gpu_.flatNormal(), info_};
     const auto castSprites = [&](std::uint16_t view, const Frustum& volume) {
         quadList_.clear();
@@ -714,7 +830,7 @@ void WorldRenderer::drawSprites() {
             }
         }
         std::stable_sort(quadList_.begin(), quadList_.end(), byMaterial);
-        sprites_.draw(view, quadList_, shadow_.get(), SpriteBatch::Pass::Shadow, shadowContext, *calls_);
+        sprites_.draw(view, quadList_, shadow_.get(), SpriteBatch::Pass::Shadow, context, *calls_);
     };
     for (std::size_t c = 0; lighting_->shadows() && c < ShadowCascadeCount; ++c) {
         castSprites(views_->shadow[c], lighting_->cascadeFrusta()[c]);
@@ -823,19 +939,50 @@ void WorldRenderer::drawTransparent() {
         }
         flushSprites();
         const auto& part = parts_[static_cast<std::size_t>(draw.index)];
+        // Water surfaces come first in their pass (TransparentKey::water) and
+        // write depth, so everything blended after them is tested against
+        // the surface: above it draws over the water, below it is hidden.
+        const std::uint64_t depthWrite = draw.key.water ? BGFX_STATE_WRITE_Z : 0;
         submitPart(views_->transparent, part,
-                   BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_DEPTH_TEST_LESS |
+                   BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_DEPTH_TEST_LESS | depthWrite |
                        blendFunction(part.blend));
     }
     flushSprites();
 }
 
+void WorldRenderer::setShaderParams(const World& world, entt::entity entity, const ShaderParams& params) {
+    shaderParams_[&world][entity] = params;
+}
+
+void WorldRenderer::clearShaderParams(const World& world, entt::entity entity) {
+    if (const auto found = shaderParams_.find(&world); found != shaderParams_.end()) {
+        found->second.erase(entity);
+        if (found->second.empty()) {
+            shaderParams_.erase(found);
+        }
+    }
+}
+
+void WorldRenderer::clearShaderParams(const World& world) {
+    shaderParams_.erase(&world);
+}
+
+const ShaderParams* WorldRenderer::shaderParams(const World& world, entt::entity entity) const {
+    const auto found = shaderParams_.find(&world);
+    if (found == shaderParams_.end()) {
+        return nullptr;
+    }
+    const auto entry = found->second.find(entity);
+    return entry == found->second.end() ? nullptr : &entry->second;
+}
+
 void WorldRenderer::addDistortion(bgfx::TextureHandle atlas, glm::vec2 texel,
-                                  std::array<SpriteVertex, 4> quad, float strength) {
+                                  std::array<SpriteVertex, 4> quad, float strength,
+                                  bgfx::ProgramHandle program, const ShaderParams* params) {
     for (auto& v : quad) {
         v.params.y = strength;
     }
-    distortQuads_.push_back({atlas, texel, quad});
+    distortQuads_.push_back({atlas, program, params, texel, quad});
 }
 
 void WorldRenderer::drawDistortion() {
@@ -851,13 +998,16 @@ void WorldRenderer::drawDistortion() {
     bgfx::setViewMode(view, bgfx::ViewMode::Sequential);
     bgfx::touch(view);
     target_->distorted = true;
-    std::stable_sort(distortQuads_.begin(), distortQuads_.end(),
-                     [](const DistortQuad& a, const DistortQuad& b) { return a.atlas.idx < b.atlas.idx; });
+    // One draw per atlas, shader and parameter block (the order among them is
+    // free: offsets add).
+    std::stable_sort(distortQuads_.begin(), distortQuads_.end(), [](const DistortQuad& a, const DistortQuad& b) {
+        return std::make_tuple(a.atlas.idx, a.program.idx, a.params) <
+               std::make_tuple(b.atlas.idx, b.program.idx, b.params);
+    });
     for (std::size_t first = 0; first < distortQuads_.size();) {
         std::size_t last = first;
         distortVertices_.clear();
-        while (last < distortQuads_.size() &&
-               distortQuads_[last].atlas.idx == distortQuads_[first].atlas.idx) {
+        while (last < distortQuads_.size() && distortQuads_[last].sameDraw(distortQuads_[first])) {
             const auto& v = distortQuads_[last].vertices;
             for (const int i : {0, 1, 2, 0, 2, 3}) {
                 distortVertices_.push_back(v[static_cast<std::size_t>(i)]);
@@ -878,7 +1028,16 @@ void WorldRenderer::drawDistortion() {
                                        glm::vec4(1.0f / glm::vec2(target_->size), 0, 0)};
         bgfx::setUniform(distortUniform_.get(), settings, 2);
         bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_BLEND_ADD);
-        submitDraw(view, distort_.get(), *calls_);
+        const auto& head = distortQuads_[first];
+        if (bgfx::isValid(head.program)) {
+            // A game shader's distortion variant: fs_distort's inputs plus
+            // the sprite shader's u_info and u_params.
+            static const ShaderParams zero{};
+            bgfx::setUniform(uniforms_.info.get(), glm::value_ptr(info_));
+            bgfx::setUniform(uniforms_.params.get(), (head.params ? *head.params : zero).data(),
+                             Uniforms::ParamsCount);
+        }
+        submitDraw(view, bgfx::isValid(head.program) ? head.program : distort_.get(), *calls_);
         first = last;
     }
 }

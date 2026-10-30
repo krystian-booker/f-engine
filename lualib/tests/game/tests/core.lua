@@ -417,6 +417,20 @@ return {
     t.ok(hole_errors[1]:find("thing.tags%[2%]"), hole_errors[1])
   end,
 
+  ["i18n.number formats with the current language's separators"] = function(t)
+    local language = i18n.language
+    i18n.language = nil
+    t.eq(i18n.number(1234567), "1,234,567") -- the system locale, en-US in tests
+    t.eq(i18n.number(1234.5), "1,234.50")
+    t.eq(i18n.number(1234.5, { decimals = 1 }), "1,234.5")
+    i18n.set_language("de")
+    t.eq(i18n.number(1234567.891, { decimals = 2 }), "1.234.567,89")
+    t.eq(i18n.number(1234567.891, { decimals = 2, locale = "en" }), "1,234,567.89")
+    i18n.set_language("fr-CA")
+    t.eq(i18n.number(1000), "1\u{a0}000")
+    i18n.language = language
+    t.eq(fe.app.format_number(0.5, { locale = "ja" }), "0.50")
+  end,
   ["i18n fills underscore placeholders and falls back to kit defaults"] = function(t)
     require("fe.ui.screens.title")
     i18n.defaults({ test = { greeting = "Hello {first_name}, {unknown_key}" } })
@@ -669,7 +683,7 @@ return {
 
   ["every core kit module loads"] = function(t)
     for _, name in ipairs({ "fe.camera", "fe.class", "fe.config", "fe.cutscene", "fe.daynight", "fe.data", "fe.devtools",
-      "fe.dialogue", "fe.event", "fe.field", "fe.follower", "fe.game", "fe.i18n", "fe.input", "fe.quest", "fe.save", "fe.scene",
+      "fe.dialogue", "fe.event", "fe.field", "fe.field.placements", "fe.field.followers", "fe.follower", "fe.game", "fe.i18n", "fe.input", "fe.quest", "fe.save", "fe.scene",
       "fe.schema", "fe.signal", "fe.sound", "fe.starter", "fe.state", "fe.story", "fe.tablex", "fe.task", "fe.test", "fe.timeline",
       "fe.transition", "fe.tween", "fe.vec", "fe.worldmap", "fe.ui", "fe.ui.theme", "fe.ui.screens.backlog",
       "fe.ui.screens.config", "fe.ui.screens.menu", "fe.ui.screens.name_entry", "fe.ui.screens.save",
@@ -701,5 +715,182 @@ return {
   ["data tables load from JSON"] = function(t)
     t.ok(not data.has_table("nothing"))
     t.error(function() data.get("nothing", "x") end, "not loaded")
+  end,
+
+  ["task.ensure keeps the traceback of where an error was raised and passes table errors on"] = function(t)
+    local job
+    expect_errors(t, "Task 'ensured' failed", function()
+      job = task.named("ensured", function()
+        task.ensure(function()
+          task.ensure(function()
+            error("deep trouble")       -- the location this line reports
+          end, function() end)
+        end, function() end)
+      end)
+    end)
+    t.eq(job.status, "failed")
+    t.ok(tostring(job.error):find("deep trouble", 1, true) ~= nil)
+    local first = job.traceback:match("tests/core%.lua:(%d+)")
+    t.ok(first ~= nil, "the traceback names this file: " .. job.traceback)
+    local error_line = tonumber(first)
+    local ensure_line = job.traceback:match("task%.lua:(%d+): in function <lualib/fe/task%.lua:%d+>")
+    t.ok(not job.traceback:find("in function 'ensure'", 1, true) or
+      tonumber(job.traceback:match("tests/core%.lua:(%d+)")) == error_line, "the first frame of this file is the raise")
+    local marker = { code = 42 }
+    local ok, err = pcall(task.ensure, function() error(marker) end, function() end)
+    t.ok(not ok)
+    t.eq(err, marker, "a table error value travels on unchanged")
+    t.eq(task.ensure(function() return 1, nil, 3 end, function() end), 1)
+    t.eq(select("#", task.ensure(function() return 1, nil, 3 end, function() end)), 3)
+  end,
+
+  ["moving a task under an ancestor does not count the shared speed twice"] = function(t)
+    local root = task.detached("root", function() task.wait_until(function() return false end) end)
+    root.speed = 2
+    local middle = root:spawn("middle", function() task.wait_until(function() return false end) end)
+    local leaf = middle:spawn("leaf", function() task.wait_until(function() return false end) end)
+    leaf:set_parent(root)
+    t.eq(leaf.parent, root)
+    local before = leaf.now
+    t.tick(30)
+    t.near(leaf.now - before, 1, 0.05, "twice game time, not four times")
+    middle.speed = 3
+    local other = middle:spawn("other", function() task.wait_until(function() return false end) end)
+    other:set_parent(root)
+    before = other.now
+    t.tick(30)
+    t.near(other.now - before, 3, 0.11, "it carries the speed of the ancestor it left and still inherits the root's")
+    root:cancel()
+  end,
+
+  ["movement tuning is read and set per world"] = function(t)
+    local world = fe.world.load("tuning", "arena")
+    local other = fe.world.load("tuning_other", "arena")
+    local tuning = world:movement_tuning()
+    t.near(tuning.arrive_distance, 0.05, 1e-6)
+    t.near(tuning.jump_arc_per_rise, 0.5, 1e-6)
+    world:set_movement_tuning({ arrive_distance = 0.1, stuck_seconds = 2 })
+    tuning = world:movement_tuning()
+    t.near(tuning.arrive_distance, 0.1, 1e-6)
+    t.eq(tuning.stuck_seconds, 2)
+    t.near(tuning.snap_distance, 0.02, 1e-6, "omitted fields keep their value")
+    t.near(other:movement_tuning().arrive_distance, 0.05, 1e-6, "another world keeps the defaults")
+    t.error(function() world:set_movement_tuning({ stuck_share = 2 }) end, "stuck_share must be from 0 to 1")
+    t.error(function() world:set_movement_tuning({ arrive_distance = 0 }) end, "arrive_distance must be from")
+    t.near(world:movement_tuning().stuck_share, 0.1, 1e-6, "a refused change leaves everything as it was")
+    fe.world.unload("tuning")
+    fe.world.unload("tuning_other")
+  end,
+
+  ["config.set pushes only the changed setting and ignores equal values"] = function(t)
+    local volumes, displays = {}, 0
+    local saved_volume, saved_display = fe.audio.set_bus_volume, fe.app.set_display
+    fe.audio.set_bus_volume = function(bus, v) volumes[#volumes + 1] = bus .. "=" .. v end
+    fe.app.set_display = function() displays = displays + 1 end
+    local before = config.get("music")
+    local changes = 0
+    local disconnect = config.changed:connect(function() changes = changes + 1 end)
+    local ok, err = pcall(function()
+      config.dirty = false
+      config.set("music", 0.42)
+      t.eq(volumes, { "music=0.42" }, "only the music bus")
+      t.eq(displays, 0, "the window is left alone")
+      t.ok(config.dirty)
+      config.dirty = false
+      config.set("music", 0.42)
+      t.ok(not config.dirty, "an equal value changes nothing")
+      t.eq(changes, 1)
+      config.set("display", {})
+      t.eq(displays, 0, "an equal table changes nothing either")
+      config.set("fullscreen", config.get("fullscreen"))
+      t.eq(displays, 0)
+    end)
+    fe.audio.set_bus_volume, fe.app.set_display = saved_volume, saved_display
+    disconnect()
+    config.set("music", before)
+    config.dirty = false
+    if not ok then error(err, 0) end
+  end,
+
+  ["quest.advance past the last stage is a no-op"] = function(t)
+    state.reset()
+    data.load("quests", "data/quests.json", "quest")
+    quest.start("relics")
+    quest.progress("relics", "shards", 3)
+    local last = #data.get("quests", "relics").stages
+    quest.advance("relics", data.get("quests", "relics").stages[last].id)
+    local seen = {}
+    local disconnect = quest.changed:connect(function(_, what) seen[#seen + 1] = what end)
+    t.eq(quest.advance("relics"), false)
+    disconnect()
+    t.eq(seen, {}, "no stage change announced")
+    t.eq(quest.stage("relics").id, data.get("quests", "relics").stages[last].id)
+    state.reset()
+  end,
+
+  ["camera rotate snaps to the next step in either direction"] = function(t)
+    local world = fe.world.load("rotate", "arena")
+    local rig = require("fe.camera").rig(world, { point = { x = 3, z = 3 } })
+    rig:rotate(90, true)
+    t.eq(rig.yaw_offset, 90)
+    rig:rotate(-90, true)
+    t.eq(rig.yaw_offset, 0)
+    rig:rotate(-90, true)
+    t.eq(rig.yaw_offset, -90)
+    rig:rotate(-90, true)
+    t.eq(rig.yaw_offset, -180, "a negative step keeps going down")
+    rig.yaw_offset = 10
+    rig:rotate(-45, true)
+    t.eq(rig.yaw_offset, -45, "from off the grid it snaps to the next multiple")
+    rig:rotate(30)
+    t.eq(rig.yaw_offset, -15)
+    fe.world.unload("rotate")
+  end,
+
+  ["i18n picks plural and select forms"] = function(t)
+    i18n.defaults({ test = {
+      items = "{count} {count|one:item|other:items}",
+      found = "Found {count|=0:nothing|one:# item|other:# items}.",
+      pronoun = "{gender|female:She|male:He|other:They} left.",
+    } })
+    t.eq(i18n.t("test.items", { count = 1 }), "1 item")
+    t.eq(i18n.t("test.items", { count = 3 }), "3 items")
+    t.eq(i18n.t("test.found", { count = 0 }), "Found nothing.")
+    t.eq(i18n.t("test.found", { count = 1 }), "Found 1 item.")
+    t.eq(i18n.t("test.found", { count = 12 }), "Found 12 items.")
+    t.eq(i18n.t("test.pronoun", { gender = "female" }), "She left.")
+    t.eq(i18n.t("test.pronoun", { gender = "x" }), "They left.")
+    t.eq(i18n.t("test.pronoun", {}), "They left.")
+    t.eq(i18n.t("test.items", {}), "{count} items", "a missing argument shows the placeholder, or the other form")
+    local before = i18n.language
+    i18n.set_language("fr")
+    t.eq(i18n.plural(0), "one", "French: 0 and 1 are singular")
+    t.eq(i18n.plural(2), "other")
+    i18n.set_language(before or "en")
+    t.eq(i18n.plural(0), "other")
+  end,
+
+  ["dialogue keeps a portrait on each side when two_portraits is on"] = function(t)
+    local box = { line = { portrait = "a.png", speaker = "A" } }
+    local sides = dialogue.portraits(box)
+    t.eq(sides.left.image, "a.png")
+    t.eq(sides.right, nil)
+    box.line = { portrait = "b.png", speaker = "B", side = "right" }
+    sides = dialogue.portraits(box)
+    t.eq(sides.left, nil, "one portrait at a time by default")
+    t.eq(sides.right.image, "b.png")
+    dialogue.style.two_portraits = true
+    box = { line = { portrait = "a.png", speaker = "A" } }
+    dialogue.portraits(box)
+    box.line = { portrait = "b.png", speaker = "B", side = "right" }
+    sides = dialogue.portraits(box)
+    t.eq(sides.left.image, "a.png")
+    t.eq(sides.left.speaking, false, "the other side is dimmed")
+    t.eq(sides.right.speaking, true)
+    box.line = { speaker = "Narrator" }
+    sides = dialogue.portraits(box)
+    t.eq(sides.right.speaking, false, "a line without a portrait keeps both, neither speaking")
+    dialogue.style.two_portraits = false
+    t.eq(dialogue.Box.blocks_update, false)
   end,
 }

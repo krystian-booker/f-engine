@@ -102,9 +102,10 @@ end
 --- run, `battle.active` is cleared, `finished` is not emitted and the error
 --- propagates. Other
 --- options are passed to the presentation (tactical: map, units, enemies,
---- deploy, win, lose, auto).
+--- deploy, win, lose, auto). `opening = "ambush"` makes the party skip its
+--- first turns, `"preemptive"` the enemies (Battle.opening_rules).
 --- `presentation` is a module name or the module table itself.
----@param options {troop?: string, stage?: string, music?: string, escapable?: boolean, scheduler?: table, rules?: table, presentation?: string|table, setup?: fun(b: table), allow_defeat?: boolean, random?: RandomStream}
+---@param options {troop?: string, stage?: string, music?: string, escapable?: boolean, scheduler?: table, rules?: table, presentation?: string|table, setup?: fun(b: table), allow_defeat?: boolean, random?: RandomStream, opening?: "ambush"|"preemptive"}
 function battle.start(options)
   local troop = options.troop and data.get("troops", options.troop)
   local layers = { battle.rules }
@@ -118,6 +119,7 @@ function battle.start(options)
     troop = options.troop,
     escapable = options.escapable ~= false and (not troop or troop.escapable),
     random = options.random,
+    opening = options.opening,
   })
   local presentation_options = tablex.copy(options)
   presentation_options.stage = options.stage or (troop and troop.stage) or (not options.map and battle.default_stage()) or nil

@@ -95,10 +95,28 @@ public:
     int addLayer(const std::string& name);
     [[nodiscard]] bool contains(int x, int z, int layer = 0) const;
     [[nodiscard]] bool contains(GridPos p) const { return contains(p.x, p.z, p.layer); }
+    // Writable access counts as a change (see revision()): read through a
+    // const Grid where nothing is written.
     GridCell& at(int x, int z, int layer = 0);
     GridCell& at(GridPos p) { return at(p.x, p.z, p.layer); }
     [[nodiscard]] const GridCell& at(int x, int z, int layer = 0) const;
     [[nodiscard]] const GridCell& at(GridPos p) const { return at(p.x, p.z, p.layer); }
+    // Replaces a cell; a change counts towards revision(), writing the same
+    // cell again does not.
+    void setCell(GridPos p, const GridCell& cell);
+    // Counts the changes that may alter connectivity: every write through the
+    // non-const at() (which cannot tell a read from a write), setCell with a
+    // different cell, setLinks and addLayer. Derived data cached on the grid
+    // (component()) is keyed on it.
+    [[nodiscard]] std::uint64_t revision() const { return revision_; }
+    // The connected component of a cell under the most permissive walking
+    // rules: 4-neighbour walkable cells of a layer, joined through every step
+    // and ladder link whose two ends are walkable, ignoring heights, tags and
+    // blocked sets. Cells in different components cannot be joined by any
+    // route that neither flies nor jumps gaps; the same component promises
+    // nothing. -1 for an unwalkable cell or one outside the grid. Computed on
+    // first use and cached until the grid changes.
+    [[nodiscard]] int component(GridPos p) const;
 
     // Surface height at a world position (x, z) on a layer, following ramps.
     [[nodiscard]] float heightAt(glm::vec2 position, int layer = 0) const;
@@ -106,7 +124,17 @@ public:
     [[nodiscard]] float heightIn(GridPos cell, glm::vec2 position) const;
     // Height where a cell meets its neighbour in direction (dx, dz).
     [[nodiscard]] float edgeHeight(GridPos cell, int dx, int dz) const;
-    [[nodiscard]] bool canStand(glm::vec2 position, float radius = 0.2f, int layer = 0) const;
+    // Standing room for a body of `radius` at `position`: every cell its disc
+    // touches is inside the grid and walkable. With a `footprint` above 1 the
+    // body also covers that many cells per side from its anchor cell (the
+    // cell of `position`) towards +x and +z, which must be inside the grid and
+    // walkable too. A flying body (`fly`) needs the cells inside the grid only.
+    // Whether it flies or not, a cell carrying one of `blockedTags`, or (when
+    // `requiredTags` is not zero) none of `requiredTags`, refuses the body:
+    // its passability class.
+    [[nodiscard]] bool canStand(glm::vec2 position, float radius = 0.2f, int layer = 0, int footprint = 1,
+                                bool fly = false, std::uint32_t blockedTags = 0,
+                                std::uint32_t requiredTags = 0) const;
     [[nodiscard]] bool walkableAt(glm::vec2 position, int layer) const;
     // First step link at a cell that touches `layer`, or null.
     [[nodiscard]] const GridLink* linkAt(int x, int z, int layer) const;
@@ -165,6 +193,7 @@ private:
         return static_cast<std::size_t>(z) * static_cast<std::size_t>(width_) + static_cast<std::size_t>(x);
     }
     void indexLinks();
+    void buildComponents() const;
     int width_ = 0, depth_ = 0;
     std::vector<Layer> layers_;
     std::vector<std::string> tagNames_;
@@ -172,5 +201,10 @@ private:
     std::vector<std::pair<std::size_t, std::size_t>> linkIndex_;   // (cell index, link index), sorted
     std::vector<std::pair<std::size_t, std::size_t>> ladderIndex_; // both ends of every ladder, sorted
     std::map<std::tuple<int, int, int>, Json> cellProps_;
+    std::uint64_t revision_ = 0;
+    // component() cache: one label per cell of every layer, valid for componentsRevision_.
+    mutable std::vector<std::int32_t> components_;
+    mutable std::uint64_t componentsRevision_ = 0;
+    mutable bool componentsBuilt_ = false;
 };
 } // namespace fe

@@ -29,6 +29,11 @@ struct Evaluation {
 // scripts only their documented members (see sealTypes). `require` searches the
 // game folder first and the engine's lualib second, so a game can override any
 // library module by placing a file at the same path.
+//
+// The implementation is split by concern: LuaHost.cpp (state, sandbox,
+// sealing, require, console), ModulePatcher.cpp (hot reload), LuaJson.cpp
+// (the JSON conversion below) and GcHold.cpp (BindingCall and Callout, the
+// only file that includes Lua's internal headers).
 class LuaHost {
 public:
     LuaHost(std::filesystem::path gameRoot, std::filesystem::path libraryRoot, bool development);
@@ -155,6 +160,11 @@ public:
     void clearErrors() { errors_.clear(); }
     std::function<void(const ScriptError&)> onError;
 
+    // The host that owns `state` (also from a coroutine of it), or null for a
+    // state the engine did not make. Found through the registry, which every
+    // thread of a state shares.
+    static LuaHost* of(lua_State* state);
+
     // Evaluates a console line, as an expression first and then as statements.
     Evaluation evaluate(const std::string& code);
     std::string console(const std::string& code) { return evaluate(code).output; }
@@ -179,7 +189,7 @@ private:
     sol::table fe_, loaded_;
     sol::function handler_;
     std::map<std::string, std::filesystem::path> moduleFiles_;
-    std::map<std::string, int> loading_;
+    std::map<std::string, int> loading_; // modules being loaded (entries removed at zero)
     std::map<std::string, TypeMembers> types_;
     std::deque<ScriptError> errors_;
     std::chrono::steady_clock::time_point start_, frameStart_;
@@ -212,7 +222,8 @@ template<class Key> sol::object field(const sol::table& table, const Key& key) {
     return value;
 }
 
-// Lua <-> JSON conversion. Sequences become arrays, other tables objects.
+// Lua <-> JSON conversion. A table becomes an array only when its keys are
+// exactly 1..n (n > 0) and nothing else; every other table becomes an object.
 // Integer keys are written as "#<n>" and string keys starting with '#' get a
 // second '#', so tables with sparse or mixed keys round-trip exactly.
 // Functions, userdata and non-integer number keys are rejected, and so are

@@ -51,6 +51,11 @@ void bindPlatform(Engine& engine) {
             "Create the world from a background load, replacing a world of that name. Before progress "
             "reaches 1 it waits for the map file and leaves undecoded assets to load on first use. Raises "
             "the "
-            "load's error (a missing or invalid map). The ticket is used up.");
+            "load's error (a missing or invalid map). The ticket is used up.")
+        .fn(
+            "cancel_load", [&engine](int ticket) { engine.cancelLoad(ticket); }, "fun(ticket: integer)",
+            "Drop a background load that will not be finished (a cancelled warp): the ticket stops "
+            "advancing and becomes unknown; a worker still parsing the map finishes in the background and "
+            "its result is discarded, and assets already decoded stay in the cache like any other.");
 }
 } // namespace fe

@@ -2,6 +2,7 @@
 #include "engine/core/Log.h"
 #include "engine/core/Paths.h"
 #include <algorithm>
+#include <sstream>
 
 namespace fe {
 namespace {
@@ -11,13 +12,70 @@ bool endsWith(const std::string& value, const std::string& suffix) {
     return value.size() >= suffix.size() &&
            value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
+
+// The page images a bitmap font names (`page id=0 file="pixel.png"`), as
+// paths relative to the same root as the font's own path.
+std::set<std::string> bitmapFontPages(const std::string& fontRelative, const std::filesystem::path& file) {
+    std::set<std::string> pages;
+    std::istringstream lines(readFile(file));
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (!line.starts_with("page")) {
+            continue;
+        }
+        const auto at = line.find("file=\"");
+        if (at == std::string::npos) {
+            continue;
+        }
+        const auto end = line.find('"', at + 6);
+        if (end == std::string::npos) {
+            continue;
+        }
+        const auto folder = std::filesystem::path(fontRelative).parent_path();
+        pages.insert((folder / line.substr(at + 6, end - at - 6)).lexically_normal().generic_string());
+    }
+    return pages;
+}
 } // namespace
 
+std::size_t decodedBytes(const Image& image) {
+    return image.rgba.size();
+}
+
+std::size_t decodedBytes(const Model& model) {
+    std::size_t bytes = 0;
+    std::set<const Image*> images;
+    for (const auto& part : model.parts) {
+        bytes += part.vertices.size() * sizeof(MeshVertex) + part.indices.size() * sizeof(std::uint32_t);
+        for (const auto* texture : {&part.material.albedo, &part.material.normal, &part.material.emission}) {
+            if (texture->image && images.insert(texture->image.get()).second) {
+                bytes += decodedBytes(*texture->image);
+            }
+        }
+    }
+    for (const auto& animation : model.animations) {
+        for (const auto& channel : animation.channels) {
+            bytes += channel.times.size() * sizeof(float) + channel.values.size() * sizeof(glm::vec4);
+        }
+    }
+    return bytes;
+}
+
+std::size_t decodedBytes(const SpriteAnimation& sprite) {
+    std::size_t bytes = sizeof(SpriteAnimation);
+    for (const auto& [name, clip] : sprite.clips) {
+        for (const auto& row : clip.directions) {
+            bytes += row.size() * sizeof(SpriteFrame);
+        }
+    }
+    return bytes;
+}
+
 AssetCache::AssetCache(std::filesystem::path root, std::filesystem::path libraryRoot,
-                       std::filesystem::path userRoot)
+                       std::filesystem::path userRoot, std::size_t budget)
     : root_(std::filesystem::weakly_canonical(root)),
       libraryRoot_(std::filesystem::weakly_canonical(libraryRoot)),
-      userRoot_(userRoot.empty() ? userRoot : std::filesystem::weakly_canonical(userRoot)),
+      userRoot_(userRoot.empty() ? userRoot : std::filesystem::weakly_canonical(userRoot)), budget_(budget),
       thread_([this] { worker(); }) {
 }
 
@@ -60,6 +118,7 @@ AssetCache::Decoded AssetCache::decode(const std::filesystem::path& file) {
 
 std::shared_ptr<const Model> AssetCache::model(const std::string& path) {
     collect();
+    touch(path);
     if (const auto found = models_.find(path); found != models_.end()) {
         return found->second;
     }
@@ -70,6 +129,7 @@ std::shared_ptr<const Model> AssetCache::model(const std::string& path) {
 
 std::shared_ptr<const SpriteAnimation> AssetCache::sprite(const std::string& path) {
     collect();
+    touch(path);
     if (const auto found = sprites_.find(path); found != sprites_.end()) {
         return found->second;
     }
@@ -109,12 +169,17 @@ void AssetCache::refreshUserImage(const std::string& path) {
 std::shared_ptr<const Image> AssetCache::image(const std::string& path) {
     collect();
     refreshUserImage(path);
+    touch(path);
     if (const auto found = images_.find(path); found != images_.end()) {
         return found->second;
     }
     auto value = std::make_shared<const Image>(Image::load(file(path)));
     images_[path] = value;
     return value;
+}
+
+bool AssetCache::loaded(const std::string& path) const {
+    return models_.contains(path) || sprites_.contains(path) || images_.contains(path);
 }
 
 template<class T, class Load>
@@ -144,6 +209,85 @@ std::shared_ptr<const Image> AssetCache::tryImage(const std::string& path) {
     return tryLoad<Image>(failed_, path, [this](const std::string& p) { return image(p); });
 }
 
+std::size_t AssetCache::bytesOf(const std::string& path) const {
+    if (const auto found = images_.find(path); found != images_.end()) {
+        return decodedBytes(*found->second);
+    }
+    if (const auto found = models_.find(path); found != models_.end()) {
+        return decodedBytes(*found->second);
+    }
+    if (const auto found = sprites_.find(path); found != sprites_.end()) {
+        return decodedBytes(*found->second);
+    }
+    return 0;
+}
+
+std::size_t AssetCache::cachedBytes() const {
+    std::size_t bytes = 0;
+    for (const auto& [path, image] : images_) {
+        bytes += decodedBytes(*image);
+    }
+    for (const auto& [path, model] : models_) {
+        bytes += decodedBytes(*model);
+    }
+    for (const auto& [path, sprite] : sprites_) {
+        bytes += decodedBytes(*sprite);
+    }
+    return bytes;
+}
+
+bool AssetCache::erase(const std::string& path) {
+    const bool had = images_.erase(path) + models_.erase(path) + sprites_.erase(path) > 0;
+    lastUse_.erase(path);
+    failed_.erase(path);
+    return had;
+}
+
+bool AssetCache::release(const std::string& path) {
+    collect();
+    if (!erase(path)) {
+        return false;
+    }
+    ++generation_;
+    return true;
+}
+
+std::size_t AssetCache::releaseUnused(const std::set<std::string>& referenced) {
+    collect();
+    std::size_t total = cachedBytes();
+    if (total <= budget_) {
+        return 0;
+    }
+    // Oldest use first; assets never touched (preloaded, not yet used) count as oldest.
+    std::vector<std::pair<std::uint64_t, std::string>> candidates;
+    const auto consider = [&](const auto& map) {
+        for (const auto& [path, value] : map) {
+            if (!referenced.contains(path)) {
+                const auto use = lastUse_.find(path);
+                candidates.emplace_back(use == lastUse_.end() ? 0 : use->second, path);
+            }
+        }
+    };
+    consider(images_);
+    consider(models_);
+    consider(sprites_);
+    std::sort(candidates.begin(), candidates.end());
+    std::size_t evicted = 0;
+    for (const auto& [use, path] : candidates) {
+        if (total <= budget_) {
+            break;
+        }
+        const auto bytes = bytesOf(path);
+        erase(path);
+        total -= std::min(total, bytes);
+        ++evicted;
+    }
+    if (evicted > 0) {
+        ++generation_;
+    }
+    return evicted;
+}
+
 void AssetCache::defineFont(const std::string& name, const Json& spec) {
     const auto files = spec.at("files").get<std::vector<std::string>>();
     if (files.empty()) {
@@ -152,11 +296,14 @@ void AssetCache::defineFont(const std::string& name, const Json& spec) {
     const float size = spec.value("size", 12.0f);
     const bool pixel = spec.value("pixel", true);
     std::vector<std::shared_ptr<Font>> faces;
+    std::set<std::string> used;
     for (const auto& relative : files) {
         const auto path = file(relative);
         const auto extension = path.extension().string();
+        used.insert(relative);
         if (extension == ".fnt") {
             faces.push_back(loadBitmapFont(path));
+            used.merge(bitmapFontPages(relative, path));
         } else if (extension == ".ttf" || extension == ".otf") {
             faces.push_back(loadTrueTypeFont(path, size, pixel));
         } else {
@@ -164,6 +311,7 @@ void AssetCache::defineFont(const std::string& name, const Json& spec) {
         }
     }
     fontSpecs_[name] = spec;
+    fontFiles_[name] = std::move(used);
     auto& slot = fonts_[name];
     if (slot) {
         retiredFonts_.push_back(std::move(slot));
@@ -199,7 +347,11 @@ float AssetCache::progress(int ticket) {
     collect();
     std::lock_guard lock(mutex_);
     const auto found = tickets_.find(ticket);
-    if (found == tickets_.end() || found->second.total == 0) {
+    if (found == tickets_.end()) {
+        return 1;
+    }
+    if (found->second.done >= found->second.total) {
+        tickets_.erase(found);
         return 1;
     }
     return static_cast<float>(found->second.done) / static_cast<float>(found->second.total);
@@ -290,18 +442,15 @@ bool AssetCache::reload(const std::filesystem::path& absolute) {
         }
     }
     for (const auto& [name, spec] : fontSpecs_) {
-        const auto files = spec.at("files").get<std::vector<std::string>>();
-        const bool uses = std::any_of(files.begin(), files.end(), [&](const std::string& f) {
-            return f == relative ||
-                   std::filesystem::path(f).parent_path() == std::filesystem::path(relative).parent_path();
-        });
-        if (uses) {
-            try {
-                defineFont(name, spec);
-                changed = true;
-            } catch (const std::exception& error) {
-                log(LogLevel::Error, std::string("Font reload failed: ") + error.what());
-            }
+        const auto files = fontFiles_.find(name);
+        if (files == fontFiles_.end() || !files->second.contains(relative)) {
+            continue;
+        }
+        try {
+            defineFont(name, spec);
+            changed = true;
+        } catch (const std::exception& error) {
+            log(LogLevel::Error, std::string("Font reload failed: ") + error.what());
         }
     }
     if (changed) {

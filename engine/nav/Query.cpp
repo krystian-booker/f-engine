@@ -5,6 +5,7 @@
 #include <numbers>
 #include <queue>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 
 namespace fe {
@@ -62,7 +63,8 @@ public:
         }
         for (const auto& axis : Axes) {
             const glm::ivec2 step(axis[0], axis[1]);
-            if (const auto* ladder = rules_.ladders ? grid_.ladderStep(from, step) : nullptr) {
+            if (const auto* ladder =
+                    rules_.ladders && rules_.footprint <= 1 ? grid_.ladderStep(from, step) : nullptr) {
                 const auto end = from == ladder->foot() ? ladder->top() : ladder->foot();
                 if (enterable(end)) {
                     add(from, end, 1, StepKind::Climb, out);
@@ -75,6 +77,19 @@ public:
                 jumps(from, {Directions[d][0], Directions[d][1]}, out);
             }
         }
+    }
+
+    // Whether the body, anchored at `p`, may occupy its footprint there.
+    [[nodiscard]] bool enterable(GridPos p) const {
+        const int side = std::max(1, rules_.footprint);
+        for (int dz = 0; dz < side; ++dz) {
+            for (int dx = 0; dx < side; ++dx) {
+                if (!enterableCell({p.x + dx, p.z + dz, p.layer})) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
 private:
@@ -155,17 +170,25 @@ private:
             return false;
         }
         const auto& cell = grid_.at(p);
-        return !cell.walkable || (cell.tags & rules_.blockedTags) ||
+        return !cell.walkable || !tagsAllow(cell) ||
                cellTop(grid_, p) < floor - std::min(rules_.maxUp, rules_.maxDown) - 1e-4f;
     }
-    [[nodiscard]] bool enterable(GridPos p) const {
+    // The passability class: no blocked tag, and one of the required tags when any are required.
+    [[nodiscard]] bool tagsAllow(const GridCell& cell) const {
+        return !(cell.tags & rules_.blockedTags) && (!rules_.requiredTags || (cell.tags & rules_.requiredTags));
+    }
+    // One cell of the body: inside the grid, walkable unless flying, its tags allowed, not occupied.
+    [[nodiscard]] bool enterableCell(GridPos p) const {
         if (!grid_.contains(p)) {
             return false;
         }
         const auto& cell = grid_.at(p);
-        return cell.walkable && !(cell.tags & rules_.blockedTags) && !rules_.blocked.contains(cellKey(p));
+        return (rules_.fly || cell.walkable) && tagsAllow(cell) && !rules_.blocked.contains(cellKey(p));
     }
     [[nodiscard]] bool climbable(GridPos from, GridPos to, int dx, int dz) const {
+        if (rules_.fly) {
+            return true;
+        }
         const float rise = grid_.edgeHeight(to, -dx, -dz) - grid_.edgeHeight(from, dx, dz);
         return rise <= rules_.maxUp + 1e-4f && -rise <= rules_.maxDown + 1e-4f;
     }
@@ -271,17 +294,34 @@ void validateRules(const StepRules& rules) {
         !std::isfinite(jump.maxDown) || jump.maxUp < 0 || jump.maxDown < 0) {
         throw std::invalid_argument("Jump distance must be 0..16 and jump limits finite and not negative");
     }
+    if (rules.footprint < 1 || rules.footprint > MaxFootprint) {
+        throw std::invalid_argument("Footprint must be 1.." + std::to_string(MaxFootprint) + " cells");
+    }
 }
 
 Route findRoute(const Grid& grid, GridPos from, GridPos to, const StepRules& rules, int maxVisited) {
     validateRules(rules);
     Route route;
-    if (!grid.contains(from) || !grid.contains(to) || !grid.at(to).walkable) {
+    const Neighbours neighbours(grid, rules);
+    // A goal the body cannot occupy (unwalkable, tagged, occupied, outside
+    // the grid) ends the search before it starts.
+    if (!grid.contains(from) || !neighbours.enterable(to)) {
         return route;
     }
     if (from == to) {
         route.steps.push_back({to, StepKind::Walk});
         return route;
+    }
+    // Walking routes stay inside the start's connected component (flying and
+    // gap jumps are the only steps that leave it), so a goal in another
+    // component is unreachable before anything is expanded. A start that is
+    // not walkable itself (a body placed there) has no component and searches
+    // as usual.
+    if (!rules.fly && rules.jump.distance <= 0) {
+        const int here = grid.component(from), there = grid.component(to);
+        if (here >= 0 && there >= 0 && here != there) {
+            return route;
+        }
     }
     struct Node {
         float priority, cost;
@@ -308,7 +348,6 @@ Route findRoute(const Grid& grid, GridPos from, GridPos to, const StepRules& rul
         return rules.diagonal ? std::max(dx, dz) + (std::numbers::sqrt2_v<float> - 1) * std::min(dx, dz)
                               : dx + dz;
     };
-    const Neighbours neighbours(grid, rules);
     std::vector<Step> steps;
     const auto start = cellKey(from);
     const auto goal = cellKey(to);
@@ -316,18 +355,18 @@ Route findRoute(const Grid& grid, GridPos from, GridPos to, const StepRules& rul
     open.push({heuristic(from), 0, start});
     int visited = 0;
     while (!open.empty()) {
+        const auto current = open.top();
+        open.pop();
+        const auto here = visits.at(current.key);
+        if (current.cost > here.cost + 1e-4f) {
+            continue; // stale queue entry: not an expansion, so not counted
+        }
         if (visited++ >= maxVisited) {
             route.truncated = true;
             break;
         }
-        const auto current = open.top();
-        open.pop();
         if (current.key == goal) {
             break;
-        }
-        const auto here = visits.at(current.key);
-        if (current.cost > here.cost + 1e-4f) {
-            continue; // stale queue entry
         }
         if (current.key != start && rules.zoc.contains(current.key)) {
             continue; // movement ends in a zone of control
@@ -365,11 +404,12 @@ std::vector<GridPos> findPath(const Grid& grid, GridPos from, GridPos to, const 
     return cells;
 }
 
-std::vector<ReachCell> reachable(const Grid& grid, GridPos start, float budget, const StepRules& rules) {
+Reach findReachable(const Grid& grid, GridPos start, float budget, const StepRules& rules, int maxVisited) {
     validateRules(rules);
-    std::vector<ReachCell> cells;
+    Reach reach;
+    auto& cells = reach.cells;
     if (!grid.contains(start) || !std::isfinite(budget) || budget < 0) {
-        return cells;
+        return reach;
     }
     std::unordered_map<std::int64_t, int> indexOf;
     using Entry = std::pair<float, int>;
@@ -379,11 +419,16 @@ std::vector<ReachCell> reachable(const Grid& grid, GridPos start, float budget, 
     cells.push_back({start, 0, -1, true});
     indexOf[cellKey(start)] = 0;
     open.push({0, 0});
+    int visited = 0;
     while (!open.empty()) {
         const auto [cost, index] = open.top();
         open.pop();
         if (cost > cells[static_cast<std::size_t>(index)].cost + 1e-5f) {
-            continue;
+            continue; // stale queue entry
+        }
+        if (visited++ >= maxVisited) {
+            reach.truncated = true;
+            break;
         }
         if (index > 0 && rules.zoc.contains(cellKey(cells[static_cast<std::size_t>(index)].pos))) {
             continue; // movement ends in a zone of control
@@ -413,7 +458,12 @@ std::vector<ReachCell> reachable(const Grid& grid, GridPos start, float budget, 
             open.push({next, added});
         }
     }
-    return cells;
+    return reach;
+}
+
+std::vector<ReachCell> reachable(const Grid& grid, GridPos start, float budget, const StepRules& rules,
+                                 int maxVisited) {
+    return findReachable(grid, start, budget, rules, maxVisited).cells;
 }
 
 std::vector<GridPos> reachPath(const std::vector<ReachCell>& cells, GridPos target) {

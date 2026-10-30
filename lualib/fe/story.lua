@@ -15,6 +15,7 @@
 --- story.finish()             -- the chapter being played is done
 --- story.finish("selene")     -- selene's next chapter is done (not being played)
 --- local id = story.open()    -- chapter select; nil when cancelled
+--- story.replay("rook", 1)    -- play a finished chapter again (a flashback, NG+)
 --- ```
 --- `story.load()` reads the same definitions from data/story.json
 --- (`[{"id": "rook", "name": ..., "chapters": [...]}]`).
@@ -27,6 +28,13 @@
 --- `actor` needs that actor in the party (`story.has_member`) and leads it
 --- while playing (`story.lead_with`); both use fe.rpg's party by default,
 --- and games without it replace them.
+---
+--- Finished chapters can be played again: `story.replay(id, number)` warps
+--- to the chapter and runs its script without touching the record (nothing
+--- is "current", `story.finish` has nothing to finish), and
+--- `story.available{include_done = true}` lists finished chapters too
+--- (marked `done`), which `story.open`/`story.select` offer with the same
+--- option and replay when chosen.
 ---
 --- Progress is saved in the "story" state section: who is recruited, how
 --- many chapters each has finished, and the chapter being played. Event
@@ -70,7 +78,7 @@ schema.define("story", {
 }, { doc = "A protagonist and their chapters." })
 
 i18n.defaults({ fe = { story = {
-  title = "Chapters", chapter = "Chapter {number}", level = "Lv {level}", done = "Completed",
+  title = "Chapters", chapter = "Chapter {number}", level = "Lv {level}", done = "Completed", replay = "Replay",
   needs_member = "{name} must be in the party", needs_flag = "Not yet", needs_chapter = "Finish {name}'s chapter {number}",
   none = "(No chapters available)",
 } } })
@@ -195,16 +203,29 @@ function story.can_start(id)
 end
 
 --- Next chapters of recruited protagonists, in definition order, except
---- the one being played: {id, number, chapter, ok, reasons}.
+--- the one being played: {id, number, chapter, ok, reasons}. With
+--- `options.include_done`, each protagonist's finished chapters come
+--- first, as {id, number, chapter, ok = true, done = true, reasons = {}}.
+---@param options? {include_done?: boolean}
 ---@return table[]
-function story.available()
+function story.available(options)
   local out = {}
   local playing = story.current()
   for _, id in ipairs(story.order) do
-    local chapter = story.protagonists[id].chapters[story.chapter(id)]
-    if story.recruited(id) and chapter and id ~= playing then
-      local ok, reasons = story.can_start(id)
-      out[#out + 1] = { id = id, number = story.chapter(id), chapter = chapter, ok = ok, reasons = reasons }
+    if story.recruited(id) then
+      local chapters = story.protagonists[id].chapters
+      if options and options.include_done then
+        for number = 1, story.finished(id) do
+          if chapters[number] then
+            out[#out + 1] = { id = id, number = number, chapter = chapters[number], ok = true, done = true, reasons = {} }
+          end
+        end
+      end
+      local chapter = chapters[story.chapter(id)]
+      if chapter and id ~= playing then
+        local ok, reasons = story.can_start(id)
+        out[#out + 1] = { id = id, number = story.chapter(id), chapter = chapter, ok = ok, reasons = reasons }
+      end
     end
   end
   return out
@@ -240,6 +261,23 @@ function story.begin(id)
   if chapter.script then require(chapter.script)(chapter, id) end
 end
 
+--- Play a finished chapter again (call from a task): the field warps to
+--- the chapter's map and its script runs with (chapter, id, true), while
+--- the record stays as it is: no chapter becomes current and
+--- `story.finish` does not count it again. Raises for a chapter that is
+--- not finished.
+---@param id string
+---@param number integer
+function story.replay(id, number)
+  local spec = story.get(id)
+  local chapter = spec.chapters[number]
+  if not chapter or number > story.finished(id) then
+    error(id .. " has not finished chapter " .. tostring(number), 2)
+  end
+  if chapter.map then require("fe.field").warp(chapter.map, chapter.point or "start") end
+  if chapter.script then require(chapter.script)(chapter, id, true) end
+end
+
 --- Finish the chapter being played, or with `id` that protagonist's next
 --- chapter (one that ends while someone else's is played): it counts as
 --- finished, and when it was being played nothing is current. Returns the
@@ -263,17 +301,21 @@ function story.finish(id)
 end
 
 --- The chapter select screen (call from a task): lists `story.available()`
---- and returns the chosen protagonist id, or nil when cancelled.
----@return string?
-function story.open()
+--- (with `options.include_done`, finished chapters too, marked for replay)
+--- and returns the chosen protagonist id and chapter number, or nil when
+--- cancelled.
+---@param options? {include_done?: boolean}
+---@return string?, integer?
+function story.open(options)
   local ui = require("fe.ui")
   local entries = {}
-  for _, entry in ipairs(story.available()) do
+  for _, entry in ipairs(story.available(options)) do
     local spec = story.protagonists[entry.id]
     local label = spec.name .. "  " .. i18n.t("fe.story.chapter", { number = entry.number }) .. "  " .. entry.chapter.title
-    entries[#entries + 1] = { label = label, value = entry.id, enabled = entry.ok,
-      right = entry.chapter.level and i18n.t("fe.story.level", { level = entry.chapter.level }) or nil,
-      reasons = entry.reasons }
+    local right = entry.chapter.level and i18n.t("fe.story.level", { level = entry.chapter.level }) or nil
+    if entry.done then right = i18n.t("fe.story.replay") end
+    entries[#entries + 1] = { label = label, value = { id = entry.id, number = entry.number, done = entry.done },
+      enabled = entry.ok, right = right, reasons = entry.reasons }
   end
   if #entries == 0 then entries = { { label = i18n.t("fe.story.none"), enabled = false } } end
   local hovered = entries[1]
@@ -289,14 +331,23 @@ function story.open()
   end
   local _, chosen = ui.with_view(panel, ui.choose, entries, { title = i18n.t("fe.story.title"), width = 260,
     rows = math.min(8, #entries), cancel = true, on_change = function(item) hovered = item end })
-  return chosen and chosen.value
+  if not (chosen and chosen.value) then return nil end
+  return chosen.value.id, chosen.value.number
 end
 
---- Chapter select, then `begin` the chosen chapter. Returns the id or nil.
+--- Chapter select, then `begin` the chosen chapter, or `replay` it when it
+--- is a finished one (`options.include_done`). Returns the id or nil.
+--- From a menu page, give the page `closes = true` so the warp does not
+--- run under the menu's pause.
+---@param options? {include_done?: boolean}
 ---@return string?
-function story.select()
-  local id = story.open()
-  if id then story.begin(id) end
+function story.select(options)
+  local id, number = story.open(options)
+  if id and number <= story.finished(id) then
+    story.replay(id, number)
+  elseif id then
+    story.begin(id)
+  end
   return id
 end
 

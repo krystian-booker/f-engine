@@ -21,6 +21,7 @@
 --- module that exists but fails to load raises its error.
 local signal = require("fe.signal")
 local state = require("fe.state")
+local tablex = require("fe.tablex")
 
 local follower = {
   max = 1,
@@ -32,14 +33,38 @@ local follower = {
   left = signal.new(),
 }
 
+--- The file's values of the settings above, for `__reload`.
+follower.file_defaults = { max = follower.max, assist_module = follower.assist_module }
+
 local record = state.section("followers", function() return { list = {} } end)
+
+--- Adopt edited settings on hot reload (values the game changed at runtime
+--- are kept).
+function follower.__reload(live, fresh)
+  live.file_defaults = tablex.adopt(live, { max = fresh.max, assist_module = fresh.assist_module }, live.file_defaults)
+end
+
+-- Whether a module file exists, in the game folder or in lualib (a
+-- `fe.*` module), as a file or a folder's init.lua.
+local function module_exists(name)
+  local path = (name:gsub("%.", "/"))
+  local candidates = { path .. ".lua", path .. "/init.lua" }
+  if name:sub(1, 3) == "fe." then
+    local inside = path:sub(4)
+    candidates[#candidates + 1] = "@fe/" .. inside .. ".lua"
+    candidates[#candidates + 1] = "@fe/" .. inside .. "/init.lua"
+  end
+  for _, candidate in ipairs(candidates) do
+    if fe.fs.exists(candidate) then return true end
+  end
+  return false
+end
 
 local function battle_assist()
   local name = follower.assist_module
-  local ok, module = pcall(require, name)
-  if ok then return type(module) == "table" and module or nil end
-  if tostring(module) == "Module '" .. name .. "' not found in the game folder or lualib" then return nil end
-  error(module, 0)
+  if not module_exists(name) then return nil end
+  local module = require(name)
+  return type(module) == "table" and module or nil
 end
 
 local function index_of(id)
@@ -114,7 +139,8 @@ end
 ---@param spec? table
 ---@return table
 function follower.join_entity(entity, spec)
-  local settings = { name = entity:props().name, sprite = entity:sprite().animation }
+  local sprite = entity:sprite()
+  local settings = { name = entity:props().name, sprite = sprite and sprite.animation }
   for key, value in pairs(spec or {}) do settings[key] = value end
   local entry = follower.join(entity.id, settings)
   entity:destroy()

@@ -1,6 +1,8 @@
 #include "engine/editor/Editor.h"
 #include "engine/editor/EditorWidgets.h"
 #include "engine/runtime/Engine.h"
+#include "engine/script/LuaHost.h"
+#include "engine/world/World.h"
 #include <glm/gtc/type_ptr.hpp>
 #include <imgui.h>
 #include <imgui_stdlib.h>
@@ -88,7 +90,7 @@ void Editor::drawZones(World& w) {
     if (ImGui::Button("Add zone")) {
         const auto t = w.camera().target;
         auto type = defaultType("zones");
-        Zone zone{"zone" + std::to_string(zones.size() + 1),
+        Zone zone{uniqueId("zone", zones),
                   type.empty() ? "zone" : type,
                   {t.x - 2, t.z - 2},
                   {t.x + 2, t.z + 2},
@@ -128,7 +130,9 @@ void Editor::drawZones(World& w) {
     changed |= editLayer("Zone layer (-1 all)", z.layer, w.authored().grid, -1);
     ImGui::SeparatorText("Zone props");
     changed |= editProps(fieldsFor(z.type, {"zones", "entities"}), z.props);
-    if (changed) {
+    if (const auto problem = changed ? editProblem(zones, z, index) : std::string{}; !problem.empty()) {
+        status_ = problem;
+    } else if (changed) {
         order(z.min, z.max);
         edit(w, [&](MapData& m) {
             if (index < m.zones.size()) {
@@ -182,7 +186,7 @@ void Editor::drawLights(World& w) {
     }
     changed |= editVec3("Light position", l.position);
     changed |= editColor("Light colour", l.color);
-    changed |= ImGui::DragFloat("Radius", &l.radius, 0.1f, 0.1f, 100);
+    changed |= ImGui::DragFloat("Radius", &l.radius, 0.1f, 0.1f, 1000);
     changed |= ImGui::DragFloat("Intensity", &l.intensity, 0.05f, 0, 50);
     changed |= ImGui::DragFloat("Flicker", &l.flicker, 0.01f, 0, 1);
     changed |= ImGui::DragFloat("Flicker speed", &l.flickerSpeed, 0.1f, 0, 60);
@@ -432,7 +436,7 @@ void Editor::drawEnvironment(World& w) {
     changed |= ImGui::SliderFloat("Exposure", &p.exposure, 0.1f, 4);
     changed |= editChoice("Tonemap", p.tonemap, {"aces", "none"});
     changed |= ImGui::SliderFloat("Vignette strength", &p.vignetteStrength, 0, 2);
-    changed |= ImGui::SliderInt("Pixel scale", &p.pixelScale, 1, 8);
+    changed |= ImGui::DragFloat("Pixel scale", &p.pixelScale, 0.05f, 1, 8, "%.2f");
     changed |= ImGui::InputText("LUT", &p.lut);
     changed |= ImGui::InputText("LUT blend target", &p.lutBlendTarget);
     changed |= ImGui::SliderFloat("LUT blend", &p.lutBlend, 0, 1);

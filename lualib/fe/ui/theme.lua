@@ -79,8 +79,62 @@ function theme.use(name)
   theme.current = name
 end
 
---- Re-register the markup colours after a hot reload.
-function theme.__reload()
+-- The values a reload may adopt: every scalar field but `current`, and the
+-- entries of these tables.
+local adoptable_tables = { "gauges", "sounds" }
+
+local function snapshot(source)
+  local out = {}
+  for key, value in pairs(source) do
+    if type(value) ~= "function" and type(value) ~= "table" and key ~= "current" then out[key] = value end
+  end
+  for _, name in ipairs(adoptable_tables) do
+    out[name] = {}
+    for key, value in pairs(source[name]) do out[name][key] = value end
+  end
+  out.presets = {}
+  for name, values in pairs(source.presets) do
+    if name ~= "default" then
+      out.presets[name] = {}
+      for key, value in pairs(values) do out.presets[name][key] = value end
+    end
+  end
+  return out
+end
+
+--- The file's values, for `__reload`.
+theme.file_defaults = snapshot(theme)
+
+--- Adopt edited colours, skin, font and sounds on hot reload: a value the
+--- game changed at runtime (`theme.set`) is kept, every other one takes the
+--- file's. While a preset such as high contrast is in use, the adopted
+--- base values go into the saved "default" preset and the preset's own
+--- edited values apply at once, so the override stays on top.
+function theme.__reload(live, fresh)
+  local baseline = live.file_defaults
+  local fresh_values = snapshot(fresh)
+  local overridden = live.current ~= "default" and live.presets.default or nil
+  for key, value in pairs(fresh_values) do
+    if key ~= "presets" and key ~= "gauges" and key ~= "sounds" then
+      local target = overridden and overridden[key] ~= nil and overridden or live
+      if target[key] == baseline[key] then target[key] = value end
+    end
+  end
+  for _, name in ipairs(adoptable_tables) do
+    for key, value in pairs(fresh_values[name]) do
+      if live[name][key] == (baseline[name] or {})[key] then live[name][key] = value end
+    end
+  end
+  for name, values in pairs(fresh_values.presets) do
+    live.presets[name] = live.presets[name] or {}
+    for key, value in pairs(values) do
+      if live.presets[name][key] == ((baseline.presets or {})[name] or {})[key] then live.presets[name][key] = value end
+    end
+  end
+  live.file_defaults = fresh_values
+  if overridden then
+    for key, value in pairs(live.presets[live.current]) do live[key] = value end
+  end
   theme.apply()
 end
 

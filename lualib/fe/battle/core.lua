@@ -33,22 +33,29 @@
 ---     means the battle goes on (the default checks are skipped)
 ---   * usable(battle, b, skill) -> false vetoes a skill in any layer
 ---     (Battle:usable; menus, AI and Battle:perform respect it)
+---   * skip_turn(battle, b) -> true in any layer makes the battler's next
+---     turn upkeep-only (Battle:skips_turn; every scheduler and the tactical
+---     turn honour it; the ambush/pre-emptive opening uses it)
 ---   * single-answer hooks use the most specific layer defining them:
----     player_controller(battle, b) -> action (default: presenter:command),
----     escape_chance(battle, b) -> 0..1, rewards(battle) -> table,
----     reaction(battle, b, action, results) -> action|nil (a counter or other
----     response by a battler the action affected; reactions do not react;
----     fe.battle.reactions has ready-made ones), inventory(battle) -> store
----     (see Battle.settings.inventory), actions[kind](battle, action) ->
----     results (custom commands)
+---     player_controller(battle, b) -> action (default: presenter:command;
+---     the tactical kit's controller returns a plan, see
+---     fe.battle.tactical.rules), escape_chance(battle, b) -> 0..1,
+---     rewards(battle) -> table, reaction(battle, b, action, results) ->
+---     action|nil (a counter or other response by a battler the action
+---     affected; reactions do not react; fe.battle.reactions has ready-made
+---     ones), inventory(battle) -> store (see Battle.settings.inventory),
+---     actions[kind](battle, action) -> results (custom commands)
 ---   * effect_hooks = {{phase, fn, priority?}, ...} become per-battle
 ---     fe.effects hooks (active only while this battle resolves effects)
 ---
 --- Events presented (presenter methods, also emitted on battle.events):
---- start, round, order, turn, action, results, state_tick, states_expired,
---- knocked_out, revived, battler_added, battler_removed, dismissed,
---- reaction, defend, flee, escaped, escape_failed, finish (plus kit- and
---- game-specific ones).
+--- start, opening (an ambush or pre-emptive strike), action, results,
+--- state_tick, states_expired, knocked_out, revived, battler_added,
+--- battler_removed, dismissed, reaction, defend, flee, escaped,
+--- escape_failed, exp (experience gained per action, see
+--- settings.exp_per_action) and finish come from the core; schedulers add
+--- round and order (round_order, initiative) and turn (initiative; the
+--- tactical kit presents turns through it); kits and games add their own.
 ---
 --- Line-ups change mid-battle three ways: `battle:add` (reinforcements),
 --- `battle:summon` (temporary battlers that leave by themselves) and
@@ -78,9 +85,39 @@ Battle.settings = {
   --- {has(id, count?), remove(id, count) -> boolean, add(id, count), add_money(amount), list?(filter),
   --- settings?: {currency}}. nil: battles have no items (an `inventory` rule hook can still supply one).
   inventory = nil,
-  --- Receiver of experience and job points: {gain_exp(amount) -> levels, alive() -> actors}. nil: none.
+  --- Receiver of experience and job points: {gain_exp(amount, actors) -> levels,
+  --- gain_jp?(amount, actors, secondary)}; `actors` are the party members who
+  --- fought (Battle:participants). nil: no experience.
   party = nil,
+  --- Job points go to the secondary class as well as the primary one.
+  jp_secondary = true,
+  --- fn(battle, action, results) -> experience the user gains for an action
+  --- it performed (Triangle Strategy). Presented as "exp" {battler, amount,
+  --- gains} after the after_action hooks. nil: experience only at victory.
+  exp_per_action = nil,
+  --- Pacing multiplier for presenters (timelines and waits divide by it);
+  --- nil reads the player's `battle_speed` setting (fe.config). See Battle.speed.
+  speed = nil,
+  --- Scheduler constants (the schedulers' own `settings` override them):
+  --- ATB gauges fill at (speed + rate_offset) / rate_divisor per second and
+  --- start between 0 and start_fill full; initiative CT starts within
+  --- start_fill of the threshold; round order multiplies a skill's
+  --- `priority` by priority_scale before adding the speed key.
+  atb = { rate_offset = 20, rate_divisor = 100, start_fill = 0.3 },
+  initiative = { start_fill = 0.25 },
+  priority_scale = 10000,
 }
+
+--- The battle's pacing multiplier: settings.speed, else the player's
+--- battle_speed setting, else 1. Never below 0.1.
+function Battle.speed()
+  local speed = Battle.settings.speed
+  if speed == nil then
+    local ok, config = pcall(require, "fe.config")
+    speed = ok and config.get("battle_speed") or 1
+  end
+  return math.max(0.1, tonumber(speed) or 1)
+end
 
 --- Damage to a guarding battler is halved (games can remove this hook).
 effects.hook("modify", function(ctx)
@@ -91,7 +128,30 @@ end, 50, "fe.battle.guard")
 
 local phases = { "before", "hit", "calculate", "modify", "apply", "after" }
 
----@param options {rules?: table, layers?: table[], scheduler: table, presenter?: table, random?: RandomStream, troop?: string, escapable?: boolean}
+--- The side an opening disadvantages: an ambush catches the party, a
+--- pre-emptive strike the enemy.
+local opening_sides = { ambush = "party", preemptive = "enemy" }
+
+--- The rule layer behind `opening`: every battler of the disadvantaged
+--- side that is present when the battle starts skips its first turn
+--- (upkeep only), whatever the scheduler. Presents "opening" {kind, side}
+--- right after "start".
+function Battle.opening_rules(kind)
+  local side = opening_sides[kind]
+  if not side then error("unknown opening '" .. tostring(kind) .. "' (ambush or preemptive)", 2) end
+  return {
+    on_start = function(battle)
+      for _, b in ipairs(battle.battlers) do
+        if b.side == side and b:takes_turns() then b.data.opening_skip = true end
+      end
+      battle:present("opening", { kind = kind, side = side })
+    end,
+    skip_turn = function(_, b) return b.data.opening_skip == true end,
+    on_turn_end = function(_, b) b.data.opening_skip = nil end,
+  }
+end
+
+---@param options {rules?: table, layers?: table[], scheduler: table, presenter?: table, random?: RandomStream, troop?: string, escapable?: boolean, opening?: "ambush"|"preemptive"}
 function Battle:init(options)
   self.rules = options.rules or {}
   self.rule_layers = {}
@@ -104,10 +164,13 @@ function Battle:init(options)
   self.random = options.random or fe.random.new()
   self.battlers = {}
   self.reserve = {} -- back-row battlers waiting outside the battle (see Battle:swap)
+  self.fought = {}  -- party actors that took part, in order of arrival (Battle:participants)
   self.events = signal.new() -- (name, payload) for every presented event
   self.round = 0
   self.escapable = options.escapable ~= false
   self.troop = options.troop and data.get("troops", options.troop)
+  self.opening = options.opening
+  if self.opening then self:add_rules(Battle.opening_rules(self.opening)) end
   self.log = {}
   self.data = {}
 end
@@ -164,12 +227,20 @@ function Battle:effect_hook(phase, fn, priority, id)
   return effects.insert_hook(list, fn, priority, id)
 end
 
+-- Remember a party actor as having fought (rewards go to them).
+local function fought(self, battler)
+  if battler.actor and battler:is_party() and not tablex.contains(self.fought, battler.actor) then
+    self.fought[#self.fought + 1] = battler.actor
+  end
+end
+
 ---@param battler Battler|table spec for Battler()
 function Battle:add(battler)
   if not Battler.is(battler, Battler) then battler = Battler(battler) end
   self.battlers[#self.battlers + 1] = battler
   battler.battle = self
   battler.data.down = not battler:alive() or nil
+  fought(self, battler)
   if self.started and not self.finished then
     battler:reset_battle_resources()
     self:notify("on_battler_added", battler)
@@ -178,15 +249,25 @@ function Battle:add(battler)
   return battler
 end
 
---- Take a battler out of the battle (deployment changes, retreats).
+--- Take a battler out of the battle (deployment changes, retreats). One
+--- removed before the battle starts did not take part.
 function Battle:remove(battler)
   if not tablex.remove_value(self.battlers, battler) then return false end
   if self.started and not self.finished then
     self:notify("on_battler_removed", battler)
     self:present("battler_removed", battler)
+  elseif not self.started and battler.actor then
+    tablex.remove_value(self.fought, battler.actor)
   end
   battler.battle = nil
   return true
+end
+
+--- The party actors that fought: active members and reserves that took
+--- part (swapped in, deployed, added mid-battle), in order of arrival.
+--- Rewards go to them; everyone else in the roster counts as benched.
+function Battle:participants()
+  return tablex.copy(self.fought)
 end
 
 --- Add a temporary battler mid-battle: a summon, companion or guest. It is
@@ -244,6 +325,7 @@ function Battle:swap(front, back)
   front.position, back.position = back.position, front.position
   back.battle, front.battle = self, nil
   back.data.down = not back:alive() or nil
+  fought(self, back)
   if self.current == front then self.current = back end
   if self.scheduler and self.scheduler.replace then self.scheduler.replace(self, front, back) end
   if self.started and not self.finished then
@@ -351,13 +433,36 @@ function Battle:targets_for(user, kind)
 end
 
 --- Whether `battler` may use `skill` now: it can pay the cost and no rule
---- layer's `usable(battle, battler, skill)` hook answers false.
+--- layer's `usable(battle, battler, skill)` hook answers false. When not,
+--- the second value says why: "unaffordable" or "vetoed".
+---@return boolean, string?
 function Battle:usable(battler, skill)
-  if not battler:can_pay(skill.cost) then return false end
+  if not battler:can_pay(skill.cost) then return false, "unaffordable" end
   for _, layer in ipairs(self.rule_layers) do
-    if layer.usable and layer.usable(self, battler, skill) == false then return false end
+    if layer.usable and layer.usable(self, battler, skill) == false then return false, "vetoed" end
   end
   return true
+end
+
+--- Whether a rule layer's `skip_turn(battle, battler)` hook makes the
+--- battler's coming turn upkeep-only (no decision, no action).
+function Battle:skips_turn(battler)
+  for _, layer in ipairs(self.rule_layers) do
+    if layer.skip_turn and layer.skip_turn(self, battler) == true then return true end
+  end
+  return false
+end
+
+--- Targets for a skill whose chosen targets are all gone by the time it
+--- resolves, keeping the target kind: every living opponent or ally for
+--- the `all_*` and `everyone` kinds, the user for `self`, else one random
+--- candidate (the only case that draws from the battle's random stream).
+function Battle:retarget(user, kind)
+  if kind == "self" then return { user } end
+  local pool = self:targets_for(user, kind)
+  if #pool == 0 then return {} end
+  if kind == "all_enemies" or kind == "all_allies" or kind == "everyone" then return pool end
+  return { pool[self.random:int(1, #pool)] }
 end
 
 --- Ask the battler's controller for an action (player input or AI).
@@ -387,16 +492,19 @@ local function source_of(action)
   end
 end
 
--- Pay for an action; false when it cannot be paid or a rule layer vetoes
--- the skill (nothing changes).
+-- Pay for an action; false and the reason ("no_inventory", "unaffordable"
+-- or "vetoed") when it cannot be paid or a rule layer vetoes the skill
+-- (nothing changes).
 local function pay(battle, user, action, source)
   if action.kind == "item" then
     local inventory = battle:inventory()
-    if not inventory or not inventory.has(action.item) then return false end
+    if not inventory then return false, "no_inventory" end
+    if not inventory.has(action.item) then return false, "unaffordable" end
     if source.consume then inventory.remove(action.item, 1) end
     return true
   end
-  if not battle:usable(user, source) then return false end
+  local ok, reason = battle:usable(user, source)
+  if not ok then return false, reason end
   user:pay(source.cost)
   return true
 end
@@ -443,27 +551,30 @@ end
 ---   {kind = "skill", user = b, skill = id, targets = {...}, hits?, multiplier?}
 ---   {kind = "item", user = b, item = id, targets = {...}}
 ---   {kind = "defend" | "flee" | <custom>, user = b}
---- Returns nil (and changes nothing) when the user cannot act, a
---- before_action hook cancels it, or its cost cannot be paid (or a
---- `usable` hook vetoes the skill); otherwise on_perform hooks run and it
---- returns the results, with `action.performed = true`.
----@return table[]|nil results
+--- Returns nil (and changes nothing) and the reason when the user cannot
+--- act ("cannot_act"), a before_action hook cancels it ("cancelled"), the
+--- battle has no item store ("no_inventory"), its cost cannot be paid
+--- ("unaffordable") or a `usable` hook vetoes the skill ("vetoed");
+--- otherwise on_perform hooks run and it returns the results, with
+--- `action.performed = true`.
+---@return table[]|nil results, string? refusal
 function Battle:perform(action)
   local user = action.user
-  if not user:can_act() then return nil end
+  if not user:can_act() then return nil, "cannot_act" end
   action.kind = action.kind or (action.item and "item" or "skill")
   self:notify("before_action", action)
-  if action.cancelled then return nil end
+  if action.cancelled then return nil, "cancelled" end
   local own_turn = self.current == user
-  local states_before = own_turn and tablex.copy(user.state_turns)
+  local serial_before = own_turn and (user.state_serial or 0)
   if own_turn then user.acting = true end
   local results
   local custom = self:action_handler(action.kind)
   local source = not custom and action.kind ~= "defend" and action.kind ~= "flee" and source_of(action)
   if source then
-    if not pay(self, user, action, source) then
+    local paid, reason = pay(self, user, action, source)
+    if not paid then
       user.acting = nil
-      return nil
+      return nil, reason
     end
     action.source = source
   end
@@ -493,8 +604,7 @@ function Battle:perform(action)
         return t:alive() or source.target == "dead_ally"
       end)
       if #targets == 0 and source.target ~= "dead_ally" and not action.cell then
-        local pool = self:targets_for(user, source.target)
-        targets = #pool > 0 and { pool[self.random:int(1, #pool)] } or {}
+        targets = self:retarget(user, source.target)
       end
       action.targets = targets
       self:present("action", action)
@@ -506,15 +616,26 @@ function Battle:perform(action)
   action.performed = true
   if own_turn then
     user.acting = nil
+    -- States the user gained during its own action (by the add_state
+    -- serial, so a state re-applied with the same duration counts too) are
+    -- not counted down at the end of this turn.
     local fresh = user.data.fresh_states or {}
-    for id, turns in pairs(user.state_turns) do
-      if states_before[id] ~= turns then fresh[id] = true end
+    for id, serial in pairs(user.state_added or {}) do
+      if serial > serial_before and user.state_turns[id] ~= nil then fresh[id] = true end
     end
     user.data.fresh_states = fresh
   end
   self:settle()
   self.log[#self.log + 1] = action
   self:notify("after_action", action, results)
+  local per_action = Battle.settings.exp_per_action
+  if per_action and user.actor and user:is_party() then
+    local amount = per_action(self, action, results)
+    if amount and amount > 0 then
+      local gains = user.actor:gain_exp(amount)
+      self:present("exp", { battler = user, amount = amount, gains = gains })
+    end
+  end
   reactions(self, action, results)
   return results
 end
@@ -556,7 +677,8 @@ end
 
 --- A whole turn for one battler: upkeep, decision, actions, upkeep. Pass
 --- `action = false` for a turn without an action (upkeep only); nil asks
---- the battler's controller. A battler with several actions per turn
+--- the battler's controller. A turn a rule layer skips (Battle:skips_turn)
+--- is upkeep only too. A battler with several actions per turn
 --- (Battler:actions_per_turn) uses `action` first and decides the others
 --- one at a time, while it can still act and the battle goes on. When the
 --- controller swaps the battler for its back-row partner, the partner acts
@@ -565,7 +687,7 @@ end
 function Battle:turn(battler, action)
   self:turn_start(battler)
   local results, taken
-  if action ~= false then
+  if action ~= false and not self:skips_turn(battler) then
     for i = 1, battler:actions_per_turn(self) do
       local actor = self.current or battler
       if not actor:can_act() or actor.battle ~= self or self:outcome() then break end
@@ -614,15 +736,23 @@ function Battle:default_rewards()
   return rewards
 end
 
---- Grant rewards through Battle.settings.party (experience, job points)
---- and the battle's inventory (money, items); returns a summary for the
---- victory screen.
+--- Grant rewards through Battle.settings.party (experience and job points
+--- to the party members who fought, Battle:participants; the party gives
+--- the rest of the roster its reserve share) and the battle's inventory
+--- (money, items); returns a summary for the victory screen.
 function Battle:grant(rewards)
   local party, inventory = Battle.settings.party, self:inventory()
   if party then
-    rewards.levels = party.gain_exp(rewards.exp)
+    local fighters = self:participants()
+    rewards.levels = party.gain_exp(rewards.exp, fighters)
     if rewards.jp > 0 then
-      for _, actor in ipairs(party.alive()) do actor:gain_jp(rewards.jp) end
+      if party.gain_jp then
+        party.gain_jp(rewards.jp, fighters, Battle.settings.jp_secondary)
+      else
+        for _, actor in ipairs(fighters) do
+          if actor:alive() then actor:gain_jp(rewards.jp) end
+        end
+      end
     end
   end
   if inventory then

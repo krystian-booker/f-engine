@@ -35,5 +35,10 @@
   {"id": "starfall", "name": "Starfall", "type": "divine", "cost": {"lp": 2}, "target": "all_enemies",
    "effects": [{"type": "damage", "formula": "fixed", "power": 30, "variance": 0}]},
   {"id": "last_stand", "name": "Last Stand", "type": "quietus", "tags": ["quietus"], "cost": {"tp": 2},
-   "effects": [{"type": "damage", "formula": "fixed", "power": 5, "variance": 0}]}
+   "effects": [{"type": "damage", "formula": "fixed", "power": 5, "variance": 0}]},
+  {"id": "ember_shot", "name": "Ember Shot", "type": "art", "tags": ["follow_up"], "element": "fire",
+   "range": {"shape": "diamond", "min": 1, "max": 2},
+   "effects": [{"type": "damage", "formula": "fixed", "power": 1, "variance": 0}]},
+  {"id": "hex", "name": "Hex", "type": "magic", "always_hit": true,
+   "effects": [{"type": "add_state", "state": "sleep", "chance": 1}]}
 ]

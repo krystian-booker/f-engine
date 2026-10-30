@@ -35,12 +35,22 @@ void main() {
         color.r = texture2D(s_scene, uv + shift).r;
         color.b = texture2D(s_scene, uv - shift).b;
     }
+    // The output is premultiplied (PremultipliedBlend in RenderCommon.h):
+    // the scene's colour times its coverage, plus the light that reaches
+    // past it. Where a world without a sky is transparent, bloom and a
+    // blurred foreground then land on the worlds drawn before it instead
+    // of being scaled away with the coverage.
+    float coverage = scene.a;
     if (u_post[1].x > 0.5) {
         float coc = circleOfConfusion(linearDepth(texture2D(s_depth, uv).r), uv) * u_post[2].w;
         vec4 far = texture2D(s_far, uv);
         vec4 near = texture2D(s_near, uv);
         color = mix(color, far.rgb, far.a * smoothstep(0.5, 2.0, coc));
-        color = mix(color, near.rgb, near.a);
+        // The near field is a layer over the covered scene.
+        color = color * scene.a * (1.0 - near.a) + near.rgb * near.a;
+        coverage = near.a + scene.a * (1.0 - near.a);
+    } else {
+        color *= scene.a;
     }
     if (u_post[1].w > 0.5) color *= texture2D(s_ao, uv).r;
     color += texture2D(s_bloom, uv).rgb * u_post[0].x;
@@ -53,5 +63,5 @@ void main() {
     color = mix(color, color * u_post[3].rgb, u_post[3].a);
     vec2 centred = v_texcoord0 - 0.5;
     color *= 1.0 - dot(centred, centred) * u_post[2].x * u_post[1].y;
-    gl_FragColor = vec4(color, scene.a);
+    gl_FragColor = vec4(color, coverage);
 }

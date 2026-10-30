@@ -37,6 +37,16 @@ local ui = {
   toast_settings = { duration = 2.5, visible = 3, width = 150, fade = 0.2, anchor = "top-right" },
 }
 
+--- The file's settings, for `__reload`.
+ui.file_defaults = { toast_settings = tablex.deep_copy(ui.toast_settings) }
+
+--- Adopt edited toast settings on hot reload (values the game changed at
+--- runtime are kept).
+function ui.__reload(live, fresh)
+  live.file_defaults.toast_settings = tablex.adopt(live.toast_settings, fresh.toast_settings,
+    live.file_defaults.toast_settings)
+end
+
 --- Canvas size.
 function ui.size()
   return fe.canvas.size()
@@ -403,7 +413,7 @@ function Menu:init(options)
   self.anchor = options.anchor or "center"
   self.x, self.y = options.x, options.y
   self.opened = 0
-  self.blocks_update = true
+  self.blocks_update = options.blocks_update ~= false
 end
 
 function Menu:height()
@@ -435,7 +445,8 @@ function Menu:draw()
 end
 
 --- Show a menu and wait for a choice. Returns the item index and item, or
---- nil when cancelled (if `cancel` is allowed). Call from a task.
+--- nil when cancelled (if `cancel` is allowed). Call from a task. The menu
+--- blocks the scenes under it unless `blocks_update = false`.
 ---@param items table[]|string[]
 ---@param options? table Menu options plus `cancel = true|integer`
 function ui.choose(items, options)

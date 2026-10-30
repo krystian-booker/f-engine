@@ -14,6 +14,11 @@ constexpr std::uint32_t LinearClamp = BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAM
 constexpr std::uint64_t AlphaBlend =
     BGFX_STATE_BLEND_FUNC_SEPARATE(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA,
                                    BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA);
+// Colour already multiplied by its alpha: light added past the coverage
+// (bloom, a blurred foreground) lands on what is underneath instead of being
+// scaled away. The post pass composites a world this way.
+constexpr std::uint64_t PremultipliedBlend =
+    BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA);
 constexpr std::uint64_t OpaqueState =
     BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS;
 // Blend function of a blended draw. Scene alpha is coverage: additive and
@@ -46,7 +51,7 @@ struct SpriteVertex {
     glm::vec4 tint{1};
     std::uint32_t flash = 0, outline = 0;  // rgba8; a silhouette quad carries its colour as the outline
     glm::vec4 probe{0};                    // light probe position, unlit flag
-    glm::vec2 params{0};                   // palette row v, unused
+    glm::vec2 params{0};                   // palette row v, distortion strength (distort quads)
     std::uint32_t normal = 0, tangent = 0; // packDirection: shading normal; image +x in world space
 };
 const bgfx::VertexLayout& spriteLayout();
@@ -60,15 +65,20 @@ struct Frustum {
     [[nodiscard]] bool visible(glm::vec3 min, glm::vec3 max) const;
 };
 
+// Per-draw parameters of a game sprite or mesh shader (u_params, vec4[4]),
+// set per entity from a script; all zero unless set.
+using ShaderParams = std::array<glm::vec4, 4>;
+
 // Every uniform handle the scene, post and screen passes use, created once.
 struct Uniforms {
     Uniforms();
     Uniform env, cascades, lightShadows, material, normalMatrix, water, sprite, overlay, sky, post, present,
-        info;
+        info, params;
     Uniform albedo, normal, shadow, palette, lights, lightGrid, lightShadow, emissive, spriteNormal,
         spriteEmissive, sceneDepth, sceneColor, panorama, scene, bloom, lut, lut2, depth, frame;
     static constexpr std::uint16_t EnvCount = 10, CascadeCount = 3, MaterialCount = 3, WaterCount = 5,
-                                   SpriteCount = 2, SkyCount = 5, PostCount = 4, PresentCount = 6;
+                                   SpriteCount = 2, SkyCount = 5, PostCount = 4, PresentCount = 7,
+                                   ParamsCount = 4;
 };
 
 // The bgfx views one world's scene uses, in execution order (PostPass takes its own).

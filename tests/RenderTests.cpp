@@ -195,6 +195,20 @@ TEST_CASE("mip levels halve each side and average colour in linear light") {
     const auto last = Image::solid(1, 2, 3).halved(true);
     CHECK(last.width == 1);
     CHECK(last.rgba == Image::solid(1, 2, 3).rgba);
+    // Colour is weighted by alpha: a transparent black neighbour does not
+    // darken a cutout's edge, and alpha averages as coverage.
+    Image edge;
+    edge.width = edge.height = 2;
+    edge.rgba = {200, 100, 50, 255, 0, 0, 0, 0, 200, 100, 50, 255, 0, 0, 0, 0};
+    const auto half = edge.halved(false);
+    CHECK(half.rgba[0] == 200);
+    CHECK(half.rgba[1] == 100);
+    CHECK(half.rgba[3] == 128);
+    Image clear;
+    clear.width = clear.height = 2;
+    clear.rgba.assign(16, 0);
+    clear.rgba[0] = 90;
+    CHECK(clear.halved(false).rgba[0] == 23); // nothing covered: a plain average
 }
 
 TEST_CASE("glTF samplers, scene membership and spot lights are imported") {
@@ -290,6 +304,23 @@ TEST_CASE("blend modes parse by name, accept the boolean alias and round-trip on
     CHECK(emitter.blend == BlendMode::Multiply);
     CHECK(EmitterSettings::fromJson(emitter.toJson()).blend == BlendMode::Multiply);
     CHECK(EmitterSettings::fromJson(Json::object()).blend == BlendMode::Alpha);
+}
+
+TEST_CASE("water surfaces draw first in the alpha pass, before every other blended draw") {
+    std::vector<TransparentKey> draws = {{BlendMode::Alpha, 2}, {BlendMode::Alpha, 5, true},
+                                         {BlendMode::Additive, 9}, {BlendMode::Alpha, 30},
+                                         {BlendMode::Alpha, 12, true}};
+    std::stable_sort(draws.begin(), draws.end(), drawsBefore);
+    // Both water surfaces (back to front among themselves), then the sprites
+    // behind and in front of them, then the additive pass.
+    CHECK(draws[0].water);
+    CHECK(draws[0].distance == doctest::Approx(12));
+    CHECK(draws[1].water);
+    CHECK(draws[1].distance == doctest::Approx(5));
+    CHECK(draws[2].distance == doctest::Approx(30));
+    CHECK(draws[3].distance == doctest::Approx(2));
+    CHECK(draws[4].blend == BlendMode::Additive);
+    CHECK_FALSE(drawsBefore({BlendMode::Alpha, 1, true}, {BlendMode::Alpha, 1, true}));
 }
 
 TEST_CASE("blended draws sort by pass, then back to front") {
@@ -562,10 +593,16 @@ TEST_CASE("map chunks keep only their own vertices, each once, in first-use orde
 
 TEST_CASE("instanced draws group equal parts in first-use order") {
     const std::vector<std::pair<int, int>> keys = {{3, 0}, {1, 0}, {3, 0}, {3, 1}, {1, 0}, {2, 0}};
-    std::vector<int> order;
-    groupByFirstUse(keys, order);
+    std::vector<int> order, rank;
+    groupByFirstUse(keys, order, rank);
     CHECK(order == std::vector<int>{0, 2, 1, 4, 3, 5});
-    groupByFirstUse(std::vector<int>{}, order);
+    // Warm buffers: a later call of the same size allocates nothing.
+    const auto* orderData = order.data();
+    const auto* rankData = rank.data();
+    groupByFirstUse(keys, order, rank);
+    CHECK(order.data() == orderData);
+    CHECK(rank.data() == rankData);
+    groupByFirstUse(std::vector<int>{}, order, rank);
     CHECK(order.empty());
 }
 
@@ -614,9 +651,217 @@ TEST_CASE("glTF materials and nodes name game shaders; invalid names keep the en
     CHECK(model.parts[0].material.shader == "glint");
     CHECK(model.parts[1].material.shader.empty());
     CHECK(model.parts[2].material.shader == "rune_glow");
+    CHECK(model.parts[2].material.alphaCutoff == 0); // OPAQUE materials are not alpha-cut
+    CHECK_FALSE(model.parts[2].material.transparent);
     CHECK(isShaderName("sepia-2_b"));
     CHECK_FALSE(isShaderName(""));
     CHECK_FALSE(isShaderName("../x"));
     CHECK_FALSE(isShaderName(std::string(65, 'a')));
     std::filesystem::remove_all(folder);
+}
+
+TEST_CASE("mirrored glTF matrix nodes import mirrored, and image URIs stay in the model's folder") {
+    const auto folder = std::filesystem::temp_directory_path() / "fengine-render-mirror";
+    std::filesystem::remove_all(folder);
+    std::filesystem::create_directories(folder);
+    std::ofstream(folder / "mirror.gltf") << R"({"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0]}],
+      "nodes": [{"matrix": [-2, 0, 0, 0,  0, 3, 0, 0,  0, 0, 1, 0,  4, 5, 6, 1]}]})";
+    const auto model = Model::load(folder / "mirror.gltf");
+    REQUIRE(model.nodes.size() == 1);
+    const auto& node = model.nodes[0];
+    CHECK(node.translation == glm::vec3(4, 5, 6));
+    CHECK(node.scale.x == doctest::Approx(-2)); // the mirroring survives as a negative scale
+    CHECK(node.scale.y == doctest::Approx(3));
+    CHECK(std::abs(node.rotation.w) == doctest::Approx(1).epsilon(1e-5)); // a proper rotation (none)
+    REQUIRE(model.restPose.size() == 1);
+    CHECK(model.restPose[0][0].x == doctest::Approx(-2));
+    CHECK(model.restPose[0][3].x == doctest::Approx(4));
+
+    std::ofstream(folder / "escape.gltf") << R"({"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0]}],
+      "nodes": [{"mesh": 0}],
+      "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "material": 0}]}],
+      "materials": [{"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}],
+      "textures": [{"source": 0}], "images": [{"uri": "../outside.png"}],
+      "buffers": [{"byteLength": 36, "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAAAAAAIA/"}],
+      "bufferViews": [{"buffer": 0, "byteLength": 36}],
+      "accessors": [{"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3", "min": [0, 0, 0], "max": [1, 0, 1]}]})";
+    CHECK_THROWS_WITH(static_cast<void>(Model::load(folder / "escape.gltf")),
+                      doctest::Contains("outside the model's folder"));
+    std::filesystem::remove_all(folder);
+}
+
+TEST_CASE("the renderer's clip-resolved sprite placement matches placeSprite") {
+    const auto animation = SpriteAnimation::fromJson(Json::parse(R"({
+      "atlas": "a.png", "pixels_per_unit": 16, "pivot": [0.5, 1],
+      "clips": {"idle": {"directions": [[{"rect": [0, 0, 16, 32]}]]},
+                "walk": {"directions": [[{"rect": [0, 0, 16, 32], "duration": 0.1}, {"rect": [16, 0, 16, 32], "duration": 0.1}],
+                                        [{"rect": [0, 32, 16, 32]}], [{"rect": [0, 64, 16, 32]}], [{"rect": [0, 96, 16, 32]}]]}}})"));
+    Camera camera;
+    camera.yaw = 37;
+    camera.snap();
+    const glm::vec3 feet(3.2f, 0.5f, 7.1f);
+    for (const auto mode : {SpriteMode::Upright, SpriteMode::Facing, SpriteMode::Flat}) {
+        for (const auto* clip : {"walk", "idle", "missing"}) {
+            for (const auto facing : {glm::vec2(0, 1), glm::vec2(-1, 0), glm::vec2(0.7f, -0.7f)}) {
+                Sprite s;
+                s.clip = clip;
+                s.mode = mode;
+                s.time = 0.15;
+                s.previousTime = 0.1;
+                s.scale = 1.5f;
+                s.pixelOffset = {2, -3};
+                s.depthBias = 0.2f;
+                const auto expected = placeSprite(s, animation, feet, facing, camera, 0.5, 32);
+                const auto got =
+                    placeSpriteClip(s, animation, animation.clip(clip), feet, facing, camera, 0.5, 32);
+                CHECK(got.frame == expected.frame);
+                CHECK(got.anchor == expected.anchor);
+                CHECK(got.right == expected.right);
+                CHECK(got.up == expected.up);
+                CHECK(got.size == expected.size);
+                CHECK(got.lying == expected.lying);
+            }
+        }
+    }
+    CHECK(clipDirection(4, {0, 1}, 0) == animation.direction("walk", {0, 1}, 0));
+    CHECK(clipDirection(4, {1, 0}, 90) == animation.direction("walk", {1, 0}, 90));
+    CHECK(clipDirection(4, {-1, 0.2f}, 200) == animation.direction("walk", {-1, 0.2f}, 200));
+    CHECK(clipDirection(1, {-1, 0.2f}, 200) == 0);
+}
+
+TEST_CASE("model poses copy the rest pose and animate without allocating") {
+    Model model;
+    model.nodes.resize(2);
+    model.nodes[0].translation = {1, 0, 0};
+    model.nodes[1].parent = 0;
+    model.nodes[1].translation = {0, 2, 0};
+    model.nodes[1].scale = {2, 2, 2};
+    model.order = {0, 1};
+    ModelAnimation spin;
+    spin.name = "rise";
+    AnimationChannel channel;
+    channel.node = 1;
+    channel.target = AnimationChannel::Target::Translation;
+    channel.times = {0, 1};
+    channel.values = {{0, 2, 0, 0}, {0, 4, 0, 0}};
+    spin.channels.push_back(channel);
+    spin.duration = 1;
+    model.animations.push_back(spin);
+    model.bakeRestPose();
+    REQUIRE(model.restPose.size() == 2);
+    CHECK(glm::vec3(model.restPose[1][3]) == glm::vec3(1, 2, 0));
+    CHECK(model.restPose[1][0].x == doctest::Approx(2));
+    std::vector<glm::mat4> pose;
+    model.pose(-1, 0, pose);
+    CHECK(pose == model.restPose);
+    model.pose(0, 0.5f, pose);
+    const auto* data = pose.data();
+    CHECK(glm::vec3(pose[1][3]) == glm::vec3(1, 3, 0)); // half way up, under the parent's offset
+    CHECK(glm::vec3(pose[0][3]) == glm::vec3(1, 0, 0));
+    model.pose(0, 1.0f, pose);
+    CHECK(pose.data() == data); // warm: nothing reallocated
+    CHECK(glm::vec3(pose[1][3]) == glm::vec3(1, 4, 0));
+    CHECK(model.animation("rise") == 0);
+    CHECK(model.animation("none") == -1);
+}
+
+TEST_CASE("shadow selection and views into caller buffers match the returning forms") {
+    const std::vector<LightShadowCandidate> candidates = {{5, true}, {1, false}, {9, true}, {4, false}};
+    std::vector<LightShadowSlot> slots;
+    std::vector<std::size_t> order;
+    chooseShadowLights(candidates, slots, order);
+    const auto expected = chooseShadowLights(candidates);
+    REQUIRE(slots.size() == expected.size());
+    for (std::size_t i = 0; i < slots.size(); ++i) {
+        CHECK(slots[i].light == expected[i].light);
+        CHECK(slots[i].firstTile == expected[i].firstTile);
+    }
+    LightSettings point;
+    point.position = {0, 1, 0};
+    point.radius = 6;
+    std::vector<LightShadowView> views;
+    lightShadowViews(point, 2, false, true, views);
+    const auto returned = lightShadowViews(point, 2, false, true);
+    REQUIRE(views.size() == returned.size());
+    CHECK(views[3].sample == returned[3].sample);
+}
+
+TEST_CASE("shadow cascades fit an orthographic view's box slices") {
+    auto camera = orbitCamera({10, 0, 10});
+    camera.orthographic = true;
+    camera.orthoHeight = 9;
+    ShadowSettings settings;
+    settings.sunDirection = {-0.6f, -1, -0.4f};
+    settings.sceneMax = {20, 8, 20};
+    const auto cascades = fitShadowCascades(camera, settings);
+    const auto splits = cascadeSplits(camera);
+    for (std::size_t c = 0; c < cascades.size(); ++c) {
+        // The slice's corners (the same box at every depth) map inside the tile.
+        for (const float d : {splits[c], splits[c + 1]}) {
+            for (const float sx : {-1.0f, 1.0f}) {
+                for (const float sy : {-1.0f, 1.0f}) {
+                    const auto corner = camera.position + camera.forward * d +
+                                        camera.right * (sx * 4.5f * camera.aspect) + camera.up * (sy * 4.5f);
+                    const auto p = cascades[c].sample * glm::vec4(corner, 1);
+                    CHECK(p.x >= -1e-3f);
+                    CHECK(p.x <= 1 + 1e-3f);
+                    CHECK(p.y >= -1e-3f);
+                    CHECK(p.y <= 1 + 1e-3f);
+                }
+            }
+        }
+    }
+    // The near cascade of an orthographic view is no smaller than its box's half diagonal.
+    const float halfDiagonal = std::hypot(4.5f * camera.aspect, 4.5f);
+    CHECK(cascades[0].radius >= halfDiagonal);
+    // Perspective fitting is untouched by the orthographic fields.
+    auto perspective = orbitCamera({10, 0, 10});
+    perspective.orthoHeight = 99;
+    CHECK(fitShadowCascades(perspective, settings)[1].radius ==
+          fitShadowCascades(orbitCamera({10, 0, 10}), settings)[1].radius);
+}
+
+TEST_CASE("the scene target divides exactly for a whole pixel scale and rounds for a fraction") {
+    CHECK(sceneSizeFor({1280, 720}, 1) == glm::ivec2(1280, 720));
+    CHECK(sceneSizeFor({1280, 720}, 2) == glm::ivec2(640, 360));
+    CHECK(sceneSizeFor({1281, 721}, 2) == glm::ivec2(640, 360)); // truncates like integer division
+    CHECK(sceneSizeFor({1280, 720}, 1.5f) == glm::ivec2(853, 480));
+    CHECK(sceneSizeFor({1280, 720}, 2.5f) == glm::ivec2(512, 288));
+    CHECK(sceneSizeFor({3, 3}, 8) == glm::ivec2(1, 1));
+    CHECK(sceneSizeFor({1280, 720}, 0.5f) == glm::ivec2(1280, 720)); // never above 1:1
+}
+
+TEST_CASE("the screen pass leaves an sRGB back buffer alone and scales linear light for HDR ones") {
+    OutputColor sdr;
+    CHECK(outputColor({0.5f, 0.25f, 1.0f}, sdr) == glm::vec3(0.5f, 0.25f, 1.0f));
+    CHECK(packOutput(sdr) == glm::vec4(0, 1, 0, 0));
+    CHECK(srgbToLinear(1.0f) == doctest::Approx(1.0f));
+    CHECK(srgbToLinear(0.5f) == doctest::Approx(0.2140f).epsilon(0.001));
+    CHECK(linearToSrgb(srgbToLinear(0.3f)) == doctest::Approx(0.3f));
+    // scRGB: white lands at the paper white over the 80-nit reference.
+    OutputColor scrgb{OutputEncoding::ScRgb, 200, 80};
+    CHECK(outputColor({1, 1, 1}, scrgb).x == doctest::Approx(2.5f));
+    CHECK(outputColor({0.5f, 0.5f, 0.5f}, scrgb).y == doctest::Approx(0.2140f * 2.5f).epsilon(0.001));
+    CHECK(packOutput(scrgb) == glm::vec4(1, 2.5f, 0, 0));
+    // macOS: the layer's 1.0 is already the display's SDR white.
+    OutputColor edr{OutputEncoding::ScRgb, 200, 200};
+    CHECK(outputColor({1, 1, 1}, edr).z == doctest::Approx(1.0f));
+    // HDR10: PQ of absolute nits, after Rec. 709 -> Rec. 2020.
+    CHECK(pqEncode(0) == doctest::Approx(0));
+    CHECK(pqEncode(100) == doctest::Approx(0.5081f).epsilon(0.001));
+    CHECK(pqEncode(10000) == doctest::Approx(1.0f));
+    OutputColor hdr10{OutputEncoding::Hdr10, 200, 80};
+    const auto white = outputColor({1, 1, 1}, hdr10);
+    CHECK(white.x == doctest::Approx(pqEncode(200)).epsilon(0.001));
+    CHECK(white.y == doctest::Approx(pqEncode(200)).epsilon(0.001));
+    CHECK(packOutput(hdr10) == glm::vec4(2, 200, 0, 0));
+    const auto red = rec709ToRec2020({1, 0, 0});
+    CHECK(red.x == doctest::Approx(0.6274f));
+    CHECK(red.x + red.y + red.z == doctest::Approx(0.7129f).epsilon(0.001));
+    // Half floats, for screenshots of a 16F back buffer.
+    CHECK(halfToFloat(0x3c00) == doctest::Approx(1.0f));
+    CHECK(halfToFloat(0x4100) == doctest::Approx(2.5f));
+    CHECK(halfToFloat(0xb800) == doctest::Approx(-0.5f));
+    CHECK(halfToFloat(0x0001) == doctest::Approx(5.9604645e-8f));
+    CHECK(halfToFloat(0) == 0.0f);
 }

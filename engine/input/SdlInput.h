@@ -6,7 +6,7 @@
 #include <string>
 
 namespace fe {
-class ReplayRecorder;
+class InputRecorder;
 
 // Translates SDL events into named raw inputs for InputState:
 //   key:<scancode name>          keyboard ("key:Return", "key:Left Shift")
@@ -34,9 +34,11 @@ public:
     // Deck and touch devices) and plays queued rumble.
     void apply(SDL_Window* window, const Canvas& canvas, glm::ivec2 viewport, float pixelDensity);
     // Also send everything fed to InputState (inputs, mouse, wheel, typed text
-    // and pre-edit strings) to a replay recorder (or stop: null).
-    void record(ReplayRecorder* recorder) { recorder_ = recorder; }
-    // Releases every input that is down and stops rumble (focus loss).
+    // and pre-edit strings) to a recorder (or stop: null); the same as
+    // InputState::setRecorder.
+    void record(InputRecorder* recorder);
+    // Releases every input that is down (InputState::focusLost) and stops
+    // rumble (focus loss).
     void releaseAll();
 
     // Button layout of a gamepad for prompts: "xbox", "playstation", "switch",
@@ -55,13 +57,8 @@ private:
     Pad& pad(SDL_JoystickID id);
     void disconnect(SDL_JoystickID id);
     void feedPad(SDL_JoystickID id, const std::string& control, float value);
-    void feed(const std::string& input, float value);
-    void compose(const std::string& text, int cursor);
     void playRumble(const InputState::Rumble& request);
     InputState& state_;
-    ReplayRecorder* recorder_ = nullptr;
     std::map<SDL_JoystickID, Pad> pads_;
-    std::map<std::string, float> down_; // inputs currently away from zero
-    bool composing_ = false;            // the last pre-edit string sent was not empty
 };
 } // namespace fe

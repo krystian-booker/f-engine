@@ -32,6 +32,7 @@
 local dialogue = require("fe.dialogue")
 local game = require("fe.game")
 local i18n = require("fe.i18n")
+local tablex = require("fe.tablex")
 local task = require("fe.task")
 local transition = require("fe.transition")
 
@@ -42,6 +43,15 @@ local cutscene = {
     skip_input = "menu",    -- asks to skip a skippable cutscene
   },
 }
+
+--- The file's settings, for `__reload`.
+cutscene.file_defaults = { settings = tablex.deep_copy(cutscene.settings) }
+
+--- Adopt edited settings on hot reload (values the game changed at runtime
+--- are kept).
+function cutscene.__reload(live, fresh)
+  live.file_defaults.settings = tablex.adopt(live.settings, fresh.settings, live.file_defaults.settings)
+end
 
 i18n.defaults({ fe = { cutscene = { skip = "Skip this scene?", yes = "Skip", no = "Continue" } } })
 
@@ -120,7 +130,8 @@ function Actor:anim(clip, options)
   options = options or {}
   self.entity:clip(clip)
   if options.wait ~= false then
-    local info = fe.app.sprite_clips(self.entity:sprite().animation)[clip]
+    local sprite = self.entity:sprite()
+    local info = sprite and sprite.animation and fe.app.sprite_clips(sprite.animation)[clip]
     if info and not info.loop then
       task.wait(info.length)
     end
@@ -170,7 +181,11 @@ function cutscene.parallel(fns)
   task.all(fns)
 end
 
-cutscene.wait = task.wait
+--- Wait on the cutscene's clock (`task.wait`).
+---@param seconds number
+function cutscene.wait(seconds)
+  return task.wait(seconds)
+end
 
 --- Wait for the player to press Confirm.
 function cutscene.wait_input(action)
@@ -190,11 +205,19 @@ function cutscene.confirm_skip(world)
   return index == 1
 end
 
--- `skip.covered` is true from the moment a skip starts covering the screen
--- until something uncovers it.
-local function skip_scene(owner, world, skip)
+--- Skip the cutscene run by `owner`: pause its world while the screen
+--- fades out, mark the owner skipping (so waits end and lines go to the
+--- backlog) and end the line on screen. `skip.covered` is true from the
+--- moment the skip covers the screen until something uncovers it;
+--- `skip.started` records that this cutscene (not an enclosing one)
+--- started the skip. Replace to present skipping differently.
+---@param owner Task
+---@param world? World
+---@param skip {covered: boolean, started: boolean?}
+function cutscene.skip_scene(owner, world, skip)
   local resume = world and game.pause(world) or function() end
   skip.covered = true
+  skip.started = true
   transition.out("fade", 0.25)
   owner.skipping = true
   owner.on_end_skip = function()
@@ -205,11 +228,16 @@ local function skip_scene(owner, world, skip)
   resume()
 end
 
--- Fast-forward and the skip prompt, for the cutscene task `owner`. With a
--- world, fast-forward speeds the world up and the cutscene (bound to it)
--- follows; without one it speeds up the owner's clock. Never both: a bound
--- task already runs on its world's time.
-local function watch(owner, world, skippable, skip)
+--- Fast-forward and the skip prompt, for the cutscene task `owner` (runs
+--- as its own task for the length of the cutscene). With a world,
+--- fast-forward speeds the world up and the cutscene (bound to it)
+--- follows; without one it speeds up the owner's clock. Never both: a bound
+--- task already runs on its world's time.
+---@param owner Task
+---@param world? World
+---@param skippable boolean
+---@param skip {covered: boolean, started: boolean?}
+function cutscene.watch(owner, world, skippable, skip)
   task.bind(false)
   local key = "fe.cutscene.fast_forward"
   task.finally(function()
@@ -228,7 +256,7 @@ local function watch(owner, world, skippable, skip)
       owner.speed = nil
       game.scale_time(key, nil)
       if cutscene.confirm_skip(world) then
-        skip_scene(owner, world, skip)
+        cutscene.skip_scene(owner, world, skip)
       end
     end
     task.frame()
@@ -240,7 +268,9 @@ end
 --- or the task is cancelled, the bars are removed at once and the lock is
 --- released (a camera held with `rig:pan_to` is released when the task
 --- ends). The cutscene follows `options.world` (default the field's) and
---- can be fast-forwarded or, when skippable, skipped (see the header).
+--- can be fast-forwarded or, when skippable, skipped (see the header). A
+--- cutscene played inside another one runs under the outer one's skip and
+--- leaves it in place when it ends.
 ---@param fn fun()
 ---@param options? {letterbox?: boolean, skippable?: boolean, world?: World}
 function cutscene.play(fn, options)
@@ -253,15 +283,20 @@ function cutscene.play(fn, options)
   local owner = task.current():owner()
   local unlock = field.lock()
   local unbind = world and task.bind(world) or function() end
-  local skip = { covered = false }
-  local watcher = task.named("cutscene:watch", watch, owner, world, skippable, skip)
+  local skip = { covered = false, started = false }
+  local watcher = task.named("cutscene:watch", cutscene.watch, owner, world, skippable, skip)
   local finished = false
+  -- Only a skip this cutscene started is cleared at its end: an enclosing
+  -- cutscene's skip carries on.
+  local function end_skip()
+    if skip.started then owner.skipping, owner.on_end_skip = nil, nil end
+  end
   task.ensure(function()
     if letterbox then transition.letterbox(true, 0.4) end
     fn()
     dialogue.close()
     watcher:cancel()
-    owner.skipping, owner.on_end_skip = nil, nil
+    end_skip()
     if skip.covered then
       if letterbox then fe.screen.set({ letterbox = 0 }) end
       transition.into("fade", 0.25)
@@ -272,7 +307,7 @@ function cutscene.play(fn, options)
     finished = true
   end, function()
     watcher:cancel()
-    owner.skipping, owner.on_end_skip = nil, nil
+    end_skip()
     if skip.covered then transition.clear() end
     unbind()
     unlock()

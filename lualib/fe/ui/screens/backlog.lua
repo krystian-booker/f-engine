@@ -10,6 +10,14 @@ local ui = require("fe.ui")
 
 local screen = { width = 300 }
 
+--- The file's values, for `__reload`.
+screen.file_defaults = { width = screen.width }
+
+--- Adopt an edited width on hot reload unless the game changed it.
+function screen.__reload(live, fresh)
+  live.file_defaults = tablex.adopt(live, { width = fresh.width }, live.file_defaults)
+end
+
 i18n.defaults({ fe = { backlog = { title = "Log", empty = "Nothing has been said yet." } } })
 
 local function entry_text(line)

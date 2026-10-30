@@ -1,6 +1,8 @@
 #include "engine/assets/Image.h"
 #include "engine/runtime/Engine.h"
 #include "engine/runtime/ReplayHarness.h"
+#include "engine/script/LuaHost.h"
+#include "engine/world/World.h"
 #include <doctest/doctest.h>
 
 using namespace fe;
@@ -96,11 +98,11 @@ TEST_CASE("the recorder writes taps as ordered commands that replay identically"
     const auto json = recorder.toJson(20);
     CHECK(json.at("seed") == 7);
     const auto& commands = json.at("commands");
-    REQUIRE(commands.size() == 5);
+    REQUIRE(commands.size() == 4);
     CHECK(commands[0].at("mouse") == Json::array({5, 6}));
-    CHECK(commands[1].at("input") == Json{{"key:Z", 1.0}});
-    CHECK(commands[2].at("input") == Json{{"key:Z", 0.0}});
-    CHECK(commands[4] == Json{{"tick", 20}});
+    CHECK(commands[1].at("input") == Json::array({Json::array({"key:Z", 1.0}), Json::array({"key:Z", 0.0})}));
+    CHECK(commands[2].at("input") == Json::array({Json::array({"key:X", 1.0})}));
+    CHECK(commands[3] == Json{{"tick", 20}});
 
     auto engine = fixtureEngine();
     engine->input().define("confirm", {"key:Z"});
@@ -204,4 +206,58 @@ TEST_CASE("replay captures must be rendered frames and match the backend's refer
     CHECK(referenceFor("reference/{backend}/a.png", "Vulkan") ==
           std::filesystem::path("reference/vulkan/a.png"));
     CHECK(referenceFor("reference/a.png", "Vulkan") == std::filesystem::path("reference/a.png"));
+}
+
+TEST_CASE("recorded inputs replay in the order they happened; the object form still works") {
+    ReplayRecorder recorder(1);
+    recorder.input("key:X", 1);
+    recorder.input("pad:a", 1);
+    recorder.stamp(1);
+    recorder.input("pad:a", 0);
+    recorder.input("key:X", 0);
+    recorder.stamp(2);
+    const auto json = recorder.toJson(2);
+    CHECK(json.at("commands")[0].at("input") ==
+          Json::array({Json::array({"key:X", 1.0}), Json::array({"pad:a", 1.0})}));
+
+    auto engine = fixtureEngine();
+    ReplayHarness replay(writeReplay("ordered.json", json));
+    replay.apply(1, *engine);
+    CHECK(engine->input().lastDevice() == "gamepad"); // the gamepad event came last
+    engine->tick(1.0 / 60);
+    CHECK(engine->input().raw("key:X") == 1);
+    CHECK(engine->input().raw("pad:a") == 1);
+    replay.apply(2, *engine);
+    CHECK(engine->input().lastDevice() == "keyboard");
+
+    // A sorted object feeds in key order (key:X before pad:a).
+    auto other = fixtureEngine();
+    ReplayHarness legacy(writeReplay(
+        "legacy.json", Json::array({{{"tick", 1}, {"input", {{"pad:a", 1}, {"key:X", 1}}}}})));
+    legacy.apply(1, *other);
+    CHECK(other->input().lastDevice() == "gamepad");
+    other->tick(1.0 / 60);
+    CHECK(other->input().raw("key:X") == 1);
+    CHECK(other->input().raw("pad:a") == 1);
+}
+
+TEST_CASE("a wait_for that times out fails without skipping the command's other fields") {
+    auto engine = fixtureEngine();
+    ReplayHarness replay(writeReplay(
+        "timeout.json",
+        Json::array({{{"tick", 1}, {"wait_for", "false"}, {"timeout", 1}, {"lua", "replay_after_wait = 7"}},
+                     {{"tick", 2}, {"lua", "replay_next = 1"}}})));
+    replay.apply(1, *engine);
+    replay.apply(2, *engine);
+    CHECK(replay.failures().empty());
+    CHECK(engine->lua().console("replay_after_wait") == "nil");
+    replay.apply(3, *engine);
+    REQUIRE(replay.failures().size() == 1);
+    CHECK(replay.failures()[0].find("Timed out") != std::string::npos);
+    CHECK(engine->lua().console("replay_after_wait") == "7");
+    // Later ticks are shifted by the wait, as after a satisfied wait_for.
+    CHECK(engine->lua().console("replay_next") == "nil");
+    replay.apply(4, *engine);
+    CHECK(engine->lua().console("replay_next") == "1");
+    CHECK(replay.finished());
 }

@@ -22,20 +22,24 @@ void LightGrid::build(const std::vector<SceneLight>& lights, glm::vec2 boundsMin
     origin = boundsMin;
     cells = glm::clamp(glm::ivec2(glm::ceil(extent / cellSize)), glm::ivec2(1), glm::ivec2(MaxCells));
 
-    std::vector<std::size_t> chosen(lights.size());
+    auto& chosen = chosen_;
+    chosen.resize(lights.size());
     std::iota(chosen.begin(), chosen.end(), 0);
     if (chosen.size() > static_cast<std::size_t>(MaxLights)) {
         auto reach = [&](std::size_t i) {
             const auto& l = lights[i].settings;
             return glm::length(l.position - focus) - l.radius;
         };
-        std::stable_sort(chosen.begin(), chosen.end(),
-                         [&](std::size_t a, std::size_t b) { return reach(a) < reach(b); });
+        // Ties keep input order (the index breaks them), without stable_sort's buffer.
+        std::sort(chosen.begin(), chosen.end(), [&](std::size_t a, std::size_t b) {
+            const float ra = reach(a), rb = reach(b);
+            return ra != rb ? ra < rb : a < b;
+        });
         chosen.resize(MaxLights);
         std::sort(chosen.begin(), chosen.end());
     }
     lightCount = static_cast<int>(chosen.size());
-    sources = chosen;
+    sources.assign(chosen.begin(), chosen.end());
 
     lightTexels.assign(static_cast<std::size_t>(MaxLights) * Rows, glm::vec4(0));
     for (std::size_t i = 0; i < chosen.size(); ++i) {
@@ -53,12 +57,8 @@ void LightGrid::build(const std::vector<SceneLight>& lights, glm::vec2 boundsMin
     }
 
     cellTexels.assign(static_cast<std::size_t>(cells.x * cells.y * MaxPerCell), -1.0f);
-    struct Candidate {
-        int cell;
-        float score;
-        int light;
-    };
-    std::vector<Candidate> candidates;
+    auto& candidates = candidates_;
+    candidates.clear();
     for (std::size_t i = 0; i < chosen.size(); ++i) {
         const auto& l = lights[chosen[i]].settings;
         const glm::vec2 centre(l.position.x, l.position.z);

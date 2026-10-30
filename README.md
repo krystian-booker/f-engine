@@ -41,7 +41,7 @@ Debug builds include the F1 editor, hot reload and the error overlay; Release bu
 
 | Program | Use |
 | --- | --- |
-| `fengine <game> [--mute] [--replay file] [--record file] [--seed n] [--frames n] [--user-data dir]` | Play or develop a game. F1 opens the editor (dev builds). `--record` saves the session's input as a replay. |
+| `fengine <game> [--mute] [--replay file] [--record file] [--seed n] [--frames n] [--max-fps n] [--user-data dir]` | Play or develop a game. F1 opens the editor (dev builds). `--record` saves the session's input as a replay. Saves, settings and `log.txt` go to the per-user folder named by `game.json`'s `id`. |
 | `fengine_headless --test <game> [--filter text]` | Run a game's Lua tests (`tests/*.lua`) without a window |
 | `fengine_headless --check <game>` | Validate data tables, maps, scripts and assets |
 | `fengine_headless <game> --replay <file>` | Run a replay without a window or GPU (screenshots skipped) |

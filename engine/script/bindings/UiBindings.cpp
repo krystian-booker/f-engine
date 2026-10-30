@@ -154,7 +154,7 @@ void bindText(Engine& engine) {
             [&text](const std::string& name, sol::object value) {
                 text.palette().define(name, lua::rgba(value));
             },
-            "fun(name: string, color: any)", "Name a color for {color:name}.")
+            "fun(name: string, color: Color)", "Name a color for {color:name}.")
         .fn(
             "icon",
             [&text](const std::string& id, sol::table spec) {
@@ -182,7 +182,9 @@ void bindText(Engine& engine) {
                 resolver->function = sol::main_protected_function(fn, host.errorHandler());
             },
             "fun(resolver: (fun(tag: string): string?)|nil)",
-            "Resolve custom tags such as {player} or {var:name}; nil removes the resolver. A resolver may "
+            "Resolve custom tags such as {player} or {var:name}; nil removes the resolver. It runs under a C "
+            "call (from fe.text, fe.canvas.text and the frame's text layout) and must not yield: a task.wait "
+            "in it raises 'attempt to yield across a C-call boundary'. A resolver may "
             "replace or remove itself; the call in progress finishes with the old one. Its errors are "
             "reported and the tag is shown as written. A resolver that resolves markup with tags through "
             "fe.text or fe.canvas.text nests: more than 8 nested resolver calls raise one error from the "

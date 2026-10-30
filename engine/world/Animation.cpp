@@ -14,8 +14,10 @@ void advanceAnimations(entt::registry& registry, AssetCache& assets, float camer
     for (const auto entity : registry.view<Sprite>()) {
         auto& sprite = registry.get<Sprite>(entity);
         const auto* transform = registry.try_get<Transform>(entity);
-        if (!sprite.moveClip.empty() && registry.all_of<Mover>(entity)) {
-            const bool moved = transform && glm::length(transform->position - transform->previous) > 1e-4f;
+        if (const auto* mover = sprite.moveClip.empty() ? nullptr : registry.try_get<Mover>(entity)) {
+            // The mover's own walking, jumping or climbing; being carried by a
+            // platform or a parent is not moving.
+            const bool moved = mover->moved;
             const auto& wanted = moved ? sprite.moveClip : (sprite.idleClip.empty() ? Idle : sprite.idleClip);
             if (sprite.clip != wanted &&
                 (sprite.clip == sprite.moveClip || sprite.clip == sprite.idleClip || sprite.clip == Idle)) {

@@ -528,10 +528,23 @@ TEST_CASE("Lua values convert to and from JSON") {
     LuaHost host(f.game, f.lib, false);
     host.console("value = {name = 'x', list = {1, 2, 3}, nested = {ok = true}}");
     const auto json = luaToJson(host.lua()["value"]);
+    CHECK(json.at("list").is_array());
     CHECK(json.at("list").size() == 3);
     CHECK(json.at("nested").at("ok") == true);
     sol::table back = jsonToLua(host.lua(), json);
     CHECK(back.get<std::string>("name") == "x");
+    // A table is an array only when its keys are exactly 1..n: a hole or an
+    // extra key makes it an object, and nothing is dropped on the way.
+    host.console("holed = {1, nil, 3, x = 1}; extra = {1, 2, x = 1}; empty = {}; dense = {[1] = 'a', [2] = 'b'}");
+    const auto holed = luaToJson(host.lua()["holed"]);
+    CHECK(holed.is_object());
+    CHECK(holed == Json({{"#1", 1}, {"#3", 3}, {"x", 1}}));
+    CHECK(luaToJson(host.lua()["extra"]) == Json({{"#1", 1}, {"#2", 2}, {"x", 1}}));
+    CHECK(luaToJson(host.lua()["empty"]).is_object());
+    CHECK(luaToJson(host.lua()["dense"]) == Json::array({"a", "b"}));
+    host.lua()["back"] = jsonToLua(host.lua(), holed);
+    CHECK(host.console("back[1], back[2], back[3], back.x") == "1\tnil\t3\t1");
+    CHECK(host.console("fe._loaded") == "nil"); // the module cache is not reachable
     host.console("bad = {print}");
     CHECK_THROWS(luaToJson(host.lua()["bad"]));
     host.console("float_key = {[1.5] = true}");
@@ -629,7 +642,7 @@ return {
     Engine engine(engineOptions(game.root));
     REQUIRE(engine.start());
     engine.tick(0.5);
-    sol::table log = engine.mainModule().as<sol::table>()["log"];
+    sol::table log = engine.lua().require(engine.config().entry).as<sol::table>()["log"];
     REQUIRE(log.size() == 2);
     CHECK(log.get<std::string>(1) == "update 0.0");
     CHECK(log.get<std::string>(2) == "post 0.5");
@@ -968,7 +981,7 @@ TEST_CASE("bindings reject wrong types, missing components and out-of-range valu
     CHECK(lua.evaluate("fe.input.pressed('confirm')").ok);
 }
 
-TEST_CASE("every entity component is added by a table or no argument and removed by nil") {
+TEST_CASE("every entity component is set by a table, read by no argument and removed by nil") {
     TestGame game("return {}");
     write(game.root / "loop.ogg", "");
     Engine engine(engineOptions(game.root));
@@ -1000,20 +1013,21 @@ TEST_CASE("every entity component is added by a table or no argument and removed
          {"sprite", "mesh", "mover", "light", "emitter", "collider", "platform", "audio"}) {
         CAPTURE(component);
         const std::string settings = component == "audio" ? "{sound = 'loop.ogg'}" : "{}";
-        CHECK(lua.evaluate("e:" + component + "(" + settings + ")").ok);
+        // Reading never adds.
+        CHECK(lua.console("e:" + component + "()") == "nil");
+        CHECK_FALSE(has(component));
+        // A table adds (with defaults) and returns the state; reading returns the same shape.
+        CHECK(lua.console("type(e:" + component + "(" + settings + "))") == "table");
         CHECK(has(component));
+        CHECK(lua.console("type(e:" + component + "())") == "table");
         CHECK(lua.evaluate("e:" + component + "(nil)").ok);
         CHECK_FALSE(has(component));
-        if (component != "audio") {
-            CHECK(lua.evaluate("e:" + component + "()").ok);
-            CHECK(has(component));
-            CHECK(lua.evaluate("e:" + component + "(nil)").ok);
-        }
+        CHECK(lua.console("e:" + component + "()") == "nil");
         CHECK_FALSE(lua.evaluate("e:" + component + "(true)").ok);
         CHECK_FALSE(has(component));
     }
     // A failed audio change leaves no half-made component.
-    CHECK_FALSE(lua.evaluate("e:audio()").ok);
+    CHECK_FALSE(lua.evaluate("e:audio{}").ok);
     CHECK_FALSE(has("audio"));
     CHECK(lua.console("e:sprite{visible = false}.visible, e:sprite().visible") == "false\tfalse");
     CHECK(lua.console("e:sprite(nil), e:sprite(nil)") == "nil\tnil");
@@ -1125,7 +1139,8 @@ TEST_CASE("bindings hold the collector while their C++ runs; callouts release it
     CHECK(lua.console("fe.probe.collecting()") == "false");
     CHECK(lua.console("local r; fe.probe.call(function() r = {raw_collecting(), fe.probe.collecting()} end) "
                       "return r[1], r[2]") == "true\tfalse");
-    CHECK(lua.console("pcall(fe.probe.collecting, 'x', 'y') and raw_collecting()") == "true");
+    // A zero-argument binding given arguments raises, and the hold is released on that path too.
+    CHECK(lua.console("not pcall(fe.probe.collecting, 'x', 'y') and raw_collecting()") == "true");
     CHECK(lua.console("pcall(fe.world.load, {}) or raw_collecting()") == "true");
 }
 
@@ -1528,4 +1543,372 @@ TEST_CASE("paths with an embedded NUL are refused") {
     CHECK(lua.console("fe.fs.exists('main.lua\\0')") == "false");
     CHECK_THROWS_WITH(resolveInside(FENGINE_TEST_GAME, std::string("main.lua\0.png", 13)),
                       doctest::Contains("NUL"));
+}
+
+TEST_CASE("hot reload keeps live data when the fresh value is a function") {
+    Folders f;
+    LuaHost host(f.game, f.lib, false);
+    write(f.game / "hooks.lua", R"(
+local M = {}
+M.handlers = {}
+M.limit = 3
+function M.count() return #M.handlers end
+return M)");
+    host.evaluate("hooks = require('hooks'); hooks.handlers[1] = 'a'; hooks.handlers[2] = 'b'");
+    write(f.game / "hooks.lua", R"(
+local M = {}
+function M.handlers() return 'now a function' end
+function M.limit() return 9 end
+function M.count() return #M.handlers end
+return M)");
+    CHECK(host.reloadFile(f.game / "hooks.lua"));
+    // "Data is kept": the live table and number stay; the module's own code is replaced.
+    CHECK(host.console("type(hooks.handlers), #hooks.handlers, hooks.limit") == "table\t2\t3");
+    CHECK(host.console("hooks.count()") == "2");
+    // The other way round, the module's own function gives way to the data.
+    write(f.game / "hooks.lua", R"(
+local M = {}
+M.handlers = {}
+M.count = 5
+return M)");
+    CHECK(host.reloadFile(f.game / "hooks.lua"));
+    CHECK(host.console("type(hooks.count)") == "number");
+    CHECK(host.console("#hooks.handlers") == "2");
+}
+
+TEST_CASE("world:spawn leaves nothing behind when a component is rejected") {
+    Engine engine(engineOptions());
+    auto& lua = engine.lua();
+    REQUIRE(lua.evaluate("w = fe.world.load('main', 'arena')").ok);
+    raises(lua, "w:spawn{id = 'hero', position = {x = 2.5, z = 5.5}, sprite = {mode = 'billboard'}}",
+           "Unknown sprite mode");
+    CHECK(lua.console("w:find('hero')") == "nil");
+    CHECK(engine.world("main")->registry().view<Transform>().size() == 0);
+    // The id is free again, so a retry works.
+    CHECK(lua.evaluate("hero = w:spawn{id = 'hero', position = {x = 2.5, z = 5.5}, sprite = {mode = 'flat'}}")
+              .ok);
+    CHECK(lua.console("hero:sprite().mode") == "flat");
+}
+
+TEST_CASE("component setters change nothing when a later field is rejected") {
+    Engine engine(engineOptions());
+    auto& lua = engine.lua();
+    REQUIRE(lua.evaluate("w = fe.world.load('main', 'arena'); e = w:spawn{position = {x = 2.5, z = 5.5}, "
+                         "mover = {speed = 2}, sprite = {scale = 1}, mesh = {speed = 1}, "
+                         "platform = {size = {x = 2, z = 2}}, light = {radius = 4}}")
+                .ok);
+    raises(lua, "e:mover{speed = 5, climb_speed = -1}", "climb_speed must be a positive number");
+    CHECK(lua.console("e:mover().speed, e:mover().climb_speed") == "2.0\t1.5");
+    raises(lua, "e:sprite{scale = 3, mode = 'nope'}", "Unknown sprite mode");
+    CHECK(lua.console("e:sprite().scale") == "1.0");
+    raises(lua, "e:mesh{speed = 2, shader = 'Bad Name'}", "mesh shader");
+    CHECK(lua.console("e:mesh().speed") == "1.0");
+    raises(lua, "e:platform{size = {x = 3, z = 100}}", "platform size");
+    CHECK(lua.console("e:platform().size.x") == "2.0");
+    raises(lua, "e:light{radius = 7, color = 'no such colour'}", "Unknown color");
+    CHECK(lua.console("e:light().radius") == "4.0");
+    raises(lua, "e:collider{radius = 1, height = -1}", "collider height");
+    CHECK(lua.console("e:collider()") == "nil"); // never added
+    raises(lua, "e:emitter{rate = 5, max = 0}", "Invalid emitter settings");
+    CHECK(lua.console("e:emitter()") == "nil");
+}
+
+TEST_CASE("component read-back returns the settings as tables without adding anything") {
+    TestGame game("return {}");
+    write(game.root / "loop.ogg", "");
+    Engine engine(engineOptions(game.root));
+    auto& lua = engine.lua();
+    REQUIRE(lua.evaluate("w = fe.world.load('main', 'arena'); e = w:spawn{position = {x = 2.5, z = 5.5}}").ok);
+    CHECK(lua.evaluate("e:mover{speed = 3, radius = 0.3, jump = {distance = 2, max_up = 1}, footprint = 2, "
+                       "fly = true}")
+              .ok);
+    CHECK(lua.console("local m = e:mover() return m.speed, ('%.2f'):format(m.radius), m.jump.distance, "
+                      "m.jump.max_up, m.footprint, m.fly") == "3.0\t0.30\t2\t1.0\t2\ttrue");
+    CHECK(lua.console("e:mover{jump = false}.jump") == "false");
+    raises(lua, "e:mover{footprint = 9}", "mover footprint must be from 1 to 8");
+    CHECK(lua.console("e:mover().footprint") == "2");
+    CHECK(lua.console("local c = e:collider{radius = 0.5, solid = false} return c.radius, "
+                      "('%.1f'):format(c.height), c.solid") == "0.5\t1.6\tfalse");
+    CHECK(lua.console("local l = e:light{radius = 6, position = {x = 0, y = 2, z = 0}, color = '#ff0000'} "
+                      "return l.radius, l.position.y, l.color[1], l.enabled") == "6.0\t2.0\t1.0\ttrue");
+    CHECK(lua.console("e:light{enabled = false}.enabled, e:light().position.y") == "false\t2.0");
+    CHECK(lua.console("local p = e:emitter{rate = 7, velocity = {y = 2}} return p.rate, p.velocity.y, p.paused") ==
+          "7.0\t2.0\tfalse");
+    CHECK(lua.console("e:emitter{paused = true}.paused, e:emitter().rate") == "true\t7.0");
+    CHECK(lua.console("local m = e:mesh{model = 'props/a.glb', speed = 2, blend = 'additive'} "
+                      "return m.model, m.speed, m.blend, m.loop") == "props/a.glb\t2.0\tadditive\ttrue");
+    CHECK(lua.console("local p = e:platform{size = {x = 2, z = 3}} return p.size.x, p.size.z") == "2.0\t3.0");
+    CHECK(lua.console("local a = e:audio{sound = 'loop.ogg', radius = 4} return a.sound, a.radius, a.volume") ==
+          "loop.ogg\t4.0\t1.0");
+    // Reading a component another entity lacks adds nothing to it.
+    CHECK(lua.console("local o = w:spawn{position = {x = 3.5, z = 5.5}} return o:mover(), o:light(), "
+                      "o:sprite(), o:collider()") == "nil\tnil\tnil\tnil");
+    CHECK(engine.world("main")->registry().view<Mover>().size() == 1);
+}
+
+TEST_CASE("move_to takes planning rules and reports cell_enter events") {
+    Engine engine(engineOptions());
+    auto& lua = engine.lua();
+    REQUIRE(lua.evaluate("w = fe.world.load('main', 'arena'); "
+                         "e = w:spawn{position = {x = 2.5, z = 5.5}, mover = {}}")
+                .ok);
+    // Rules reach the built-in planner: a wall of blocked cells leaves no route.
+    REQUIRE(lua.evaluate("local wall = {} for z = 0, 11 do wall[#wall + 1] = {x = 4, z = z} end "
+                         "e:move_to({x = 6.5, z = 5.5}, {rules = {blocked = wall}})")
+                .ok);
+    engine.tick(1.0 / 60);
+    CHECK(lua.console("local kinds = {} for _, ev in ipairs(w:events()) do kinds[ev.type] = true end "
+                      "return kinds.blocked == true") == "true");
+    CHECK(lua.evaluate("e:move_to({x = 6.5, z = 5.5}, {rules = {diagonal = true, footprint = 1}})").ok);
+    CHECK(lua.console("#w:reachable({x = 2, z = 5}, 2, {fly = true}) > 1, w:reachable({x = 2, z = 5}, 2).truncated") ==
+          "true\tnil");
+    raises(lua, "e:move_to(nil, {path = {{x = 3, z = 5}}, rules = {}})", "either a path");
+    raises(lua, "e:move_to({x = 6.5, z = 5.5}, {rules = {footprint = 0}})", "rules.footprint");
+    // Crossing into a new cell reports it with the cell as payload.
+    REQUIRE(lua.evaluate("e:stop(); w:events(); e:place({x = 2.95, z = 5.5}); e:drive({x = 6, z = 0})").ok);
+    engine.tick(1.0 / 60);
+    CHECK(lua.console("local hit for _, ev in ipairs(w:events()) do if ev.type == 'cell_enter' and ev.a == e "
+                      "then hit = ev end end return hit and hit.cell.x, hit and hit.cell.z") == "3\t5");
+}
+
+TEST_CASE("integers stored as int raise instead of wrapping") {
+    Engine engine(engineOptions());
+    auto& lua = engine.lua();
+    REQUIRE(lua.evaluate("w = fe.world.load('main', 'arena'); e = w:spawn{position = {x = 2.5, z = 5.5}}").ok);
+    raises(lua, "e:mover{jump = {distance = (1 << 32) + 3}}", "jump.distance must be an integer");
+    CHECK(lua.console("e:mover()") == "nil");
+    raises(lua, "fe.app.set_display{width = (1 << 32) + 3}", "width must be an integer");
+    CHECK_FALSE(engine.requests().display.has_value());
+    raises(lua, "fe.app.set_display{monitor = 1.5}", "monitor must be an integer");
+}
+
+TEST_CASE("API consistency: ranges, '@fe/' paths, seed type, dead handles and zero-argument getters") {
+    Engine engine(engineOptions());
+    auto& lua = engine.lua();
+    raises(lua, "fe.audio.sound('x.ogg', {volume = 5})", "volume must be from 0 to 4");
+    CHECK(lua.console("#fe.fs.list('@fe/') > 0 and fe.fs.list('@fe/')[1] ~= nil") == "true");
+    CHECK(lua.console("math.type(fe.random.seed())") == "integer");
+    CHECK(lua.console("fe._loaded") == "nil");
+    REQUIRE(lua.evaluate("w = fe.world.load('main', 'arena'); e = w:spawn{position = {x = 2.5, z = 5.5}}; "
+                         "e:destroy()")
+                .ok);
+    raises(lua, "e:destroy()", "This entity no longer exists");
+    // Every function and method that takes no arguments rejects extra ones.
+    raises(lua, "fe.app.title(1)", "'fe.app.title' takes no arguments (got 1)");
+    raises(lua, "fe.app.title(1)", "use fe.app.set_title");
+    raises(lua, "fe.time.now(0)", "takes no arguments");
+    raises(lua, "w:points('x')", "'World:points' takes no arguments");
+    raises(lua, "w:camera():snap(true)", "takes no arguments");
+    raises(lua, "fe.random.new(1):float(2)", "takes no arguments");
+    CHECK(lua.evaluate("w:points(); fe.time.now(); fe.random.new(1):float()").ok);
+    // fe.dev.zone keeps a bounded set of names.
+    CHECK(lua.evaluate("for i = 1, 256 do fe.dev.zone('zone' .. i, 1) end").ok);
+    raises(lua, "fe.dev.zone('one more', 1)", "at most 256 names");
+    CHECK(lua.evaluate("fe.dev.zone('zone7', 2)").ok);
+    // A rejected world:draw defines no render target.
+    raises(lua, "w:draw{target = 'never', camera = 5}", "Field 'camera' must be a table");
+    raises(lua, "fe.app.image_size('rt:never')", "does not exist yet");
+}
+
+TEST_CASE("binding documentation must agree with the parameters the binding reads") {
+    CHECK(BindingDocs::signatureArity("fun(): integer") == 0);
+    CHECK(BindingDocs::signatureArity("fun(a: string): integer") == 1);
+    CHECK(BindingDocs::signatureArity("fun(target: Vec3|nil, options?: {path?: boolean|(Cell|Vec3)[], "
+                                      "speed?: number, layer?: integer}): table<string, {a: integer, b: "
+                                      "integer}>") == 2);
+    CHECK(BindingDocs::signatureArity("fun(cell: Cell, changes: {height?: number, tags?: string[]})") == 2);
+    CHECK(BindingDocs::signatureArity("integer") == -1);
+    BindingDocs docs;
+    docs.owner("fe.x", "", false);
+    docs.add({"fe.x", "ok", "fun(a: integer): integer", "", BindingDocs::Kind::Function, 1});
+    docs.add({"fe.x", "unknown", "fun(a: integer): integer", "", BindingDocs::Kind::Function, -1});
+    const BindingDocs::Entry wrong{"fe.x", "wrong", "fun(a: integer): integer", "",
+                                   BindingDocs::Kind::Function, 2};
+#if FENGINE_DEV
+    CHECK_THROWS_WITH(docs.add(wrong), doctest::Contains("declares 1 parameter(s) but the binding reads 2"));
+#else
+    docs.add(wrong);
+    REQUIRE(docs.problems().size() == 1);
+    CHECK_THROWS(docs.writeStubs(std::filesystem::temp_directory_path() / "fengine-arity.d.lua"));
+#endif
+}
+
+TEST_CASE("sprite outlines take a width in atlas texels") {
+    Engine engine(engineOptions());
+    auto& lua = engine.lua();
+    REQUIRE(lua.evaluate("w = fe.world.load('main', 'arena'); e = w:spawn{id = 'lined', position = {x = 2, "
+                         "z = 2}, sprite = {outline = 'white'}}")
+                .ok);
+    CHECK(lua.console("e:sprite().outline_width") == "1.0");
+    CHECK(lua.console("e:sprite{outline_width = 2.5}.outline_width") == "2.5");
+    const auto& world = *engine.world("main");
+    CHECK(world.registry().get<Sprite>(world.find("lined")).outlineWidth == doctest::Approx(2.5f));
+    raises(lua, "e:sprite{outline_width = 8}", "outline_width must be from 0.5 to 4");
+    raises(lua, "e:sprite{outline_width = 0}", "outline_width");
+    CHECK(lua.console("e:sprite().outline_width") == "2.5"); // a refused change leaves the sprite alone
+}
+
+TEST_CASE("fe.dev.stats reports last frame's timings and counts") {
+    Engine engine(engineOptions());
+    auto& lua = engine.lua();
+    REQUIRE(lua.evaluate("w = fe.world.load('main', 'arena')").ok);
+    const auto before = std::stoi(lua.console("fe.dev.stats().entities"));
+    REQUIRE(lua.evaluate("for i = 1, 5 do w:spawn{position = {x = 2, z = 2}} end").ok);
+    engine.tick(1.0 / 60);
+    engine.draw(1);
+    CHECK(lua.console("fe.dev.stats().entities") == std::to_string(before + 5));
+    CHECK(lua.console("local s = fe.dev.stats() return s.frame_ms, s.draw_calls, s.particles") ==
+          "0.0\t0\t0"); // no GPU headless
+    CHECK(lua.console("local s = fe.dev.stats() return s.lua_update_ms >= 0 and s.lua_draw_ms >= 0 and "
+                      "s.memory_kb > 0") == "true");
+    // The runtime fills what it measures.
+    engine.stats().frame = 16.5;
+    engine.stats().drawCalls = 42;
+    CHECK(lua.console("local s = fe.dev.stats() return s.frame_ms, s.draw_calls") == "16.5\t42");
+    raises(lua, "fe.dev.stats(1)", "takes no arguments");
+}
+
+TEST_CASE("world:query with fields returns a struct of arrays") {
+    Engine engine(engineOptions());
+    auto& lua = engine.lua();
+    REQUIRE(lua.evaluate("w = fe.world.load('main', 'arena'); "
+                         "a = w:spawn{id = 'a', position = {x = 2.5, y = 0, z = 3.5}, tags = {'unit'}}; "
+                         "b = w:spawn{id = 'b', position = {x = 7.5, y = 1, z = 1.5}, layer = 0, tags = "
+                         "{'unit'}}; "
+                         "c = w:spawn{position = {x = 7.5, z = 1.5}, tags = {'prop'}}")
+                .ok);
+    // Without fields the old shape: a list of handles.
+    CHECK(lua.console("#w:query{tag = 'unit'}, type(w:query{tag = 'unit'}[1])") == "2\tuserdata");
+    REQUIRE(lua.evaluate("q = w:query{tag = 'unit', fields = {'entity', 'x', 'z', 'id', 'cell_x', 'cell_z', "
+                         "'layer', 'y'}}")
+                .ok);
+    CHECK(lua.console("q.n, #q.entity, #q.x, #q.id, #q.cell_x, #q.layer, #q.y") == "2\t2\t2\t2\t2\t2\t2");
+    CHECK(lua.console("local i = q.id[1] == 'a' and 1 or 2 return q.x[i], q.z[i], q.cell_x[i], q.cell_z[i], "
+                      "q.layer[i], q.y[i], q.entity[i] == a") == "2.5\t3.5\t2\t3\t0\t0.0\ttrue");
+    CHECK(lua.console("local i = q.id[1] == 'b' and 1 or 2 return q.id[i], q.entity[i] == b, q.y[i]") ==
+          "b\ttrue\t1.0");
+    // Only the requested columns exist; an unnamed entity's id is "".
+    CHECK(lua.console("local q = w:query{tag = 'prop', fields = {'id'}} return q.n, q.id[1], q.x, "
+                      "q.entity") == "1\t\tnil\tnil");
+    CHECK(lua.console("local q = w:query{near = {x = 7.5, z = 1.5}, radius = 0.1, fields = {'x'}} "
+                      "return q.n") == "2");
+    CHECK(lua.console("w:query{tag = 'none', fields = {'x'}}.n") == "0");
+    raises(lua, "w:query{fields = {'hp'}}", "Unknown query field 'hp'");
+    CHECK(lua.console("w:query{fields = 'x'}.n") == "3"); // a single string is one field name
+}
+
+TEST_CASE("fe.fs.user_* files stay inside <user data>/files and are binary-safe") {
+    auto options = engineOptions();
+    const auto files = options.userData / "files";
+    std::filesystem::remove_all(files);
+    Engine engine(std::move(options));
+    auto& lua = engine.lua();
+    CHECK(lua.console("#fe.fs.user_list()") == "0");
+    CHECK(lua.console("fe.fs.user_read('mods/a/mod.json')") == "nil");
+    REQUIRE(lua.evaluate("fe.fs.user_write('mods/a/mod.json', '{\"name\": \"A\"}'); "
+                         "fe.fs.user_write('mods/b/mod.json', '{}'); fe.fs.user_write('notes.txt', 'hi')")
+                .ok);
+    CHECK(std::filesystem::is_regular_file(files / "mods" / "a" / "mod.json"));
+    CHECK(lua.console("table.concat(fe.fs.user_list(), ' ')") == "mods/ notes.txt");
+    CHECK(lua.console("table.concat(fe.fs.user_list('mods'), ' ')") == "a/ b/");
+    CHECK(lua.console("fe.fs.user_read('mods/a/mod.json')") == "{\"name\": \"A\"}");
+    // Any bytes round-trip.
+    REQUIRE(lua.evaluate("bytes = '\\0\\1\\2\\255\\254 end' fe.fs.user_write('bin.dat', bytes)").ok);
+    CHECK(lua.console("fe.fs.user_read('bin.dat') == bytes, #fe.fs.user_read('bin.dat')") == "true\t9");
+    CHECK(lua.console("fe.fs.user_remove('bin.dat'), fe.fs.user_remove('bin.dat')") == "true\tfalse");
+    CHECK(lua.console("fe.fs.user_remove('mods/b'), #fe.fs.user_list('mods')") == "true\t1");
+    // Confinement: NUL, '..', absolute paths and the folder itself.
+    raises(lua, "fe.fs.user_read('a\\0.txt')", "NUL");
+    raises(lua, "fe.fs.user_write('../escape.txt', 'x')", "escapes");
+    raises(lua, "fe.fs.user_write('/tmp/escape.txt', 'x')", "escapes");
+    raises(lua, "fe.fs.user_list('..')", "escapes");
+    raises(lua, "fe.fs.user_write('', 'x')", "needs a file path");
+    raises(lua, "fe.fs.user_write('.', 'x')", "needs a file path");
+    raises(lua, "fe.fs.user_remove('.')", "needs a file or folder");
+    raises(lua, "fe.fs.user_write('x.tmp', 'x')", ".tmp");
+    CHECK_FALSE(std::filesystem::exists(options.userData / "escape.txt"));
+    // Limits: one file and the whole folder.
+    raises(lua, "fe.fs.user_write('big.dat', string.rep('x', 16 * 1024 * 1024 + 1))", "at most 16 MiB");
+    CHECK(lua.console("fe.fs.user_read('big.dat')") == "nil");
+    CHECK(lua.evaluate("fe.fs.user_write('big.dat', string.rep('x', 16 * 1024 * 1024))").ok);
+    CHECK(lua.console("#fe.fs.user_read('big.dat')") == std::to_string(16 * 1024 * 1024));
+    CHECK(lua.console("fe.fs.user_remove('big.dat')") == "true");
+    std::filesystem::remove_all(files);
+}
+
+TEST_CASE("fe.save blobs are stored next to the slot and deleted with it") {
+    auto options = engineOptions();
+    const auto saves = options.userData / "saves";
+    std::filesystem::remove_all(saves);
+    Engine engine(std::move(options));
+    auto& lua = engine.lua();
+    REQUIRE(lua.evaluate("fe.save.write('slot1', {gold = 1}); bytes = '\\0\\1\\255 snapshot'; "
+                         "fe.save.write_blob('slot1', 'snapshot', bytes)")
+                .ok);
+    CHECK(std::filesystem::is_regular_file(saves / "slot1.snapshot.blob"));
+    CHECK(lua.console("fe.save.read_blob('slot1', 'snapshot') == bytes") == "true");
+    CHECK(lua.console("fe.save.read_blob('slot1', 'missing')") == "nil");
+    CHECK(lua.console("table.concat(fe.save.blobs('slot1'), ',')") == "snapshot");
+    CHECK(lua.console("#fe.save.list()") == "1"); // blobs are not slots
+    raises(lua, "fe.save.write_blob('slot1', 'Bad Name', 'x')", "Blob names");
+    raises(lua, "fe.save.write_blob('slot1', 'big', string.rep('x', 16 * 1024 * 1024 + 1))",
+           "at most 16 MiB");
+    REQUIRE(lua.evaluate("fe.save.remove_blob('slot1', 'snapshot')").ok);
+    CHECK(lua.console("fe.save.read_blob('slot1', 'snapshot')") == "nil");
+    REQUIRE(lua.evaluate("fe.save.write_blob('slot1', 'again', 'x'); fe.save.delete('slot1')").ok);
+    CHECK_FALSE(std::filesystem::exists(saves / "slot1.again.blob"));
+    CHECK(lua.console("fe.save.read_blob('slot1', 'again')") == "nil");
+}
+
+TEST_CASE("fe.app.format_number follows the locale's separators") {
+    Engine engine(engineOptions());
+    auto& lua = engine.lua();
+    CHECK(lua.console("fe.app.format_number(1234567)") == "1,234,567"); // en-US headless
+    CHECK(lua.console("fe.app.format_number(1234.5)") == "1,234.50");
+    CHECK(lua.console("fe.app.format_number(1234.5, {decimals = 0})") == "1,235");
+    CHECK(lua.console("fe.app.format_number(1234567.891, {decimals = 2, locale = 'de-DE'})") ==
+          "1.234.567,89");
+    CHECK(lua.console("fe.app.format_number(-7, {locale = 'fr'})") == "-7");
+    CHECK(lua.console("fe.app.format_number(1e6, {locale = 'fr'})") == "1 000 000");
+    raises(lua, "fe.app.format_number(1, {decimals = 30})", "decimals must be from 0 to 20");
+    raises(lua, "fe.app.format_number('x')", "number must be a finite number");
+    raises(lua, "fe.app.format_number(0/0)", "finite");
+}
+
+TEST_CASE("mover tag classes, launches and gravity are scriptable") {
+    TestGame game("return {}");
+    Engine engine(engineOptions(game.root));
+    auto& lua = engine.lua();
+    REQUIRE(lua.evaluate("w = fe.world.load('main', 'arena'); e = w:spawn{position = {x = 2.5, z = 5.5}}").ok);
+    CHECK(lua.console("local m = e:mover{blocked_tags = {'water'}} "
+                      "return #m.blocked_tags, m.blocked_tags[1], #m.required_tags") == "1\twater\t0");
+    CHECK(lua.console("local m = e:mover{fly = true, required_tags = {'water', 'deploy'}, blocked_tags = {}} "
+                      "return #m.blocked_tags, table.concat(m.required_tags, ',')") == "0\twater,deploy");
+    CHECK(lua.console("table.concat(e:mover().required_tags, ',')") == "water,deploy");
+    raises(lua, "e:mover{blocked_tags = {'acid'}}", "mover blocked_tags: the map grid has no tag 'acid'");
+    raises(lua, "e:mover{required_tags = {'acid'}}", "mover required_tags: the map grid has no tag 'acid'");
+    CHECK(lua.console("table.concat(e:mover().required_tags, ',')") == "water,deploy"); // nothing changed
+    // Path rules take required_tags the same way; a goal off the class is unreachable.
+    raises(lua, "w:path({x = 1, z = 1}, {x = 2, z = 2}, {required_tags = {'acid'}})",
+           "rules.required_tags: the map grid has no tag 'acid'");
+    CHECK(lua.console("#w:path({x = 1, z = 1}, {x = 2, z = 2}, {required_tags = {'water'}})") == "0");
+    CHECK(lua.console("#w:reachable({x = 1, z = 1}, 3, {required_tags = {'water'}})") == "1");
+    // Gravity is movement tuning.
+    CHECK(lua.console("w:movement_tuning().gravity") == "20.0");
+    CHECK(lua.console("w:set_movement_tuning{gravity = 9.8} "
+                      "return ('%.1f'):format(w:movement_tuning().gravity)") == "9.8");
+    raises(lua, "w:set_movement_tuning{gravity = 0}", "gravity must be from 0.1 to 1000");
+    // A launch flies and lands with the jump events.
+    REQUIRE(lua.evaluate("e:mover{fly = false, required_tags = {}}; e:launch{x = 0, y = 3, z = 0}").ok);
+    CHECK(lua.console("e:moving()") == "true");
+    raises(lua, "e:launch(5)", "Expected a {x, y, z} table");
+    raises(lua, "e:launch{x = 1e7}", "must be from -1000000 to 1000000");
+    for (int i = 0; i < 90; ++i) {
+        engine.tick(1.0 / 60);
+    }
+    CHECK(lua.console("e:moving()") == "false");
+    CHECK(lua.console("('%.2f'):format(e.position.y)") == "0.00");
+    CHECK(lua.console("local names = {} for _, ev in ipairs(w:events()) do "
+                      "if ev.type == 'jump_start' or ev.type == 'landed' then names[#names + 1] = ev.type end end "
+                      "return table.concat(names, ',')") == "jump_start,landed");
 }

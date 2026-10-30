@@ -8,6 +8,9 @@
 --- Command handlers are plain functions(context, params) registered by the
 --- system that plays the timeline (side-view battles register step, anim,
 --- effect, return...). Handlers may wait; later commands start on time.
+--- Times are measured on the playing task's clock (`task.clock`), the same
+--- clock its waits use, so a timeline bound to a world keeps its spacing
+--- under hit-stop and time scales.
 local task = require("fe.task")
 
 local timeline = {}
@@ -20,10 +23,10 @@ function timeline.play(entries, handlers, context)
   local sorted = {}
   for i, entry in ipairs(entries) do sorted[i] = entry end
   table.sort(sorted, function(a, b) return (a.time or 0) < (b.time or 0) end)
-  local start = task.time()
+  local start = task.clock()
   local running = {}
   for _, entry in ipairs(sorted) do
-    local delay = (entry.time or 0) - (task.time() - start)
+    local delay = (entry.time or 0) - (task.clock() - start)
     if delay > 0 then task.wait(delay) end
     local handler = handlers[entry.command]
     if not handler then

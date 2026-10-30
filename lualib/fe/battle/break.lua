@@ -35,8 +35,16 @@
 ---   attack skill's hits once more (a 2-hit attack boosted by 2 hits 6
 ---   times); other actions gain `power_per_point` power per point.
 ---
---- Events: "break" (battler), "shield_restored" (battler). Notification
---- hook: on_break(battle, battler, breaker).
+--- * A revived enemy returns with full shields (on_revived), so a boss
+---   script's revival makes it breakable again at once.
+--- * `shields.reveal(battle, b, key)` reveals a weakness without a hit
+---   (an Analyze skill); `shields.set_weaknesses(b, list)` changes a
+---   battler's weaknesses mid-battle (a phase change) and
+---   `shields.weaknesses(b)` reads them (b.data.weak, else the data's weak).
+---
+--- Events: "break" (battler), "shield_restored" (battler),
+--- "weakness_revealed" ({battler, key}). Notification hook:
+--- on_break(battle, battler, breaker).
 local Battle = require("fe.battle.core")
 local data = require("fe.data")
 local i18n = require("fe.i18n")
@@ -65,9 +73,17 @@ i18n.defaults({ fe = { battle = {
 
 local bestiary = state.section("bestiary", function() return { weaknesses = {} } end)
 
---- Weaknesses (element and damage type ids) of a battler.
+--- Weaknesses (element and damage type ids) of a battler: the list set
+--- with shields.set_weaknesses for this battle, else its enemy data's `weak`.
 function shields.weaknesses(b)
-  return b.def and b.def.weak or {}
+  return b.data.weak or (b.def and b.def.weak) or {}
+end
+
+--- Change a battler's weaknesses for the rest of the battle (a boss phase
+--- that shifts its element); nil goes back to the data. Reveals stay.
+---@param list string[]|nil
+function shields.set_weaknesses(b, list)
+  b.data.weak = list
 end
 
 function shields.is_broken(b)
@@ -94,13 +110,21 @@ function shields.revealed(b, key)
   return known ~= nil and known ~= false and known[key] == true
 end
 
-local function reveal(b, key)
+--- Reveal one of a battler's weaknesses (an Analyze skill): in this battle
+--- and, with settings.remember, in the bestiary for its enemy type.
+--- Presents "weakness_revealed" {battler, key} when it was hidden before.
+--- `battle` may be nil (no event). Returns true when it was hidden.
+function shields.reveal(battle, b, key)
+  local was_hidden = not shields.revealed(b, key)
+  b.data.revealed = b.data.revealed or {}
   b.data.revealed[key] = true
   if settings.remember and b.def then
     local known = bestiary.weaknesses[b.def.id] or {}
     known[key] = true
     bestiary.weaknesses[b.def.id] = known
   end
+  if was_hidden and battle then battle:present("weakness_revealed", { battler = b, key = key }) end
+  return was_hidden
 end
 
 -- Enemies get shields once; a battler swapped back in keeps its own.
@@ -138,7 +162,7 @@ local function weakness_hit(ctx)
   local weak = shields.weaknesses(target)
   for _, key in ipairs({ ctx.damage_type or false, ctx.element or false }) do
     if key and tablex.contains(weak, key) then
-      reveal(target, key)
+      shields.reveal(battle, target, key)
       if not shields.is_broken(target) and target.data.shield > 0 then
         target.data.shield = target.data.shield - 1
         if target.data.shield == 0 and target:alive() then break_battler(battle, target, ctx.user) end
@@ -224,6 +248,18 @@ function shields.rules(extra)
     if b.data.max_shield and b.data.shield == 0 and not shields.is_broken(b) and b:alive() then
       b.data.shield = b.data.max_shield
       battle:present("shield_restored", b)
+    end
+  end
+
+  --- A revived enemy comes back with full shields (and no break state
+  --- left over), so it can be broken again at once.
+  function layer.on_revived(battle, b)
+    if b.data.max_shield then
+      b:remove_state(settings.state)
+      if b.data.shield ~= b.data.max_shield then
+        b.data.shield = b.data.max_shield
+        battle:present("shield_restored", b)
+      end
     end
   end
 

@@ -65,6 +65,7 @@ function rpg.install()
       return leader and leader:sprite()
     end
   end
+  require("fe.field.followers").watch_party(rpg.party)
   field.follower_sprites = function()
     local out = {}
     for i, actor in ipairs(rpg.party.members()) do

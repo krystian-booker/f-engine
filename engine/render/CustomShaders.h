@@ -22,6 +22,14 @@ constexpr std::size_t ShaderVertexCount = 4;
 // vertex shader, whose outputs its inputs must match. A shader that cannot be
 // compiled, loaded or paired is reported once, with the error, and its users
 // fall back to the engine's own shader (post passes are skipped).
+//
+// A shader may come with a shadow variant, fs_<name>_shadow.sc: the shadow
+// passes (sun cascades, light tiles) and the sprite silhouette pass use it
+// in place of the engine's depth-only shader, paired with the same vertex
+// shader as the colour shader. Without one those passes keep the engine's.
+// A sprite shader may likewise come with fs_<name>_distort.sc, which the
+// distortion pass uses for that shader's distort sprites in place of
+// fs_distort.sc (same inputs, samplers and uniforms, plus u_params).
 class CustomShaders {
 public:
     CustomShaders(std::filesystem::path gameRoot, std::filesystem::path shaderRoot);
@@ -33,20 +41,33 @@ public:
     bgfx::ProgramHandle program(const std::string& name, ShaderVertex vertex) {
         return program(slot(name), vertex);
     }
+    // The shadow variant's program; invalid when the game ships none (no
+    // error) or it cannot be used (reported once).
+    bgfx::ProgramHandle shadowProgram(int slot, ShaderVertex vertex);
+    // The distortion variant's program, likewise.
+    bgfx::ProgramHandle distortProgram(int slot, ShaderVertex vertex);
     // Development builds: forgets programs whose source changed (checked once a second).
     void poll();
     // Engine shaders were rebuilt: programs are loaded again on next use.
     void reload(std::filesystem::path shaderRoot);
 
 private:
-    struct Entry {
-        std::string name;
+    // The colour shader or one of its variants: one program per vertex shader.
+    struct Variant {
+        std::string name; // fs_<name>
         std::array<Program, ShaderVertexCount> programs;
         std::array<bool, ShaderVertexCount> tried{};
         std::filesystem::file_time_type source{};
+        bool exists = false; // a source or shipped binary was found
         bool reported = false;
     };
-    void forget(Entry& entry);
+    struct Entry {
+        Variant color, shadow, distort;
+        [[nodiscard]] std::array<Variant*, 3> variants() { return {&color, &shadow, &distort}; }
+    };
+    [[nodiscard]] bool variantExists(const std::string& name) const;
+    void forget(Variant& variant);
+    bgfx::ProgramHandle load(Variant& variant, ShaderVertex vertex, bool required);
     [[nodiscard]] std::filesystem::path binary(const std::string& name,
                                                std::filesystem::file_time_type source);
     std::filesystem::path gameRoot_, shaderRoot_;

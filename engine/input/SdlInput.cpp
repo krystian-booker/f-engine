@@ -1,6 +1,6 @@
 #include "engine/input/SdlInput.h"
 #include "engine/core/Log.h"
-#include "engine/runtime/ReplayHarness.h"
+#include "engine/services/InputRecorder.h"
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -90,28 +90,12 @@ void SdlInput::feedPad(SDL_JoystickID id, const std::string& control, float valu
         }
     }
     // "pad:" first: rebinding screens take the first input pressed in a tick.
-    feed("pad:" + control, strongest);
-    feed("pad" + std::to_string(source.number) + ":" + control, value);
+    state_.feed("pad:" + control, strongest);
+    state_.feed("pad" + std::to_string(source.number) + ":" + control, value);
 }
 
-void SdlInput::compose(const std::string& text, int cursor) {
-    composing_ = !text.empty();
-    state_.feedComposition(text, cursor);
-    if (recorder_) {
-        recorder_->composition(text, cursor);
-    }
-}
-
-void SdlInput::feed(const std::string& input, float value) {
-    state_.feed(input, value);
-    if (value != 0) {
-        down_[input] = value;
-    } else {
-        down_.erase(input);
-    }
-    if (recorder_) {
-        recorder_->input(input, value);
-    }
+void SdlInput::record(InputRecorder* recorder) {
+    state_.setRecorder(recorder);
 }
 
 std::string SdlInput::padType(SDL_GamepadType type, Uint16 vendor, Uint16 product, bool steamDeck) {
@@ -197,13 +181,7 @@ void SdlInput::releaseAll() {
             SDL_RumbleGamepadTriggers(pad.handle, 0, 0, 0);
         }
     }
-    std::vector<std::string> held;
-    for (const auto& [input, value] : down_) {
-        held.push_back(input);
-    }
-    for (const auto& input : held) {
-        feed(input, 0);
-    }
+    state_.focusLost();
 }
 
 void SdlInput::process(const SDL_Event& event, const Canvas& canvas, glm::ivec2 viewport, float density,
@@ -211,24 +189,18 @@ void SdlInput::process(const SDL_Event& event, const Canvas& canvas, glm::ivec2 
     switch (event.type) {
     case SDL_EVENT_WINDOW_FOCUS_LOST:
         releaseAll();
-        if (composing_) {
-            compose("", 0);
-        }
         break;
     case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP:
         if (!event.key.repeat && !(uiCaptured && event.key.down)) {
-            feed(std::string("key:") + SDL_GetScancodeName(event.key.scancode), event.key.down ? 1.0f : 0.0f);
+            state_.feed(std::string("key:") + SDL_GetScancodeName(event.key.scancode),
+                        event.key.down ? 1.0f : 0.0f);
         }
         break;
     case SDL_EVENT_MOUSE_MOTION:
         if (!uiCaptured) {
-            const auto position =
-                canvas.fromWindow({event.motion.x * density, event.motion.y * density}, viewport);
-            state_.feedMouse(position);
-            if (recorder_) {
-                recorder_->mouse(position);
-            }
+            state_.feedMouse(
+                canvas.fromWindow({event.motion.x * density, event.motion.y * density}, viewport));
         }
         break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -257,29 +229,24 @@ void SdlInput::process(const SDL_Event& event, const Canvas& canvas, glm::ivec2 
             break;
         }
         if (name) {
-            feed(name, event.button.down ? 1.0f : 0.0f);
+            state_.feed(name, event.button.down ? 1.0f : 0.0f);
         }
         break;
     }
     case SDL_EVENT_MOUSE_WHEEL:
         if (!uiCaptured) {
             state_.feedWheel(event.wheel.y);
-            if (recorder_) {
-                recorder_->wheel(event.wheel.y);
-            }
         }
         break;
     case SDL_EVENT_TEXT_INPUT:
         if (!uiCaptured && event.text.text) {
             state_.feedText(event.text.text);
-            if (recorder_) {
-                recorder_->text(event.text.text);
-            }
         }
         break;
     case SDL_EVENT_TEXT_EDITING:
         if (!uiCaptured && state_.textEntry().active) {
-            compose(event.edit.text ? event.edit.text : "", std::max(0, int(event.edit.start)));
+            state_.feedComposition(event.edit.text ? event.edit.text : "",
+                                   std::max(0, int(event.edit.start)));
         }
         break;
     case SDL_EVENT_GAMEPAD_ADDED:

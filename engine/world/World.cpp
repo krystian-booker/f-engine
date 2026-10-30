@@ -48,13 +48,17 @@ World::World(std::string name, MapData map, AssetCache& assets, std::uint64_t se
       collision_(registry_, staticBoxes(map_, assets_, geometryPath())),
       movement_(registry_, map_.grid, collision_, events_), particles_(registry_, assets_, random_) {
     rebuildStatic();
-    camera_.target = map_.points.empty() ? glm::vec3(map_.grid.width() * 0.5f, 0, map_.grid.depth() * 0.5f)
-                                         : map_.points.begin()->second.position;
+    // The camera starts on the `start` point, else the first point, else the middle.
+    const auto start = map_.points.find("start");
+    camera_.target = start != map_.points.end() ? start->second.position
+                     : map_.points.empty()      ? glm::vec3(map_.grid.width() * 0.5f, 0, map_.grid.depth() * 0.5f)
+                                                : map_.points.begin()->second.position;
     camera_.snap();
 }
 
 void World::rebuildStatic() {
     collision_.setBoxes(staticBoxes(map_, assets_, geometryPath()));
+    collision_.refresh();
     Json emitters = Json::array();
     for (const auto& emitter : map_.emitters) {
         emitters.push_back({toJson(emitter.position), emitter.settings.toJson()});
@@ -289,11 +293,10 @@ void World::tick(double dt) {
         return;
     }
     time_ += dt;
-    collision_.refresh();
-    movement_.collectRiders();
     movement_.update(dt);
     movement_.carryRiders();
     movement_.updateAttachments();
+    movement_.reportCells();
     advanceAnimations(registry_, assets_, camera_.yaw, dt, events_);
     particles_.update(dt, map_.environment.weather, camera_.target);
     collision_.updateContacts(events_);

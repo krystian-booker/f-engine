@@ -22,6 +22,15 @@ local screen = {
   text_scales = { 1, 1.25, 1.5 },
 }
 
+--- The file's values, for `__reload`.
+screen.file_defaults = { rebindable = tablex.deep_copy(screen.rebindable), text_scales = tablex.deep_copy(screen.text_scales) }
+
+--- Adopt edited lists on hot reload unless the game changed them.
+function screen.__reload(live, fresh)
+  live.file_defaults = tablex.adopt(live, { rebindable = fresh.rebindable, text_scales = fresh.text_scales },
+    live.file_defaults)
+end
+
 i18n.defaults({ fe = {
   settings = {
     title = "Settings", master = "Master volume", music = "Music volume", sfx = "Effects volume",
@@ -128,11 +137,11 @@ local function change(item, step)
   elseif item.choices then
     config.set(item.key, cycle(item.choices, config.values[item.key], step))
   elseif item.cycle then
-    local changes = item.cycle(step)
-    for key, value in pairs(changes) do
-      if key ~= "fullscreen" then config.values.display[key] = value end
+    local display = tablex.copy(config.values.display)
+    for key, value in pairs(item.cycle(step)) do
+      if key ~= "fullscreen" then display[key] = value end
     end
-    config.set("display", config.values.display)
+    config.set("display", display)
   elseif item.key then
     config.set(item.key, tablex.clamp(config.values[item.key] + step * item.step, 0, item.max or 1))
   end

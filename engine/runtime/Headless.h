@@ -3,6 +3,10 @@
 #include <string>
 
 namespace fe {
+// The running executable's absolute path, asked of the operating system
+// (argv[0] may be relative to a working directory elsewhere, a symlink or a
+// bare name found through PATH); `fallback` when the system cannot say.
+std::filesystem::path executablePath(const std::filesystem::path& fallback);
 // Locates lualib next to the executable: <exe dir>/lualib, an app bundle's
 // Resources/lualib or <exe dir>/share/fengine/lualib. Development builds also
 // search the folders above and fall back to the source tree; shipped builds

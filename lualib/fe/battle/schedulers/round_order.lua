@@ -1,8 +1,9 @@
 --- Round-based turns: battlers choose actions, then turns resolve in order
 --- (skill `priority` first, then `order_key`, by default speed). Every
 --- living battler takes a turn each round, including ones that cannot act
---- (asleep, broken): they get upkeep only, so their states still count down
---- and turn hooks still run. Obstacles take no turns.
+--- (asleep, broken) or whose turn a rule layer skips (Battle:skips_turn):
+--- they get upkeep only, so their states still count down and turn hooks
+--- still run. Obstacles take no turns.
 ---
 --- Rule layers can reorder a round with `order(battle, entries, preview)`
 --- (entries are {battler, action, order}, sorted first-to-last; reorder in
@@ -26,6 +27,7 @@
 ---   jitter = 0.1,
 --- }
 --- ```
+local Battle = require("fe.battle.core")
 local data = require("fe.data")
 local tablex = require("fe.tablex")
 
@@ -54,12 +56,13 @@ function round_order.new(settings)
     return factors
   end
 
-  -- Sort key: priority, then order_key/speed times the round's factor.
+  -- Sort key: priority (times Battle.settings.priority_scale, so it always
+  -- outranks speed), then order_key/speed times the round's factor.
   local function order_value(battle, entry, factors)
     local action = entry.action or { user = entry.battler }
     local skill = action.skill and data.find("skills", action.skill)
     local value = settings.order_key and settings.order_key(battle, action) or entry.battler:stat("speed")
-    return (skill and skill.priority or 0) * 10000 + value * (factors[entry.battler] or 1)
+    return (skill and skill.priority or 0) * Battle.settings.priority_scale + value * (factors[entry.battler] or 1)
   end
 
   local function sorted(battle, entries, factors, preview)
@@ -137,7 +140,7 @@ function round_order.new(settings)
         local action = false
         if settings.choose == "turn" then
           action = nil
-        elseif b:can_act() then
+        elseif b:can_act() and not battle:skips_turn(b) then
           action = battle:decide(b) or false
         end
         -- A battler swapped out while choosing hands its turn to the newcomer.

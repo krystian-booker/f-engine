@@ -6,17 +6,26 @@
 --- (`fe.time.local_date`, formatted by the `fe.save.date` string).
 local i18n = require("fe.i18n")
 local save = require("fe.save")
+local tablex = require("fe.tablex")
 local ui = require("fe.ui")
 
-local screen = { slots = { "slot1", "slot2", "slot3", "slot4" } }
+local screen = { slots = { "slot1", "slot2", "slot3", "slot4" }, thumbnail_size = { 40, 23 } }
+
+--- The file's values, for `__reload`.
+screen.file_defaults = { slots = tablex.deep_copy(screen.slots), thumbnail_size = tablex.deep_copy(screen.thumbnail_size) }
+
+--- Adopt edited slots and thumbnail size on hot reload unless the game
+--- changed them.
+function screen.__reload(live, fresh)
+  live.file_defaults = tablex.adopt(live, { slots = fresh.slots, thumbnail_size = fresh.thumbnail_size },
+    live.file_defaults)
+end
 
 i18n.defaults({ fe = { save = {
   save = "Save", load = "Load", empty = "Empty", unknown = "Unknown", auto = "Auto", file = "File {number}",
   level = "{name} Lv{level}", save_failed = "Could not save the game.", load_failed = "Could not load this save.",
   date = "{year}-{month}-{day} {hour}:{min}",
 } } })
-
-local thumbnail_w, thumbnail_h = 40, 23
 
 local function clock(seconds)
   seconds = math.floor(seconds or 0)
@@ -83,8 +92,9 @@ function screen.open(mode)
       ui.text(item.label, x, y, { color = selected and ui.theme.highlight or (item.enabled and ui.theme.text or ui.theme.disabled) })
       local tx = x + 44
       if item.thumbnail then
-        fe.canvas.image(item.thumbnail, tx, y + 1, { w = thumbnail_w, h = thumbnail_h, linear = true })
-        tx = tx + thumbnail_w + 6
+        local tw, th = screen.thumbnail_size[1], screen.thumbnail_size[2]
+        fe.canvas.image(item.thumbnail, tx, y + 1, { w = tw, h = th, linear = true })
+        tx = tx + tw + 6
       end
       ui.text(item.line, tx, y, { color = item.enabled and ui.theme.text or ui.theme.disabled })
       ui.text(item.party, tx, y + 11, { color = ui.theme.muted })

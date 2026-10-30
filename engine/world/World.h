@@ -93,11 +93,14 @@ public:
     void rename(entt::entity entity, const std::string& id);
     void setDestroyHook(std::function<void(entt::entity)> hook) { destroyHook_ = std::move(hook); }
 
-    // Movement (see MovementSystem)
-    void moveTo(entt::entity entity, glm::vec3 target, bool findPath,
-                std::optional<int> layer = std::nullopt) {
-        movement_.moveTo(entity, target, findPath, layer);
+    // Movement (see MovementSystem). `rules`, when given, plan the route
+    // instead of the mover's defaults.
+    void moveTo(entt::entity entity, glm::vec3 target, bool findPath, std::optional<int> layer = std::nullopt,
+                const StepRules* rules = nullptr) {
+        movement_.moveTo(entity, target, findPath, layer, rules);
     }
+    [[nodiscard]] MovementTuning& movementTuning() { return movement_.tuning; }
+    [[nodiscard]] const MovementTuning& movementTuning() const { return movement_.tuning; }
     void follow(entt::entity entity, std::vector<Waypoint> route) {
         movement_.follow(entity, std::move(route));
     }
@@ -105,6 +108,8 @@ public:
     void jump(entt::entity entity, glm::vec3 target, float height, float duration, int layer) {
         movement_.jump(entity, target, height, duration, layer);
     }
+    // A ballistic flight under MovementTuning::gravity (see MovementSystem::launch).
+    void launch(entt::entity entity, glm::vec3 velocity) { movement_.launch(entity, velocity); }
     // Instantly places an entity, snapping height to the grid unless `keepHeight`.
     void place(entt::entity entity, glm::vec3 position, int layer, bool keepHeight = false) {
         movement_.place(entity, position, layer, keepHeight);
@@ -141,8 +146,12 @@ public:
     // Applies the live map's colliders (plus geometry marker boxes) and, when
     // they changed, its emitters, replacing the emitter entities made from the
     // map; lights are read from the map every frame. The editor calls this
-    // after edits.
+    // after edits; it also refreshes the spatial hash (refreshCollision()).
     void rebuildStatic();
+    // Re-buckets every collider. Movement, place() and spawn keep the spatial
+    // hash current; code that writes Transform::position directly (the
+    // editor) calls this afterwards.
+    void refreshCollision() { collision_.refresh(); }
 
     // First thing a ray hits: grid surfaces and cliff faces, static colliders,
     // and entities (their collider, or their sprite's quad when they have no

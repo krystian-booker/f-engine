@@ -6,7 +6,7 @@ SAMPLER2D(s_palette, 1);
 SAMPLER2D(s_spriteNormal, 5);
 SAMPLER2D(s_spriteEmissive, 6);
 // [0] atlas texel w, h, palette enabled, alpha cutoff
-// [1] output (0-3 blendOutput modes, 4 silhouette), has normal map, has emissive mask
+// [1] output (0-3 blendOutput modes, 4 silhouette), has normal map, has emissive mask, outline width (texels)
 uniform vec4 u_sprite[2];
 float alphaAt(vec2 uv) { return texture2D(s_albedo, uv).a; }
 void main() {
@@ -23,7 +23,7 @@ void main() {
         return;
     }
     if (v_outline.a > 0.0 && albedo.a < 0.5) {
-        vec2 t = u_sprite[0].xy;
+        vec2 t = u_sprite[0].xy * u_sprite[1].w;
         float around = max(max(alphaAt(v_texcoord0 + vec2(t.x, 0.0)), alphaAt(v_texcoord0 - vec2(t.x, 0.0))),
                            max(alphaAt(v_texcoord0 + vec2(0.0, t.y)), alphaAt(v_texcoord0 - vec2(0.0, t.y))));
         if (around > 0.5) {

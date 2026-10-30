@@ -19,12 +19,26 @@
 --- `dialogue.draw_box` to restyle, or `dialogue.Box` (a scene class with
 --- `show`, `update`, `draw`) to change behaviour. `style.backlog_input`
 --- (default "info") opens the backlog screen while a box is shown.
+--- `dialogue.acquire` (the box for the calling task) and
+--- `dialogue.close_box` are module functions too.
+---
+--- The box does not block the scenes under it (`blocks_update = false`),
+--- so the field keeps following the player with the camera, draining world
+--- events and running parallel pages and routines while a line is on
+--- screen; the field gates its own input while any scene is above it.
+---
+--- Portraits: a line's `portrait` is drawn on `line.side` ("left" or
+--- "right", default `style.portrait_side`). With `style.two_portraits` the
+--- box remembers the last portrait shown on each side and draws both, the
+--- one not speaking dimmed by `style.portrait_dim`, for conversations
+--- between two characters facing each other.
 ---
 --- Voice and pacing:
----   * `voice = path` on a line plays voice-over on the "voice" bus. It
----     stops when the player advances; auto-advance waits until it has
----     finished. `blip = id` plays a typing blip every `style.blip_every`
----     characters instead.
+---   * `voice = id` on a line plays voice-over on the "voice" bus through
+---     `fe.sound.voice`: an id from the voice catalog (data/audio.json) or
+---     a file path. It stops when the player advances; auto-advance waits
+---     until it has finished. `blip = id` plays a typing blip every
+---     `style.blip_every` characters instead.
 ---   * `dialogue.speaking(speaker, talking)` fires when a speaker starts and
 ---     stops talking (voice-over playing, or text still typing without
 ---     voice). `mouth = {paths}` on a line animates the portrait with those
@@ -40,6 +54,7 @@ local config = require("fe.config")
 local scene = require("fe.scene")
 local signal = require("fe.signal")
 local sound = require("fe.sound")
+local tablex = require("fe.tablex")
 local task = require("fe.task")
 local ui = require("fe.ui")
 
@@ -56,6 +71,11 @@ local dialogue = {
     fast_forward_input = "skip", -- hold to fast-forward (false: none)
     fast_forward_delay = 0.12, -- seconds a complete line stays while fast-forwarding
     mouth_fps = 8,             -- lip-flap frames per second
+    portrait_side = "left",    -- side a line's portrait is drawn on unless the line says
+    two_portraits = false,     -- keep and draw the last portrait of each side
+    portrait_dim = 0.45,       -- alpha of the portrait that is not speaking
+    bubble_width = 120,        -- widest speech bubble
+    bubble_color = 0x282030ff, -- speech bubble ink
   },
   auto = false,
   --- Emitted (speaker, text, line) when a line is shown.
@@ -69,7 +89,16 @@ local dialogue = {
   backlog_size = 200,
 }
 
-local Box = { name = "dialogue", blocks_update = true }
+--- The file's style, for `__reload`.
+dialogue.file_defaults = { style = tablex.deep_copy(dialogue.style) }
+
+--- Adopt edited style values on hot reload (values the game changed at
+--- runtime are kept).
+function dialogue.__reload(live, fresh)
+  live.file_defaults.style = tablex.adopt(live.style, fresh.style, live.file_defaults.style)
+end
+
+local Box = { name = "dialogue", blocks_update = false }
 Box.__index = Box
 dialogue.Box = Box
 
@@ -81,9 +110,37 @@ local function box_rect(style)
   return style.margin, y, w, h
 end
 
-local function text_width(line, style)
+--- The portraits a box shows: {left = portrait?, right = portrait?}, each
+--- {image, mouth, speaker, speaking}. With `style.two_portraits` both sides
+--- keep their last portrait; otherwise only the current line's side has one.
+---@param box table
+---@return table
+function dialogue.portraits(box)
+  local style = dialogue.style
+  local line = box.line
+  local sides = style.two_portraits and box.sides or {}
+  if line and line.portrait then
+    local side = line.side or style.portrait_side
+    for key, portrait in pairs(sides) do
+      if key ~= side then portrait.speaking = false end
+    end
+    sides[side] = { image = line.portrait, mouth = line.mouth, speaker = line.speaker, speaking = true }
+  elseif line then
+    for _, portrait in pairs(sides) do portrait.speaking = false end
+  end
+  box.sides = sides
+  return sides
+end
+
+local function text_width(line, style, sides)
   local _, _, w = box_rect(style)
-  local inset = line.portrait and style.portrait_size + 10 or 0
+  local inset = 0
+  if sides then
+    if sides.left then inset = inset + style.portrait_size + 10 end
+    if sides.right then inset = inset + style.portrait_size + 10 end
+  elseif line.portrait then
+    inset = style.portrait_size + 10
+  end
   return w - ui.theme.padding * 2 - inset - 6
 end
 
@@ -102,11 +159,12 @@ function Box:show(line)
   self:stop_voice()
   self.line = line
   self.done = false
+  local sides = dialogue.portraits(self)
   self.pages = fe.text.paginate(line.text, { font = ui.theme.font, size = ui.text_size(),
-    width = text_width(line, dialogue.style) }, dialogue.style.lines)
+    width = text_width(line, dialogue.style, dialogue.style.two_portraits and sides or nil) }, dialogue.style.lines)
   self.page = 1
   self:start_page()
-  if line.voice then self.voice = sound.play(line.voice, { bus = "voice" }) end
+  if line.voice then self.voice = sound.voice(line.voice) end
   self:update_speaking()
 end
 
@@ -202,28 +260,43 @@ function Box:update(dt)
   self:update_speaking()
 end
 
+-- Draw one portrait; the speaking one may lip-flap, the other is dimmed.
+local function draw_portrait(box, portrait, px, py)
+  local style = dialogue.style
+  local image = portrait.image
+  if portrait.speaking and portrait.mouth and #portrait.mouth > 0 and box:talking() then
+    image = portrait.mouth[math.floor(task.time() * style.mouth_fps) % #portrait.mouth + 1]
+  end
+  if not portrait.speaking then fe.canvas.push({ alpha = style.portrait_dim }) end
+  fe.canvas.image(image, px, py, { w = style.portrait_size, h = style.portrait_size })
+  if not portrait.speaking then fe.canvas.pop() end
+end
+
 --- Draw a message box; replace to restyle.
 function dialogue.draw_box(box)
   local style = dialogue.style
   local x, y, w, h = box_rect(style)
   ui.window(x, y, w, h)
   local line = box.line
+  local sides = box.sides or dialogue.portraits(box)
   local tx = x + ui.theme.padding + 2
-  if line.portrait then
-    local image = line.portrait
-    if line.mouth and #line.mouth > 0 and box:talking() then
-      image = line.mouth[math.floor(task.time() * style.mouth_fps) % #line.mouth + 1]
-    end
-    fe.canvas.image(image, x + 5, y + (h - style.portrait_size) / 2, { w = style.portrait_size, h = style.portrait_size })
+  local py = y + (h - style.portrait_size) / 2
+  if sides.left then
+    draw_portrait(box, sides.left, x + 5, py)
     tx = tx + style.portrait_size + 8
+  end
+  if sides.right then
+    draw_portrait(box, sides.right, x + w - 5 - style.portrait_size, py)
   end
   if line.speaker and line.speaker ~= "" then
     local nw = ui.measure(line.speaker) + 12
     local ny = style.position == "top" and y + h - 4 or y - 12
-    ui.window(x + 6, ny, nw, 16)
-    ui.text(line.speaker, x + 12, ny + 4, { color = ui.theme.heading })
+    local nx = (line.side or style.portrait_side) == "right" and x + w - 6 - nw or x + 6
+    ui.window(nx, ny, nw, 16)
+    ui.text(line.speaker, nx + 6, ny + 4, { color = ui.theme.heading })
   end
-  ui.text(box.pages[box.page], tx, y + ui.theme.padding + 2, { visible = box.visible, width = text_width(line, style) })
+  ui.text(box.pages[box.page], tx, y + ui.theme.padding + 2, { visible = box.visible,
+    width = text_width(line, style, sides) })
   if box.finished then
     local bob = math.floor(task.time() * 3) % 2
     ui.text(box.page < #box.pages and "▼" or "▶", x + w - 14, y + h - 12 + bob, { color = ui.theme.highlight })
@@ -238,7 +311,10 @@ end
 -- table that hot reload keeps.
 local live = { box = nil, bubbles = {} }
 
-local function close_box(b)
+--- Close a box (only the open one; others are already gone): stops its
+--- voice, announces silence, removes its scene.
+---@param b table
+function dialogue.close_box(b)
   if live.box == b then
     b:stop_voice()
     b.done = true
@@ -254,7 +330,7 @@ end
 function dialogue.close()
   local current = task.current()
   if live.box and (not current or live.box.owner == current:owner()) then
-    close_box(live.box)
+    dialogue.close_box(live.box)
   end
 end
 
@@ -273,8 +349,11 @@ function dialogue.finish_line(owner)
   end
 end
 
--- The box for the calling task, once no other line is showing.
-local function acquire()
+--- The box for the calling task (its owner, see `Task:owner`), once no
+--- other line is showing: another task's idle box is closed and a new one
+--- opened, which closes when the owner ends. Waits; call from a task.
+---@return table
+function dialogue.acquire()
   local owner = task.current() and task.current():owner()
   if not owner then
     error("dialogue.say waits for the player, so it must run inside a task", 3)
@@ -282,12 +361,12 @@ local function acquire()
   task.wait_until(function()
     return not live.box or not live.box.speaking or not live.box.owner:running()
   end)
-  if live.box and live.box.owner ~= owner then close_box(live.box) end
+  if live.box and live.box.owner ~= owner then dialogue.close_box(live.box) end
   if not live.box then
     local b = setmetatable({ owner = owner }, dialogue.Box)
     live.box = b
     scene.push(b)
-    b.forget = owner:finally(function() close_box(b) end)
+    b.forget = owner:finally(function() dialogue.close_box(b) end)
   end
   return live.box
 end
@@ -300,20 +379,21 @@ end
 
 --- Show a line and wait until the player dismisses it. The box stays open
 --- for the next line; `close = true` closes it afterwards. `voice` is a
---- voice-over file, `blip` a typing sound, `mouth` lip-flap portrait frames.
+--- voice-over id or file, `blip` a typing sound, `mouth` lip-flap portrait
+--- frames, `side` where the portrait goes ("left" or "right").
 ---@param speaker string|nil
 ---@param text string markup
----@param options? {portrait?: string, mouth?: string[], voice?: string, blip?: string, speed?: number, close?: boolean}
+---@param options? {portrait?: string, side?: "left"|"right", mouth?: string[], voice?: string, blip?: string, speed?: number, close?: boolean}
 function dialogue.say(speaker, text, options)
   options = options or {}
-  local line = { speaker = speaker, text = text, portrait = options.portrait, mouth = options.mouth,
+  local line = { speaker = speaker, text = text, portrait = options.portrait, side = options.side, mouth = options.mouth,
     voice = options.voice, blip = options.blip, speed = options.speed }
   if task.skipping() then
     remember(speaker, text)
     dialogue.line_shown:emit(speaker, text, line)
     return
   end
-  local b = acquire()
+  local b = dialogue.acquire()
   b.speaking = true
   task.ensure(function()
     b:show(line)
@@ -324,7 +404,7 @@ function dialogue.say(speaker, text, options)
     b.speaking = false
     b:stop_voice()
   end)
-  if options.close then close_box(b) end
+  if options.close then dialogue.close_box(b) end
 end
 
 --- Ask a question; returns the chosen index. `cancel` picks that index when
@@ -344,7 +424,7 @@ function dialogue.choice(options, settings)
   local y = dialogue.style.position == "top" and by + bh + 4 or by - height - 4
   local index = ui.choose(options, {
     x = cw - width - dialogue.style.margin, y = y, width = width, rows = #options,
-    cancel = cancel or nil, title = settings.title,
+    cancel = cancel or nil, title = settings.title, blocks_update = false,
   })
   return index or cancel
 end
@@ -371,11 +451,12 @@ function dialogue.draw_bubbles()
       alive[#alive + 1] = b
       local x, y, visible = b.entity:screen_position(b.lift)
       if visible then
-        local w, h = ui.measure(b.text, { width = 120 })
-        w = math.min(120, w)
+        local style = dialogue.style
+        local w, h = ui.measure(b.text, { width = style.bubble_width })
+        w = math.min(style.bubble_width, w)
         local bx, by = math.floor(x - w / 2 - 5), math.floor(y - h - 10)
         fe.canvas.nine_slice("@fe/assets/ui/bubble.png", bx, by, w + 10, h + 8, 4)
-        fe.canvas.text(b.text, bx + 5, by + 4, { width = w + 1, color = 0x282030ff })
+        fe.canvas.text(b.text, bx + 5, by + 4, { width = w + 1, color = style.bubble_color })
       end
     end
   end

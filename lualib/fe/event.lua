@@ -14,9 +14,22 @@
 --- when its page stops being active; when its own script turned the page
 --- off, the loop ends after that run and a run still waiting is cancelled
 --- on the next `event.tick`, so the change that turned it off finishes.
---- Page fields `sprite`, `clip`, `solid`, `hidden` change the entity.
+--- Page fields `sprite`, `clip`, `solid`, `hidden` change the entity; with
+--- no active page it is hidden and not solid, from the moment the pages
+--- are attached. An entity whose placement has a mesh (`defaults.mesh`,
+--- which fe.field sets for props) shows and hides the mesh instead of a
+--- sprite (see `event.apply`).
 --- Scripts are modules returning `function(ev)`; `ev.self` is the entity,
 --- `ev.page` the page, `ev.world` its world and `ev.player` the field player.
+---
+--- An "auto" page starts while `event.auto_allowed()` holds: by default
+--- while no blocking event runs; fe.field replaces it with
+--- `field.can_trigger`, so no auto page starts under a field lock (a
+--- cutscene, a command, a warp) and it starts when the lock lifts.
+---
+--- Module functions a game may replace: `event.matches`, `event.compare`,
+--- `event.apply`, `event.active_index`, `event.stop_parallel`,
+--- `event.auto_allowed` and `event.scope`.
 ---
 --- Conditions: `flag`, `not_flag`, `var` and `check` are built in; kits
 --- provide `quest`, `quest_stage`, `objective` (fe.quest), `hours`
@@ -147,11 +160,16 @@ function event.busy()
 end
 
 --- Attach pages to an entity (fe.field does this for placements).
+--- `defaults` describe the entity without an active page: `sprite`, `clip`,
+--- `solid` (default true) and `mesh` (true when the entity shows a mesh
+--- instead of a sprite). The active page's appearance (or the no-page
+--- state: hidden, not solid) is applied at once.
 function event.attach(entity, pages, defaults)
   local d = entity:data()
   d.pages = pages
   d.page_defaults = defaults or {}
   d.page_index = nil
+  d.page_applied = false
   d.page_errors = {}
   event.refresh(entity)
 end
@@ -162,7 +180,13 @@ function event.page(entity)
   return d.pages and d.page_index and d.pages[d.page_index]
 end
 
-local function active_index(entity, d)
+--- The index of the last page whose conditions hold, or nil. A condition
+--- that raises is reported once per message and counts as false.
+---@param entity Entity
+---@param d? table the entity's data
+---@return integer?
+function event.active_index(entity, d)
+  d = d or entity:data()
   local ev = { self = entity }
   local index
   for i, page in ipairs(d.pages) do
@@ -189,14 +213,40 @@ local function inside(job)
   return false
 end
 
--- Cancel a parallel page's task whose page is no longer active, unless the
--- caller runs inside it (its script turned the page off in the middle of
--- an emit; event.tick cancels it next tick).
-local function stop_parallel(entity, d)
+--- Cancel a parallel page's task whose page is no longer active, unless the
+--- caller runs inside it (its script turned the page off in the middle of
+--- an emit; event.tick cancels it next tick).
+---@param entity Entity
+---@param d? table the entity's data
+function event.stop_parallel(entity, d)
+  d = d or entity:data()
   local job = d.parallel
   if job and job:running() and d.parallel_page ~= event.page(entity) and not inside(job) then
     job:cancel()
   end
+end
+
+--- Give an entity the appearance of `page` (nil: no active page, so it is
+--- hidden and not solid): a sprite from the page or the defaults, or the
+--- mesh's visibility when `defaults.mesh` is set (a page `sprite` still
+--- adds one). Replace to present pages differently.
+---@param entity Entity
+---@param page table?
+---@param defaults table
+function event.apply(entity, page, defaults)
+  local visible = page ~= nil and not page.hidden
+  local sprite = page and page.sprite or defaults.sprite
+  -- `defaults.mesh` rather than asking the entity: on engines before the
+  -- component getters, `entity:mesh()` with no settings removes the mesh.
+  if defaults.mesh then
+    entity:mesh({ visible = visible })
+    if sprite then entity:sprite({ animation = sprite, clip = page and page.clip or defaults.clip or "idle", visible = visible }) end
+  else
+    entity:sprite({ animation = sprite, clip = page and page.clip or defaults.clip or "idle", visible = visible })
+  end
+  local solid = page and page.solid
+  if solid == nil then solid = defaults.solid ~= false end
+  entity:collider({ solid = visible and solid })
 end
 
 --- Re-evaluate which page is active and apply its appearance.
@@ -204,22 +254,19 @@ function event.refresh(entity)
   if not entity:valid() then return end
   local d = entity:data()
   if not d.pages then return end
-  local index = active_index(entity, d)
-  if index == d.page_index then return end
+  local index = event.active_index(entity, d)
+  if index == d.page_index and d.page_applied then return end
   d.page_index = index
-  stop_parallel(entity, d)
+  d.page_applied = true
+  event.stop_parallel(entity, d)
   d.auto_done = false
-  local page = index and d.pages[index]
-  local defaults = d.page_defaults
-  local visible = page ~= nil and not page.hidden
-  entity:sprite({
-    animation = page and page.sprite or defaults.sprite,
-    clip = page and page.clip or defaults.clip or "idle",
-    visible = visible,
-  })
-  local solid = page and page.solid
-  if solid == nil then solid = defaults.solid ~= false end
-  entity:collider({ solid = visible and solid })
+  event.apply(entity, index and d.pages[index], d.page_defaults)
+end
+
+--- Whether an "auto" page may start now (fe.field: `field.can_trigger`).
+---@return boolean
+function event.auto_allowed()
+  return not event.busy()
 end
 
 --- Run a page's script in the current task (the caller handles blocking).
@@ -283,11 +330,11 @@ function event.tick(entities, extra)
   for _, entity in ipairs(entities) do
     if entity:valid() then
       local d = entity:data()
-      stop_parallel(entity, d)
+      event.stop_parallel(entity, d)
       local page = event.page(entity)
       if page and page.trigger == "parallel" then
         event.run(entity, page, extra)
-      elseif page and page.trigger == "auto" and not d.auto_done and not event.busy() and not running(d.running) then
+      elseif page and page.trigger == "auto" and not d.auto_done and event.auto_allowed() and not running(d.running) then
         d.auto_done = true
         event.run(entity, page, extra)
       end

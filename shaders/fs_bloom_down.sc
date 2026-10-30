@@ -2,7 +2,7 @@ $input v_texcoord0
 #include <bgfx_shader.sh>
 SAMPLER2D(s_source, 0);
 // [0] source texel w, h, first level (0/1: weight by coverage and apply the threshold), threshold
-// [1] knee (absolute), upsample weight
+// [1] knee in brightness units (bloom_knee times the threshold: bloomKnee() in FrameMath.h), upsample weight
 uniform vec4 u_bloom[2];
 
 vec3 tap(vec2 uv, vec2 offset) {

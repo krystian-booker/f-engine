@@ -1,29 +1,50 @@
 --- The field main menu (needs the RPG kit). Pages are entries in
---- `menu.pages`; remove, reorder or add your own ({id, label, run, enabled?}).
---- `label` is an i18n key or plain text. A page's `run` is called in the
---- menu's task; if it raises, the error is reported and the menu returns.
---- While the menu is open the field world is paused (`fe.game.pause`), so
---- sprites, particles and field scripts stand still.
+--- `menu.pages`, a list identified by `id`; remove, reorder or add your own
+--- ({id, label, run, enabled?, closes?}). `label` is an i18n key or plain
+--- text. A page's `run` is a function, or the name of a module function
+--- (`run = "items_page"`), looked up on this module when the page is
+--- chosen, so replacing `menu.items_page` changes the Items page; the
+--- built-in pages are `menu.items_page`, `skills_page`, `equip_page`,
+--- `status_page`, `formation_page`, `quests_page`, `log_page`,
+--- `config_page` and `save_page`. It is called in the menu's task; if it
+--- raises, the error is reported and the menu returns. While the menu is
+--- open the field world is paused (`fe.game.pause`), so sprites, particles
+--- and field scripts stand still.
+---
+--- A page that starts gameplay (the world map's travel, a chapter select
+--- that warps) must not run under that pause: give it `closes = true`, and
+--- the menu closes first and runs the page in a detached task once the
+--- pause is released; or call `menu.continue_with(fn)` from inside a page
+--- for the same effect.
 ---
 --- ```lua
 --- table.insert(menu.pages, 3, {id = "crafting", label = "Craft", run = require("ui.crafting").open})
+--- menu.pages[#menu.pages + 1] = {id = "travel", label = "Travel", run = worldmap.open, closes = true}
 --- menu.allow_save = function() return false end   -- save only at save points
---- menu.page("formation").run()                     -- open one page directly
+--- menu.formation_page()                            -- open one page directly (in a task)
+--- menu.equip_page = function() ... end             -- replace a built-in page body
 --- ```
+--- Hot reload: the file's pages are merged into `menu.pages` by id (a
+--- game's own pages keep their place and functions) and `menu.dim`, the
+--- colour drawn over the field, is adopted unless the game changed it.
+---
+--- The RPG kit (`fe.rpg.*`) and `fe.effects` are required inside the pages
+--- that use them, so this file (and `fe.ui`) loads without the kit.
 local data = require("fe.data")
-local effects = require("fe.effects")
 local game = require("fe.game")
 local i18n = require("fe.i18n")
-local inventory = require("fe.rpg.inventory")
-local party = require("fe.rpg.party")
-local stats = require("fe.rpg.stats")
 local tablex = require("fe.tablex")
 local task = require("fe.task")
 local ui = require("fe.ui")
 
 local menu = {
   allow_save = function() return true end,
+  --- Colour drawn over the field while the menu is open.
+  dim = 0x050a1888,
 }
+
+--- The file's values, for `__reload`.
+menu.file_defaults = { dim = menu.dim }
 
 i18n.defaults({ fe = { menu = {
   items = "Items", skills = "Skills", equip = "Equip", status = "Status", formation = "Formation", journal = "Journal",
@@ -47,6 +68,7 @@ function menu.slot_name(slot)
 end
 
 local function member_panel(actor, x, y, w, selected)
+  local stats = require("fe.rpg.stats")
   ui.text(actor:name(), x, y, { color = selected and ui.theme.highlight or ui.theme.heading })
   ui.text(t("fe.menu.level", { level = actor:level() }), x, y, { width = w - 6, align = "right", color = ui.theme.muted })
   local row = y + 12
@@ -64,6 +86,7 @@ end
 
 --- Pick a party member; returns the Actor or nil.
 function menu.choose_member(title, filter)
+  local party = require("fe.rpg.party")
   local entries = tablex.map(party.members(), function(actor)
     return { label = actor:name(), value = actor, enabled = not filter or filter(actor) }
   end)
@@ -72,6 +95,8 @@ function menu.choose_member(title, filter)
 end
 
 local function use_on_members(source, user, pay)
+  local effects = require("fe.effects")
+  local party = require("fe.rpg.party")
   local target_kind = source.target or (source.use and source.use.target) or "ally"
   local targets
   if target_kind == "all_allies" then
@@ -96,7 +121,8 @@ local function use_on_members(source, user, pay)
   return true
 end
 
-local function items_page()
+function menu.items_page()
+  local inventory = require("fe.rpg.inventory")
   while true do
     local entries = tablex.map(inventory.list(function(item) return item.kind ~= "equipment" end), function(entry)
       local usable = entry.item.use and entry.item.use.scope ~= "battle"
@@ -115,7 +141,7 @@ local function items_page()
   end
 end
 
-local function skills_page()
+function menu.skills_page()
   local user = menu.choose_member(t("fe.menu.who"))
   if not user then return end
   while true do
@@ -138,6 +164,7 @@ local function skills_page()
 end
 
 local function stat_lines(actor, preview)
+  local stats = require("fe.rpg.stats")
   local now = actor:stats()
   local lines = {}
   for _, def in ipairs(stats.list) do
@@ -152,7 +179,8 @@ local function stat_lines(actor, preview)
   return table.concat(lines, "\n")
 end
 
-local function equip_page()
+function menu.equip_page()
+  local inventory = require("fe.rpg.inventory")
   local actor = menu.choose_member(t("fe.menu.equip"))
   if not actor then return end
   while true do
@@ -186,7 +214,8 @@ local function equip_page()
   end
 end
 
-local function status_page()
+function menu.status_page()
+  local party = require("fe.rpg.party")
   local actor = menu.choose_member(t("fe.menu.status"))
   if not actor then return end
   local view = { name = "status", blocks_update = true }
@@ -224,7 +253,8 @@ local function status_page()
   ui.run_screen(view)
 end
 
-local function formation_page()
+function menu.formation_page()
+  local party = require("fe.rpg.party")
   while true do
     local entries = {}
     for i, actor in ipairs(party.members()) do
@@ -255,7 +285,7 @@ local function formation_page()
   end
 end
 
-local function quests_page()
+function menu.quests_page()
   local quest = require("fe.quest")
   local entries = tablex.map(quest.list("active"), function(q)
     local stage = quest.stage(q.def.id)
@@ -280,22 +310,80 @@ local function quests_page()
     cancel = true, on_change = function(item) hovered = item end })
 end
 
+function menu.log_page()
+  require("fe.ui.screens.backlog").open()
+end
+
+function menu.config_page()
+  require("fe.ui.screens.config").open()
+end
+
+function menu.save_page()
+  require("fe.ui.screens.save").open("save")
+end
+
 menu.pages = {
-  { id = "items", label = "fe.menu.items", run = items_page },
-  { id = "skills", label = "fe.menu.skills", run = skills_page },
-  { id = "equip", label = "fe.menu.equip", run = equip_page },
-  { id = "status", label = "fe.menu.status", run = status_page },
-  { id = "formation", label = "fe.menu.formation", run = formation_page },
-  { id = "quests", label = "fe.menu.journal", run = quests_page },
-  { id = "log", label = "fe.menu.log", run = function() require("fe.ui.screens.backlog").open() end },
-  { id = "config", label = "fe.menu.settings", run = function() require("fe.ui.screens.config").open() end },
-  { id = "save", label = "fe.menu.save", run = function() require("fe.ui.screens.save").open("save") end,
-    enabled = function() return menu.allow_save() end },
+  { id = "items", label = "fe.menu.items", run = "items_page" },
+  { id = "skills", label = "fe.menu.skills", run = "skills_page" },
+  { id = "equip", label = "fe.menu.equip", run = "equip_page" },
+  { id = "status", label = "fe.menu.status", run = "status_page" },
+  { id = "formation", label = "fe.menu.formation", run = "formation_page" },
+  { id = "quests", label = "fe.menu.journal", run = "quests_page" },
+  { id = "log", label = "fe.menu.log", run = "log_page" },
+  { id = "config", label = "fe.menu.settings", run = "config_page" },
+  { id = "save", label = "fe.menu.save", run = "save_page", enabled = function() return menu.allow_save() end },
 }
 
 --- A page by id, or nil.
 function menu.page(id)
   return tablex.find(menu.pages, function(page) return page.id == id end)
+end
+
+--- The function a page runs: its `run`, or the module function it names
+--- (raises for a name this module lacks).
+---@param page table
+---@return fun()
+function menu.page_run(page)
+  local run = page.run
+  if type(run) == "string" then
+    run = menu[run]
+    if type(run) ~= "function" then error("menu page '" .. tostring(page.id) .. "': no menu." .. page.run .. " function", 2) end
+  end
+  return run
+end
+
+--- Adopt the file's pages by id after a hot reload: a live page with the
+--- same id takes the fresh page's `label`, `run` and `enabled`; fresh
+--- pages the live list lacks are added after the page that precedes them
+--- in the file; a game's own pages stay where they are.
+function menu.__reload(live, fresh)
+  live.file_defaults = tablex.adopt(live, { dim = fresh.dim }, live.file_defaults)
+  local previous
+  for _, page in ipairs(fresh.pages) do
+    local existing = live.page(page.id)
+    if existing then
+      existing.label, existing.run, existing.enabled = page.label, page.run, page.enabled
+    else
+      local index = previous and (tablex.index_of(live.pages, previous) or #live.pages) + 1 or 1
+      table.insert(live.pages, index, page)
+      existing = page
+    end
+    previous = existing
+  end
+end
+
+--- Close the menu and run `fn` in a detached task once the menu's pause
+--- is released (for pages that start gameplay). Outside the menu, runs it
+--- in a detached task at once.
+---@param fn fun()
+function menu.continue_with(fn)
+  local view = menu.view
+  if view and not view.closed then
+    view.continuation = fn
+    ui.close(view)
+  else
+    task.detached("menu:continue", fn)
+  end
 end
 
 local function page_entries()
@@ -304,11 +392,14 @@ local function page_entries()
   end)
 end
 
---- Open the menu (call in a task); returns when the player closes it.
+--- Open the menu (call in a task); returns when the player closes it, or
+--- when a page with `closes` is chosen (that page then runs on its own).
 function menu.open()
+  local inventory, party = require("fe.rpg.inventory"), require("fe.rpg.party")
   local world = require("fe.field").world
   local resume = world and game.pause(world) or function() end
   local view = { name = "menu", opaque = false, blocks_update = true }
+  menu.view = view
   local list = ui.List({ items = page_entries(), rows = #menu.pages,
     on_confirm = function(item) view.chosen = item.value end,
     on_cancel = function() ui.close(view) end })
@@ -316,7 +407,13 @@ function menu.open()
     while true do
       task.wait_until(function() return view.chosen ~= nil end)
       local page = view.chosen
-      local ok, err = pcall(page.run)
+      local ok, run = pcall(menu.page_run, page)
+      if ok and page.closes then
+        menu.continue_with(run)
+        return
+      end
+      local err
+      if ok then ok, err = pcall(run) else err = run end
       view.chosen = nil
       if not ok then fe.log.error("Menu page '" .. page.id .. "' failed: " .. tostring(err)) end
       list:set_items(page_entries())
@@ -332,7 +429,7 @@ function menu.open()
   end
   function view:draw()
     local cw, ch = fe.canvas.size()
-    fe.canvas.rect(0, 0, cw, ch, 0x050a1888)
+    fe.canvas.rect(0, 0, cw, ch, menu.dim)
     ui.window(8, 8, 90, #list.items * ui.row_height() + 12)
     list.active = not self.chosen
     list:draw(26, 14, 66)
@@ -348,7 +445,11 @@ function menu.open()
     ui.text(string.format("%d:%02d", playtime // 3600, (playtime // 60) % 60), 14, ch - 21,
       { width = 138, align = "right", color = ui.theme.muted })
   end
-  task.ensure(function() task.race({ function() ui.run_screen(view) end, run_pages }) end, resume)
+  task.ensure(function() task.race({ function() ui.run_screen(view) end, run_pages }) end, function()
+    resume()
+    if menu.view == view then menu.view = nil end
+  end)
+  if view.continuation then task.detached("menu:continue", view.continuation) end
 end
 
 return menu

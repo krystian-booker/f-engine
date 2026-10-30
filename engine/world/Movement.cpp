@@ -2,13 +2,32 @@
 #include "engine/nav/Query.h"
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <stdexcept>
+#include <utility>
 
 namespace fe {
 namespace {
-constexpr float SubStep = 0.05f;      // longest collision-checked move
-constexpr float DefaultRadius = 0.2f; // entities without a mover
-constexpr float DefaultHeight = 1.6f; // entities without a collider
+constexpr float SubStep = 0.05f;             // longest collision-checked move
+constexpr float MinimumJumpSeconds = 0.05f;  // shortest arc jump() accepts
+constexpr float LandingSearchStep = 0.25f;   // ring spacing when a landing is blocked
+constexpr int LandingSearchAngles = 16;      // spots per ring
+constexpr float PlatformBoardHeight = 0.2f;  // how far above or below a platform's top a rider's feet may be
+constexpr int MaxAttachmentDepth = 64;       // longest parent chain followed before giving up
+
+glm::vec2 cellCentre(int x, int z) {
+    return {static_cast<float>(x) + 0.5f, static_cast<float>(z) + 0.5f};
+}
+
+// `v` turned about the y axis by `yaw` radians, as the renderer turns meshes.
+glm::vec3 rotateYaw(glm::vec3 v, float yaw) {
+    const float c = std::cos(yaw), s = std::sin(yaw);
+    return {v.x * c + v.z * s, v.y, -v.x * s + v.z * c};
+}
+
+glm::vec2 flat(glm::vec3 p) {
+    return {p.x, p.z};
+}
 } // namespace
 
 MovementSystem::MovementSystem(entt::registry& registry, Grid& grid, CollisionSystem& collision,
@@ -16,16 +35,43 @@ MovementSystem::MovementSystem(entt::registry& registry, Grid& grid, CollisionSy
     : registry_(registry), grid_(grid), collision_(collision), events_(events) {
 }
 
-int MovementSystem::targetLayer(glm::vec3 target, int current) const {
+MovementSystem::Body MovementSystem::bodyOf(entt::entity entity) const {
+    Body body;
+    const auto* mover = registry_.try_get<Mover>(entity);
+    const auto* collider = registry_.try_get<Collider>(entity);
+    if (collider) {
+        body.height = collider->height;
+        body.radius = collider->radius;
+    }
+    if (mover) {
+        body.radius = mover->radius;
+        body.footprint = std::clamp(mover->footprint, 1, MaxFootprint);
+        body.fly = mover->fly;
+        body.collide = mover->collide;
+        body.blockedTags = mover->blockedTags;
+        body.requiredTags = mover->requiredTags;
+    }
+    return body;
+}
+
+int MovementSystem::targetLayer(glm::vec3 target, int current, const Body& body) const {
     const int x = floorCell(target.x);
     const int z = floorCell(target.z);
-    if (grid_.contains(x, z, current) && grid_.at(x, z, current).walkable) {
+    const auto open = [&](int layer) {
+        if (!grid_.contains(x, z, layer)) {
+            return false;
+        }
+        const auto& cell = std::as_const(grid_).at(x, z, layer);
+        return (body.fly || cell.walkable) && !(cell.tags & body.blockedTags) &&
+               (!body.requiredTags || (cell.tags & body.requiredTags));
+    };
+    if (open(current)) {
         return current;
     }
     std::optional<int> best;
     float distance = 0;
     for (int l = 0; l < grid_.layerCount(); ++l) {
-        if (!grid_.at(x, z, l).walkable) {
+        if (!open(l)) {
             continue;
         }
         const float d = std::abs(grid_.heightAt({target.x, target.z}, l) - target.y);
@@ -42,7 +88,18 @@ GridPos MovementSystem::cellOf(entt::entity entity) const {
     return {floorCell(transform.position.x), floorCell(transform.position.z), transform.layer};
 }
 
-void MovementSystem::moveTo(entt::entity entity, glm::vec3 target, bool findPath, std::optional<int> layer) {
+void MovementSystem::reset(Mover& mover) {
+    mover.motion = Motion::None;
+    mover.onRoute = false;
+    mover.waypoints.clear();
+    mover.stuckTime = 0;
+    mover.arc = {};
+    mover.climb = {};
+    mover.flight = {};
+}
+
+void MovementSystem::moveTo(entt::entity entity, glm::vec3 target, bool findPath, std::optional<int> layer,
+                            const StepRules* rules) {
     auto& mover = registry_.get_or_emplace<Mover>(entity);
     std::vector<Waypoint> route;
     if (!findPath) {
@@ -50,38 +107,46 @@ void MovementSystem::moveTo(entt::entity entity, glm::vec3 target, bool findPath
         follow(entity, std::move(route));
         return;
     }
-    finishClimb(entity);
     const auto& transform = registry_.get<Transform>(entity);
-    const auto from = cellOf(entity);
     GridPos to{floorCell(target.x), floorCell(target.z), layer.value_or(transform.layer)};
     if (!grid_.contains(to)) {
         throw std::runtime_error("Movement target is outside the map grid");
     }
+    settle(entity);
+    const auto body = bodyOf(entity);
+    const auto from = cellOf(entity);
     if (!layer) {
-        to.layer = targetLayer(target, transform.layer);
+        to.layer = targetLayer(target, transform.layer, body);
     }
-    StepRules rules;
-    rules.maxUp = rules.maxDown = mover.maxStep;
-    rules.diagonal = true;
-    rules.jump = mover.jump;
-    const auto planned = findRoute(grid_, from, to, rules, routeVisitLimit_);
+    StepRules planning;
+    if (rules) {
+        planning = *rules;
+    } else {
+        planning.maxUp = planning.maxDown = mover.maxStep;
+        planning.diagonal = true;
+        planning.jump = mover.jump;
+        planning.blockedTags = mover.blockedTags;
+        planning.requiredTags = mover.requiredTags;
+    }
+    planning.footprint = body.footprint;
+    planning.fly = body.fly;
+    const auto planned = findRoute(grid_, from, to, planning, routeVisitLimit_);
     const auto& path = planned.steps;
     // A search stopped by its visit cap may hold a detour (or nothing): the
     // mover does not follow it, and says so the way it does for no route.
     if (path.empty() || planned.truncated) {
-        stop(entity);
-        mover.jumping = false;
+        reset(mover);
         events_.push({WorldEvent::Kind::Blocked, entity, entt::null, {}});
         return;
     }
     for (std::size_t i = 0; i + 1 < path.size(); ++i) {
         const auto& cell = path[i].cell;
-        const glm::vec2 centre(static_cast<float>(cell.x) + 0.5f, static_cast<float>(cell.z) + 0.5f);
+        const auto centre = cellCentre(cell.x, cell.z);
         route.push_back({{centre.x, grid_.heightAt(centre, cell.layer), centre.y}, cell.layer, path[i].kind});
     }
     if (path.front().kind != StepKind::Walk) {
         // Jumps and climbs start from the middle of the start cell.
-        const glm::vec2 centre(static_cast<float>(from.x) + 0.5f, static_cast<float>(from.z) + 0.5f);
+        const auto centre = cellCentre(from.x, from.z);
         route.insert(route.begin(), {{centre.x, grid_.heightAt(centre, from.layer), centre.y}, from.layer});
     }
     route.push_back({target, path.back().cell.layer, path.back().kind});
@@ -89,41 +154,74 @@ void MovementSystem::moveTo(entt::entity entity, glm::vec3 target, bool findPath
 }
 
 void MovementSystem::follow(entt::entity entity, std::vector<Waypoint> route) {
-    finishClimb(entity);
+    settle(entity);
     auto& mover = registry_.get_or_emplace<Mover>(entity);
+    reset(mover);
     mover.waypoints = std::move(route);
-    mover.stuckTime = 0;
-    mover.jumping = false;
-    mover.active = !mover.waypoints.empty();
+    mover.motion = mover.waypoints.empty() ? Motion::None : Motion::Route;
 }
 
 void MovementSystem::stop(entt::entity entity) {
+    settle(entity);
     if (auto* mover = registry_.try_get<Mover>(entity)) {
-        mover->active = false;
-        mover->waypoints.clear();
+        reset(*mover);
         mover->drive = glm::vec2(0);
     }
 }
 
 void MovementSystem::jump(entt::entity entity, glm::vec3 target, float height, float duration, int layer) {
-    finishClimb(entity);
+    settle(entity);
     auto& mover = registry_.get_or_emplace<Mover>(entity);
-    mover.active = false;
-    mover.waypoints.clear();
-    startJump(entity, target, height, duration, layer);
+    reset(mover);
+    if (!startJump(entity, target, height, duration, layer)) {
+        events_.push({WorldEvent::Kind::Blocked, entity, entt::null, {}});
+    }
 }
 
-void MovementSystem::startJump(entt::entity entity, glm::vec3 target, float height, float duration,
+bool MovementSystem::freeOfSolids(entt::entity entity, glm::vec3 position, const Body& body) const {
+    return !collision_.blockedByBox(position, body.radius, body.height) &&
+           !collision_.blockedByEntity(entity, position, body.radius, body.height);
+}
+
+std::optional<glm::vec3> MovementSystem::landingFor(entt::entity entity, glm::vec3 target, int layer) const {
+    const auto body = bodyOf(entity);
+    if (!body.collide || freeOfSolids(entity, target, body)) {
+        return target;
+    }
+    const auto centre = flat(target);
+    for (float ring = LandingSearchStep; ring <= tuning.landingSearch + 1e-4f; ring += LandingSearchStep) {
+        for (int i = 0; i < LandingSearchAngles; ++i) {
+            const float angle = 2 * std::numbers::pi_v<float> * static_cast<float>(i) /
+                                static_cast<float>(LandingSearchAngles);
+            const glm::vec2 spot = centre + glm::vec2(std::cos(angle), std::sin(angle)) * ring;
+            const glm::vec3 probe(spot.x, grid_.heightAt(spot, layer), spot.y);
+            if (supported(spot, body, layer) && freeOfSolids(entity, probe, body)) {
+                return probe;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+bool MovementSystem::startJump(entt::entity entity, glm::vec3 target, float height, float duration,
                                int layer) {
     auto& mover = registry_.get<Mover>(entity);
-    mover.jumping = true;
-    mover.jumpFrom = registry_.get<Transform>(entity).position;
-    mover.jumpTo = target;
-    mover.jumpHeight = height;
-    mover.jumpDuration = std::max(0.05f, duration);
-    mover.jumpTime = 0;
-    mover.jumpLayer = std::clamp(layer, 0, grid_.layerCount() - 1);
+    const auto& transform = registry_.get<Transform>(entity);
+    layer = std::clamp(layer, 0, grid_.layerCount() - 1);
+    const auto landing = landingFor(entity, target, layer);
+    if (!landing) {
+        return false;
+    }
+    mover.arc = {};
+    mover.arc.from = transform.position;
+    mover.arc.to = *landing;
+    mover.arc.height = height;
+    mover.arc.duration = std::max(MinimumJumpSeconds, duration);
+    mover.arc.fromLayer = transform.layer;
+    mover.arc.layer = layer;
+    mover.motion = Motion::Jump;
     events_.push({WorldEvent::Kind::JumpStart, entity, entt::null, {}});
+    return true;
 }
 
 bool MovementSystem::startClimb(entt::entity entity, GridPos to, glm::vec3 end) {
@@ -138,83 +236,279 @@ bool MovementSystem::startClimb(entt::entity entity, GridPos to, glm::vec3 end) 
     // The climb runs up the face between the two cells, on the foot's side.
     const auto foot = ladder->foot();
     const glm::vec2 wall(ladder->direction);
-    const glm::vec2 edge = glm::vec2(static_cast<float>(foot.x) + 0.5f, static_cast<float>(foot.z) + 0.5f) +
-                           wall * (0.5f - std::max(mover.radius, 0.05f));
+    const glm::vec2 edge = cellCentre(foot.x, foot.z) + wall * (0.5f - std::max(mover.radius, 0.05f));
     const float start = transform.position.y;
     const float finish =
         to == ladder->top() ? grid_.edgeHeight(to, -step.x, -step.y) : grid_.heightIn(foot, edge);
-    mover.climbPoints = {{{edge.x, start, edge.y}, mover.speed},
-                         {{edge.x, finish, edge.y}, mover.climbSpeed},
-                         {end, mover.speed}};
-    mover.climbFacing = wall;
-    mover.climbLayer = to.layer;
-    mover.climbing = true;
+    mover.climb = {};
+    mover.climb.points = {{{edge.x, start, edge.y}, mover.speed},
+                          {{edge.x, finish, edge.y}, mover.climbSpeed},
+                          {end, mover.speed}};
+    mover.climb.start = transform.position;
+    mover.climb.facing = wall;
+    mover.climb.fromLayer = transform.layer;
+    mover.climb.layer = to.layer;
+    mover.motion = Motion::Climb;
     events_.push({WorldEvent::Kind::ClimbStart, entity, entt::null, {}});
     return true;
 }
 
-void MovementSystem::finishClimb(entt::entity entity) {
-    auto* mover = registry_.try_get<Mover>(entity);
-    if (!mover || !mover->climbing) {
+void MovementSystem::settle(entt::entity entity) {
+    const auto* mover = registry_.try_get<Mover>(entity);
+    if (!mover) {
         return;
     }
+    if (mover->motion == Motion::Jump) {
+        finishJump(entity, true);
+    } else if (mover->motion == Motion::Climb) {
+        finishClimb(entity, true);
+    } else if (mover->motion == Motion::Launch) {
+        const auto& transform = registry_.get<Transform>(entity);
+        finishLaunch(entity, groundUnder(flat(transform.position), bodyOf(entity), transform.position.y));
+    }
+}
+
+void MovementSystem::launch(entt::entity entity, glm::vec3 velocity) {
+    auto& mover = registry_.get_or_emplace<Mover>(entity);
+    if (mover.motion == Motion::Climb) {
+        throw std::runtime_error("Cannot launch an entity that is climbing a ladder");
+    }
     auto& transform = registry_.get<Transform>(entity);
-    transform.position = mover->climbPoints.back().first;
-    transform.layer = mover->climbLayer;
-    mover->climbing = false;
-    mover->climbPoints.clear();
+    reset(mover); // a jump or launch in flight goes on as this one, from where the body is
+    mover.drive = glm::vec2(0);
+    mover.flight.velocity = velocity;
+    mover.flight.fromLayer = transform.layer;
+    mover.motion = Motion::Launch;
+    const auto heading = flat(velocity);
+    if (glm::length(heading) > 1e-4f) {
+        transform.facing = glm::normalize(heading);
+    }
+    events_.push({WorldEvent::Kind::JumpStart, entity, entt::null, {}});
+}
+
+MovementSystem::Surface MovementSystem::groundUnder(glm::vec2 position, const Body& body, float height) const {
+    std::optional<Surface> best;
+    for (int l = 0; l < grid_.layerCount(); ++l) {
+        const float surface = grid_.heightAt(position, l);
+        if (surface <= height + 1e-4f && (!best || surface > best->height) && supported(position, body, l)) {
+            best = Surface{surface, l};
+        }
+    }
+    return best.value_or(Surface{grid_.heightAt(position, 0), 0});
+}
+
+void MovementSystem::finishLaunch(entt::entity entity, Surface surface) {
+    auto& mover = registry_.get<Mover>(entity);
+    auto& transform = registry_.get<Transform>(entity);
+    const glm::vec3 point(transform.position.x, surface.height, transform.position.z);
+    const auto spot = landingFor(entity, point, surface.layer);
+    transform.layer = surface.layer;
+    transform.position = spot.value_or(point);
+    reset(mover);
+    collision_.moved(entity);
+    events_.push({WorldEvent::Kind::Landed, entity, entt::null, {}});
+    if (!spot) {
+        events_.push({WorldEvent::Kind::Blocked, entity, entt::null, {}});
+    }
+}
+
+// Integrates the flight in sub-steps no longer horizontally than SubStep. A
+// sub-step that would carry the body into a solid, a box, ground more than a
+// step above the body or out of the grid ends the horizontal motion instead
+// (a collide = false body minds the grid's edge only). Landing is
+// tested after each sub-step: the highest standable surface between the
+// heights the step started and ended at, or the floor (the lowest layer's
+// surface) once the body is at or below it.
+void MovementSystem::advanceLaunch(entt::entity entity, float dt) {
+    auto& mover = registry_.get<Mover>(entity);
+    auto& transform = registry_.get<Transform>(entity);
+    auto& flight = mover.flight;
+    const auto body = bodyOf(entity);
+    const float gravity = tuning.gravity;
+    glm::vec2 horizontal = flat(flight.velocity);
+    const float wanted = std::ceil(glm::length(horizontal) * dt / SubStep);
+    constexpr float MaxSubSteps = 4096;
+    const int steps = wanted >= 1 && wanted <= MaxSubSteps ? static_cast<int>(wanted)
+                      : wanted > MaxSubSteps               ? static_cast<int>(MaxSubSteps)
+                                                           : 1;
+    const float h = dt / static_cast<float>(steps);
+    mover.moved = true;
+    for (int i = 0; i < steps; ++i) {
+        const glm::vec3 start = transform.position;
+        const float y0 = start.y;
+        const float y1 = y0 + flight.velocity.y * h - 0.5f * gravity * h * h;
+        flight.velocity.y -= gravity * h;
+        glm::vec2 to = flat(start) + horizontal * h;
+        if (glm::length(horizontal) > 0) {
+            const glm::vec3 probe(to.x, y1, to.y);
+            const bool blocked =
+                !grid_.contains(floorCell(to.x), floorCell(to.y)) ||
+                (body.collide &&
+                 (grid_.heightAt(to, 0) > std::max(y0, y1) + mover.maxStep + 1e-4f ||
+                  collision_.blockedByBox(probe, body.radius, body.height) ||
+                  collision_.blocksMove(entity, start, probe, body.radius, body.height)));
+            if (blocked) {
+                flight.velocity.x = flight.velocity.z = 0;
+                horizontal = glm::vec2(0);
+                to = flat(start);
+            }
+        }
+        transform.position = {to.x, y1, to.y};
+        collision_.moved(entity);
+        std::optional<Surface> landing;
+        for (int l = 0; l < grid_.layerCount(); ++l) {
+            const float surface = grid_.heightAt(to, l);
+            if (surface > y0 + 1e-4f || surface < y1 || (landing && surface <= landing->height) ||
+                !supported(to, body, l)) {
+                continue;
+            }
+            landing = Surface{surface, l};
+        }
+        if (!landing && y1 <= grid_.heightAt(to, 0)) {
+            landing = Surface{grid_.heightAt(to, 0), 0};
+        }
+        if (landing) {
+            finishLaunch(entity, *landing);
+            return;
+        }
+    }
+}
+
+void MovementSystem::resume(entt::entity entity) {
+    auto& mover = registry_.get<Mover>(entity);
+    if (!mover.onRoute) {
+        mover.motion = Motion::None;
+        return;
+    }
+    if (!mover.waypoints.empty()) {
+        mover.motion = Motion::Route;
+        return;
+    }
+    reset(mover);
+    events_.push({WorldEvent::Kind::Arrived, entity, entt::null, {}});
+}
+
+void MovementSystem::finishJump(entt::entity entity, bool interrupted) {
+    auto& mover = registry_.get<Mover>(entity);
+    auto& transform = registry_.get<Transform>(entity);
+    const auto arc = mover.arc;
+    if (interrupted) {
+        // Land on the ground under the body: the standable layer whose
+        // surface is nearest the body's height; over a void, the nearer end
+        // of the arc.
+        const auto body = bodyOf(entity);
+        const auto here = flat(transform.position);
+        std::optional<int> ground;
+        float nearest = 0;
+        for (int l = 0; l < grid_.layerCount(); ++l) {
+            const float surface = grid_.heightAt(here, l);
+            const float gap = std::abs(surface - transform.position.y);
+            if ((!ground || gap < nearest) && supported(here, body, l) &&
+                (!body.collide || !collision_.blockedByBox({here.x, surface, here.y}, body.radius, body.height))) {
+                ground = l;
+                nearest = gap;
+            }
+        }
+        if (ground) {
+            transform.layer = *ground;
+            transform.position = {here.x, grid_.heightAt(here, *ground), here.y};
+        } else if (glm::length(here - flat(arc.to)) <= glm::length(here - flat(arc.from))) {
+            transform.layer = arc.layer;
+            transform.position = arc.to;
+        } else {
+            transform.layer = arc.fromLayer;
+            transform.position = arc.from;
+        }
+        reset(mover);
+    } else {
+        transform.layer = arc.layer;
+        transform.position = arc.to;
+    }
+    collision_.moved(entity);
+    events_.push({WorldEvent::Kind::Landed, entity, entt::null, {}});
+    if (!interrupted) {
+        resume(entity);
+    }
+}
+
+void MovementSystem::finishClimb(entt::entity entity, bool interrupted) {
+    auto& mover = registry_.get<Mover>(entity);
+    auto& transform = registry_.get<Transform>(entity);
+    const auto climb = mover.climb;
+    if (interrupted && !climb.points.empty()) {
+        // Step off at the nearer end of the ladder.
+        const auto top = climb.points.back().first;
+        if (glm::length(transform.position - top) <= glm::length(transform.position - climb.start)) {
+            transform.position = top;
+            transform.layer = climb.layer;
+        } else {
+            transform.position = climb.start;
+            transform.layer = climb.fromLayer;
+        }
+        reset(mover);
+    } else {
+        transform.layer = climb.layer;
+    }
     collision_.moved(entity);
     events_.push({WorldEvent::Kind::ClimbEnd, entity, entt::null, {}});
+    if (!interrupted) {
+        resume(entity);
+    }
 }
 
 void MovementSystem::place(entt::entity entity, glm::vec3 position, int layer, bool keepHeight) {
+    settle(entity);
     auto& transform = registry_.get<Transform>(entity);
     transform.layer = std::clamp(layer, 0, grid_.layerCount() - 1);
     if (!keepHeight) {
         position.y = grid_.heightAt({position.x, position.z}, transform.layer);
     }
     transform.position = transform.previous = position;
-    stop(entity);
     if (auto* mover = registry_.try_get<Mover>(entity)) {
-        mover->jumping = mover->climbing = false;
-        mover->climbPoints.clear();
+        reset(*mover);
+        mover->drive = glm::vec2(0);
     }
     collision_.moved(entity);
 }
 
 bool MovementSystem::moving(entt::entity entity) const {
     const auto* mover = registry_.try_get<Mover>(entity);
-    return mover && (mover->active || mover->jumping || mover->climbing || glm::length(mover->drive) > 0);
-}
-
-float MovementSystem::bodyHeight(entt::entity entity) const {
-    const auto* collider = registry_.try_get<Collider>(entity);
-    return collider ? collider->height : DefaultHeight;
+    return mover && (mover->motion != Motion::None || glm::length(mover->drive) > 0);
 }
 
 bool MovementSystem::canOccupy(entt::entity entity, glm::vec3 position, int layer) const {
-    const auto* mover = registry_.try_get<Mover>(entity);
-    const float radius = mover ? mover->radius : DefaultRadius;
-    return supported({position.x, position.z}, radius, layer) &&
-           !collision_.blockedByBox(position, radius, bodyHeight(entity)) &&
-           !collision_.blockedByEntity(entity, position, radius);
+    const auto body = bodyOf(entity);
+    return supported({position.x, position.z}, body, layer) && freeOfSolids(entity, position, body);
 }
 
-bool MovementSystem::supported(glm::vec2 p, float radius, int layer) const {
-    if (grid_.canStand(p, radius, layer)) {
+bool MovementSystem::supported(glm::vec2 p, const Body& body, int layer) const {
+    const auto stands = [&](int on) {
+        return grid_.canStand(p, body.radius, on, body.footprint, body.fly, body.blockedTags, body.requiredTags);
+    };
+    if (stands(layer)) {
         return true;
     }
-    // Any link of the cell whose other surface meets this one and holds the body.
+    // Any link of the cell whose other surface meets this one and holds the
+    // body. The surfaces are compared where the link is crossed: at the
+    // junction edge of a directed link (the edge walkers enter from, as path
+    // finding tests it), under the body for an undirected one.
     return grid_.anyLinkAt(floorCell(p.x), floorCell(p.y), layer, [&](const GridLink& link) {
         const int other = link.other(layer);
-        return std::abs(grid_.heightAt(p, other) - grid_.heightAt(p, layer)) <= Grid::LinkGap + 1e-4f &&
-               grid_.canStand(p, radius, other);
+        if (!grid_.contains(link.x, link.z, other) || !grid_.contains(link.x, link.z, layer)) {
+            return false;
+        }
+        const glm::vec2 junction = link.direction == glm::ivec2(0)
+                                       ? p
+                                       : cellCentre(link.x, link.z) - glm::vec2(link.direction) * 0.5f;
+        const float gap = grid_.heightIn({link.x, link.z, other}, junction) -
+                          grid_.heightIn({link.x, link.z, layer}, junction);
+        return std::abs(gap) <= Grid::LinkGap + 1e-4f && stands(other);
     });
 }
 
 bool MovementSystem::stepTowards(entt::entity entity, glm::vec2 delta) {
     auto& transform = registry_.get<Transform>(entity);
-    const auto& mover = registry_.get<Mover>(entity);
+    auto& mover = registry_.get<Mover>(entity);
     const float length = glm::length(delta);
     if (length > 1e-5f) {
         transform.facing = delta / length;
@@ -223,9 +517,10 @@ bool MovementSystem::stepTowards(entt::entity entity, glm::vec2 delta) {
         transform.position.x += delta.x;
         transform.position.z += delta.y;
         collision_.moved(entity);
+        mover.moved = mover.moved || length > 1e-5f;
         return length > 1e-5f;
     }
-    const float height = bodyHeight(entity);
+    const auto body = bodyOf(entity);
     glm::vec2 p(transform.position.x, transform.position.z);
     int layer = transform.layer;
     auto attempt = [&](glm::vec2 move) {
@@ -234,15 +529,16 @@ bool MovementSystem::stepTowards(entt::entity entity, glm::vec2 delta) {
             return false;
         }
         const glm::vec2 to = p + move;
-        const glm::vec2 ahead = to + move / distance * std::max(mover.radius, SubStep);
+        const glm::vec2 ahead = to + move / distance * std::max(body.radius, SubStep);
         const int next = grid_.traverseLink(to, layer, move, mover.maxStep, mover.maxStep,
                                             !grid_.walkableAt(ahead, layer));
         const float here = grid_.heightAt(p, layer);
         const float there = grid_.heightAt(to, next);
+        const glm::vec3 start(p.x, here, p.y);
         const glm::vec3 probe(to.x, there, to.y);
-        if (!supported(to, mover.radius, next) || std::abs(there - here) > mover.maxStep ||
-            collision_.blockedByBox(probe, mover.radius, height) ||
-            collision_.blockedByEntity(entity, probe, mover.radius)) {
+        if (!supported(to, body, next) || (!body.fly && std::abs(there - here) > mover.maxStep) ||
+            collision_.blockedByBox(probe, body.radius, body.height) ||
+            collision_.blocksMove(entity, start, probe, body.radius, body.height)) {
             return false;
         }
         p = to;
@@ -266,63 +562,54 @@ bool MovementSystem::stepTowards(entt::entity entity, glm::vec2 delta) {
     transform.layer = layer;
     transform.position = {p.x, grid_.heightAt(p, layer), p.y};
     collision_.moved(entity);
-    return glm::length(p - start) > 1e-5f;
+    const bool moved = glm::length(p - start) > 1e-5f;
+    mover.moved = mover.moved || moved;
+    return moved;
 }
 
 void MovementSystem::advanceJump(entt::entity entity, float dt) {
     auto& mover = registry_.get<Mover>(entity);
     auto& transform = registry_.get<Transform>(entity);
-    mover.jumpTime += dt;
-    const float t = std::min(1.0f, mover.jumpTime / mover.jumpDuration);
-    transform.position =
-        glm::mix(mover.jumpFrom, mover.jumpTo, t) + glm::vec3(0, 4 * mover.jumpHeight * t * (1 - t), 0);
-    const glm::vec2 heading(mover.jumpTo.x - mover.jumpFrom.x, mover.jumpTo.z - mover.jumpFrom.z);
+    auto& arc = mover.arc;
+    arc.time += dt;
+    const float t = std::min(1.0f, arc.time / arc.duration);
+    transform.position = glm::mix(arc.from, arc.to, t) + glm::vec3(0, 4 * arc.height * t * (1 - t), 0);
+    const glm::vec2 heading = flat(arc.to) - flat(arc.from);
     if (glm::length(heading) > 1e-4f) {
         transform.facing = glm::normalize(heading);
     }
+    mover.moved = true;
     collision_.moved(entity);
-    if (t < 1) {
-        return;
-    }
-    mover.jumping = false;
-    transform.layer = mover.jumpLayer;
-    events_.push({WorldEvent::Kind::Landed, entity, entt::null, {}});
-    if (mover.active && mover.waypoints.empty()) {
-        mover.active = false;
-        events_.push({WorldEvent::Kind::Arrived, entity, entt::null, {}});
+    if (t >= 1) {
+        finishJump(entity, false);
     }
 }
 
 void MovementSystem::advanceClimb(entt::entity entity, float dt) {
     auto& mover = registry_.get<Mover>(entity);
     auto& transform = registry_.get<Transform>(entity);
+    auto& points = mover.climb.points;
     float budget = dt;
-    while (!mover.climbPoints.empty() && budget > 0) {
-        const auto [point, speed] = mover.climbPoints.front();
+    while (!points.empty() && budget > 0) {
+        const auto [point, speed] = points.front();
         const auto offset = point - transform.position;
         const float distance = glm::length(offset);
         const float reach = std::max(speed, 0.01f) * budget;
-        const glm::vec2 flat(offset.x, offset.z);
-        transform.facing = glm::length(flat) > 1e-4f && std::abs(offset.y) < 1e-4f ? glm::normalize(flat)
-                                                                                   : mover.climbFacing;
+        const glm::vec2 level(offset.x, offset.z);
+        transform.facing = glm::length(level) > 1e-4f && std::abs(offset.y) < 1e-4f ? glm::normalize(level)
+                                                                                    : mover.climb.facing;
         if (distance > reach) {
             transform.position += offset / distance * reach;
             break;
         }
         transform.position = point;
         budget -= distance / std::max(speed, 0.01f);
-        mover.climbPoints.erase(mover.climbPoints.begin());
+        points.erase(points.begin());
     }
+    mover.moved = true;
     collision_.moved(entity);
-    if (!mover.climbPoints.empty()) {
-        return;
-    }
-    mover.climbing = false;
-    transform.layer = mover.climbLayer;
-    events_.push({WorldEvent::Kind::ClimbEnd, entity, entt::null, {}});
-    if (mover.active && mover.waypoints.empty()) {
-        mover.active = false;
-        events_.push({WorldEvent::Kind::Arrived, entity, entt::null, {}});
+    if (points.empty()) {
+        finishClimb(entity, false);
     }
 }
 
@@ -332,34 +619,37 @@ void MovementSystem::advanceRoute(entt::entity entity, float dt) {
     const float step = mover.speed * dt;
     float budget = step;
     const auto before = transform.position;
-    while (mover.active && !mover.waypoints.empty() && !mover.jumping && !mover.climbing && budget > 0) {
+    mover.onRoute = true;
+    while (mover.motion == Motion::Route && !mover.waypoints.empty() && budget > 0) {
         const auto waypoint = mover.waypoints.front();
         const int layer = waypoint.layer >= 0 ? waypoint.layer : transform.layer;
         if (waypoint.kind == StepKind::Jump) {
             mover.waypoints.erase(mover.waypoints.begin());
-            const glm::vec2 across(waypoint.position.x - transform.position.x,
-                                   waypoint.position.z - transform.position.z);
-            const float length = glm::length(across);
+            const float length = glm::length(flat(waypoint.position) - flat(transform.position));
             const float rise = std::abs(waypoint.position.y - transform.position.y);
-            startJump(entity, waypoint.position, 0.4f + 0.2f * length + 0.5f * rise,
-                      std::max(0.3f, length / std::max(mover.speed, 0.1f)), layer);
+            const float apex =
+                tuning.jumpArcBase + tuning.jumpArcPerUnit * length + tuning.jumpArcPerRise * rise;
+            const float seconds = std::max(tuning.jumpMinimumSeconds, length / std::max(mover.speed, 0.1f));
+            if (!startJump(entity, waypoint.position, apex, seconds, layer)) {
+                reset(mover);
+                events_.push({WorldEvent::Kind::Blocked, entity, entt::null, {}});
+                return;
+            }
             break;
         }
         if (waypoint.kind == StepKind::Climb) {
             mover.waypoints.erase(mover.waypoints.begin());
             const GridPos to{floorCell(waypoint.position.x), floorCell(waypoint.position.z), layer};
             if (!startClimb(entity, to, waypoint.position)) {
-                mover.active = false;
-                mover.waypoints.clear();
+                reset(mover);
                 events_.push({WorldEvent::Kind::Blocked, entity, entt::null, {}});
                 return;
             }
             break;
         }
-        const glm::vec2 to(waypoint.position.x - transform.position.x,
-                           waypoint.position.z - transform.position.z);
+        const glm::vec2 to = flat(waypoint.position) - flat(transform.position);
         const float distance = glm::length(to);
-        if (distance > std::max(budget, 0.02f)) {
+        if (distance > std::max(budget, tuning.snapDistance)) {
             stepTowards(entity, to / distance * budget);
             if (!mover.collide) {
                 transform.position.y = glm::mix(transform.position.y, waypoint.position.y, budget / distance);
@@ -370,8 +660,7 @@ void MovementSystem::advanceRoute(entt::entity entity, float dt) {
         if (!mover.collide) {
             transform.position.y = waypoint.position.y;
         }
-        if (glm::length(glm::vec2(transform.position.x - waypoint.position.x,
-                                  transform.position.z - waypoint.position.z)) >= 0.05f) {
+        if (glm::length(flat(transform.position) - flat(waypoint.position)) >= tuning.arriveDistance) {
             break; // blocked short of the waypoint
         }
         if (waypoint.layer >= 0) {
@@ -383,18 +672,17 @@ void MovementSystem::advanceRoute(entt::entity entity, float dt) {
         budget -= distance;
         mover.waypoints.erase(mover.waypoints.begin());
     }
-    if (mover.jumping || mover.climbing) {
-        mover.stuckTime = 0;
+    if (mover.motion != Motion::Route) {
+        mover.stuckTime = 0; // a jump or climb took over
         return;
     }
     const float moved = glm::length(transform.position - before);
-    mover.stuckTime = moved < step * 0.1f ? mover.stuckTime + dt : 0;
+    mover.stuckTime = moved < step * tuning.stuckShare ? mover.stuckTime + dt : 0;
     if (mover.waypoints.empty()) {
-        mover.active = false;
+        reset(mover);
         events_.push({WorldEvent::Kind::Arrived, entity, entt::null, {}});
-    } else if (mover.stuckTime > 1.0) {
-        mover.active = false;
-        mover.waypoints.clear();
+    } else if (mover.stuckTime > tuning.stuckSeconds) {
+        reset(mover);
         events_.push({WorldEvent::Kind::Blocked, entity, entt::null, {}});
     }
 }
@@ -403,12 +691,15 @@ void MovementSystem::update(double dt) {
     const auto delta = static_cast<float>(dt);
     for (const auto entity : registry_.view<Transform, Mover>()) {
         auto& mover = registry_.get<Mover>(entity);
-        if (mover.jumping || mover.climbing) {
+        mover.moved = false;
+        if (mover.motion == Motion::Jump || mover.motion == Motion::Climb || mover.motion == Motion::Launch) {
             mover.drive = glm::vec2(0); // steering waits until the body is back on its feet
-            if (mover.jumping) {
+            if (mover.motion == Motion::Jump) {
                 advanceJump(entity, delta);
-            } else {
+            } else if (mover.motion == Motion::Climb) {
                 advanceClimb(entity, delta);
+            } else {
+                advanceLaunch(entity, delta);
             }
             continue;
         }
@@ -418,8 +709,7 @@ void MovementSystem::update(double dt) {
             const auto before = registry_.get<Transform>(entity).position;
             stepTowards(entity, drive);
             const auto after = registry_.get<Transform>(entity).position;
-            if (mover.collide &&
-                glm::length(glm::vec2(after.x - before.x, after.z - before.z)) < 0.1f * glm::length(drive)) {
+            if (mover.collide && glm::length(flat(after) - flat(before)) < 0.1f * glm::length(drive)) {
                 // Walking into a ladder climbs it.
                 const bool alongX = std::abs(drive.x) >= std::abs(drive.y);
                 const glm::ivec2 axis =
@@ -428,87 +718,100 @@ void MovementSystem::update(double dt) {
                 const auto from = cellOf(entity);
                 if (const auto* ladder = share > 0.7f ? grid_.ladderStep(from, axis) : nullptr) {
                     const auto to = from == ladder->foot() ? ladder->top() : ladder->foot();
-                    const glm::vec2 centre(static_cast<float>(to.x) + 0.5f, static_cast<float>(to.z) + 0.5f);
-                    if (grid_.at(to).walkable) {
+                    const auto centre = cellCentre(to.x, to.z);
+                    if (mover.fly || std::as_const(grid_).at(to).walkable) {
                         startClimb(entity, to, {centre.x, grid_.heightAt(centre, to.layer), centre.y});
                     }
                 }
             }
             continue;
         }
-        if (mover.active && !mover.waypoints.empty()) {
+        if (mover.motion == Motion::Route) {
             advanceRoute(entity, delta);
         }
     }
 }
 
-void MovementSystem::updateAttachments() {
-    for (const auto entity : registry_.view<Transform>()) {
-        auto& transform = registry_.get<Transform>(entity);
-        if (transform.parent == entt::null) {
+void MovementSystem::reportCells() {
+    for (const auto entity : registry_.view<Transform, Mover>()) {
+        auto& mover = registry_.get<Mover>(entity);
+        const auto cell = cellOf(entity);
+        if (mover.cell.layer < 0) {
+            mover.cell = cell; // first sight: nothing was entered
             continue;
         }
-        const auto* parent =
-            registry_.valid(transform.parent) ? registry_.try_get<Transform>(transform.parent) : nullptr;
-        if (!parent) {
-            transform.parent = entt::null; // the parent was destroyed
+        if (cell == mover.cell) {
             continue;
         }
-        transform.position = parent->position + transform.offset;
-        transform.previous = parent->previous + transform.offset;
-        transform.layer = parent->layer;
-        collision_.moved(entity);
+        mover.cell = cell;
+        events_.push({WorldEvent::Kind::CellEnter, entity, entt::null, {}, cell});
     }
 }
 
-void MovementSystem::collectRiders() {
-    for (const auto [platform, transform, surface] : registry_.view<Transform, Platform>().each()) {
-        auto [found, added] = rides_.try_emplace(platform);
-        auto& ride = found->second;
-        if (added) {
-            ride.last = transform.position;
-        }
-        ride.riders.clear();
-        const glm::vec2 half = surface.size * 0.5f;
-        for (const auto [entity, rider] : registry_.view<Transform>().each()) {
-            if (entity == platform || rider.parent != entt::null || rider.layer != transform.layer ||
-                registry_.all_of<Platform>(entity) || !registry_.any_of<Mover, Collider>(entity)) {
-                continue;
-            }
-            if (const auto* mover = registry_.try_get<Mover>(entity);
-                mover && (mover->jumping || mover->climbing)) {
-                continue;
-            }
-            const auto offset = rider.position - ride.last;
-            if (std::abs(offset.x) <= half.x && std::abs(offset.z) <= half.y && std::abs(offset.y) < 0.2f) {
-                ride.riders.push_back(entity);
-            }
+void MovementSystem::resolveAttachment(entt::entity entity, int depth) {
+    if (!resolved_.insert(entity).second) {
+        return;
+    }
+    auto& transform = registry_.get<Transform>(entity);
+    if (transform.parent == entt::null) {
+        return;
+    }
+    if (!registry_.valid(transform.parent) || !registry_.all_of<Transform>(transform.parent)) {
+        transform.parent = entt::null; // the parent was destroyed
+        return;
+    }
+    if (depth < MaxAttachmentDepth) {
+        resolveAttachment(transform.parent, depth + 1); // parents first
+    }
+    const auto& parent = registry_.get<Transform>(transform.parent);
+    transform.position = parent.position + rotateYaw(transform.offset, parent.yaw);
+    transform.previous = parent.previous + rotateYaw(transform.offset, parent.previousYaw);
+    transform.layer = parent.layer;
+    collision_.moved(entity);
+}
+
+void MovementSystem::updateAttachments() {
+    resolved_.clear();
+    for (const auto entity : registry_.view<Transform>()) {
+        if (registry_.get<Transform>(entity).parent != entt::null) {
+            resolveAttachment(entity, 0);
         }
     }
 }
 
 void MovementSystem::restoreCells() {
     for (auto it = overrides_.rbegin(); it != overrides_.rend(); ++it) {
-        if (grid_.contains(it->cell) && grid_.at(it->cell) == it->applied) {
-            grid_.at(it->cell) = it->original; // unless a script changed the cell since
+        if (grid_.contains(it->cell) && std::as_const(grid_).at(it->cell) == it->applied) {
+            grid_.setCell(it->cell, it->original); // unless a script changed the cell since
         }
     }
     overrides_.clear();
 }
 
 // Riders that collide when walking keep colliding while carried: a solid
-// entity (not on the same platform) stops the horizontal part of the carry,
-// sliding along it where one axis is free; the vertical part always applies.
-void MovementSystem::carry(entt::entity rider, glm::vec3 delta, std::span<const entt::entity> aboard) {
+// entity (not on the same platform), a static box or terrain the rider
+// cannot stand on stops the horizontal part of the carry, sliding along it
+// where one axis is free; the vertical part always applies. `deck` and
+// `half` are the platform's new top and half size: a rider still on the deck
+// is supported by it whatever the grid says.
+void MovementSystem::carry(entt::entity rider, glm::vec3 delta, std::span<const entt::entity> aboard,
+                           glm::vec3 deck, glm::vec2 half) {
     auto& carried = registry_.get<Transform>(rider);
     const auto* mover = registry_.try_get<Mover>(rider);
     const auto* collider = registry_.try_get<Collider>(rider);
     const bool collides = mover ? mover->collide : collider && collider->solid;
-    const float radius = mover ? mover->radius : collider ? collider->radius : 0.0f;
+    const auto body = bodyOf(rider);
     glm::vec3 applied(0, delta.y, 0);
     if (collides) {
+        const auto allowed = [&](glm::vec3 move) {
+            const auto to = carried.position + move;
+            const bool onDeck = std::abs(to.x - deck.x) <= half.x && std::abs(to.z - deck.z) <= half.y;
+            return !collision_.blocksMove(rider, carried.position, to, body.radius, body.height, aboard) &&
+                   !collision_.blockedByBox(to, body.radius, body.height) &&
+                   (onDeck || supported(flat(to), body, carried.layer));
+        };
         for (const glm::vec3 move : {delta, glm::vec3(delta.x, delta.y, 0), glm::vec3(0, delta.y, delta.z)}) {
-            if (!collision_.blockedByEntity(rider, carried.position + move, radius, aboard)) {
+            if (allowed(move)) {
                 applied = move;
                 break;
             }
@@ -524,20 +827,51 @@ void MovementSystem::carryRiders() {
     std::erase_if(rides_, [&](const auto& entry) {
         return !registry_.valid(entry.first) || !registry_.all_of<Transform, Platform>(entry.first);
     });
+    for (const auto platform : registry_.view<Transform, Platform>()) {
+        auto [found, added] = rides_.try_emplace(platform);
+        if (added) {
+            found->second.last = registry_.get<Transform>(platform).position;
+        }
+    }
     restoreCells();
     for (auto& [platform, ride] : rides_) {
         const auto& transform = registry_.get<Transform>(platform);
-        const auto delta = transform.position - ride.last;
-        ride.last = transform.position;
-        aboard_.assign(ride.riders.begin(), ride.riders.end());
-        aboard_.push_back(platform);
-        for (const auto rider : ride.riders) {
-            if (registry_.valid(rider)) {
-                carry(rider, delta, aboard_);
-            }
-        }
         const glm::vec2 half = registry_.get<Platform>(platform).size * 0.5f;
-        // Cells whose centre the platform covers, within the grid.
+        const auto delta = transform.position - ride.last;
+        // This tick's riders: on the top and inside the footprint the platform
+        // had when the tick began, measured where they stand now, so a mover
+        // that stepped off during the tick is not displaced. Colliders come
+        // from the collision hash around that footprint; movers without a
+        // collider (not in the hash, and rare) from their own view.
+        ride.riders.clear();
+        const auto consider = [&](entt::entity entity) {
+            const auto& rider = registry_.get<Transform>(entity);
+            if (entity == platform || rider.parent != entt::null || rider.layer != transform.layer ||
+                registry_.all_of<Platform>(entity)) {
+                return;
+            }
+            if (const auto* mover = registry_.try_get<Mover>(entity);
+                mover && (mover->motion == Motion::Jump || mover->motion == Motion::Climb ||
+                          mover->motion == Motion::Launch)) {
+                return;
+            }
+            const auto offset = rider.position - ride.last;
+            if (std::abs(offset.x) <= half.x && std::abs(offset.z) <= half.y &&
+                std::abs(offset.y) < PlatformBoardHeight) {
+                ride.riders.push_back(entity);
+            }
+        };
+        nearScratch_.clear();
+        collision_.nearby(ride.last, std::max(half.x, half.y), nearScratch_);
+        for (const auto entity : nearScratch_) {
+            consider(entity);
+        }
+        for (const auto entity : registry_.view<Transform, Mover>(entt::exclude<Collider>)) {
+            consider(entity);
+        }
+        ride.last = transform.position;
+        // Cells whose centre the platform covers, within the grid, written
+        // before its riders move so their footing is known.
         const int x0 = std::max(0, ceilCell(transform.position.x - half.x - 0.5f));
         const int x1 = std::min(grid_.width() - 1, floorCell(transform.position.x + half.x - 0.5f));
         const int z0 = std::max(0, ceilCell(transform.position.z - half.y - 0.5f));
@@ -548,14 +882,21 @@ void MovementSystem::carryRiders() {
                 if (!grid_.contains(cell)) {
                     continue;
                 }
-                auto& current = grid_.at(cell);
+                const auto& current = std::as_const(grid_).at(cell);
                 CellOverride entry{cell, current, current};
                 entry.applied.walkable = true;
                 entry.applied.height = transform.position.y;
                 entry.applied.ramp = Ramp::None;
                 entry.applied.rise = 1;
-                current = entry.applied;
+                grid_.setCell(cell, entry.applied);
                 overrides_.push_back(entry);
+            }
+        }
+        aboard_.assign(ride.riders.begin(), ride.riders.end());
+        aboard_.push_back(platform);
+        for (const auto rider : ride.riders) {
+            if (registry_.valid(rider)) {
+                carry(rider, delta, aboard_, transform.position, half);
             }
         }
     }

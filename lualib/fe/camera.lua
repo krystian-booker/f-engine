@@ -193,7 +193,8 @@ end
 --- `snap` the yaw moves to the next multiple of step.
 function Rig:rotate(step, snap)
   if snap then
-    self.yaw_offset = (math.floor(self.yaw_offset / step + 0.5) + (step > 0 and 1 or -1)) * math.abs(step)
+    local size = math.abs(step)
+    self.yaw_offset = (math.floor(self.yaw_offset / size + 0.5) + (step > 0 and 1 or -1)) * size
   else
     self.yaw_offset = self.yaw_offset + step
   end

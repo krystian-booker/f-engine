@@ -1,9 +1,13 @@
 #include "engine/assets/Image.h"
 #include "engine/core/Paths.h"
 #include "engine/services/Canvas.h"
+#include "engine/services/InputRecorder.h"
 #include "engine/services/InputState.h"
 #include "engine/services/SaveStore.h"
+#include <chrono>
 #include <doctest/doctest.h>
+#include <map>
+#include <thread>
 
 using namespace fe;
 
@@ -210,11 +214,33 @@ TEST_CASE("backups and PNG thumbnails go through the durable atomic writer") {
     const auto folder = std::filesystem::temp_directory_path() / "fengine-durable-test";
     std::filesystem::remove_all(folder);
     const auto file = folder / "data.json";
-    writeTextAtomic(file, "first", true);
+    writeTextAtomic(file, "{\"n\": 1}", true);
     CHECK_FALSE(std::filesystem::exists(backupPath(file)));
-    writeTextAtomic(file, "second", true);
-    CHECK(readFile(backupPath(file)) == "first");
-    CHECK(readFile(file) == "second");
+    // The previous file becomes the backup by rename, not by copy: a hard
+    // link to it is a link to the .bak afterwards, and nothing is left over.
+    const auto link = folder / "data.link";
+    std::filesystem::create_hard_link(file, link);
+    writeTextAtomic(file, "{\"n\": 2}", true);
+    CHECK(readFile(backupPath(file)) == "{\"n\": 1}");
+    CHECK(readFile(file) == "{\"n\": 2}");
+    CHECK(std::filesystem::equivalent(link, backupPath(file)));
+    CHECK_FALSE(std::filesystem::equivalent(link, file));
+    CHECK_FALSE(std::filesystem::exists(folder / "data.json.tmp"));
+    std::filesystem::remove(link);
+    // A second write renames the current file over the older backup.
+    writeTextAtomic(file, "{\"n\": 3}", true);
+    CHECK(readFile(backupPath(file)) == "{\"n\": 2}");
+    // Without keepBackup the previous version is replaced and the backup untouched.
+    writeTextAtomic(file, "{\"n\": 4}");
+    CHECK(readFile(backupPath(file)) == "{\"n\": 2}");
+    CHECK(readFile(file) == "{\"n\": 4}");
+    // The crash window between the two renames: the file is missing and the
+    // backup holds the last version, which the JSON reader falls back to.
+    std::filesystem::remove(file);
+    CHECK(readJsonOrBackup(file).at("n") == 2);
+    writeTextAtomic(file, "{\"n\": 5}", true);
+    CHECK(readFile(backupPath(file)) == "{\"n\": 2}"); // nothing to rename aside: the backup stays
+    CHECK(readFile(file) == "{\"n\": 5}");
     const auto png = folder / "thumbnails" / "slot1.png";
     Image::solid(10, 20, 30).savePng(png);
     CHECK_FALSE(std::filesystem::exists(folder / "thumbnails" / "slot1.png.tmp"));
@@ -287,4 +313,374 @@ TEST_CASE("asset preload decodes on the worker thread") {
     }
     CHECK(assets.progress(ticket) == doctest::Approx(1));
     CHECK(assets.tryModel("maps/arena/geometry.glb"));
+}
+
+TEST_CASE("a blank or unparseable JSON file is never copied over the backup") {
+    const auto folder = std::filesystem::temp_directory_path() / "fengine-backup-guard-test";
+    std::filesystem::remove_all(folder);
+    const auto file = folder / "slot.json";
+    writeJson(file, {{"step", 1}}, true);
+    writeJson(file, {{"step", 2}}, true);
+    CHECK(readJson(backupPath(file)).at("step") == 1);
+    // A truncated file (an interrupted write) must not become the backup.
+    writeTextAtomic(file, "{\"step\": ");
+    writeJson(file, {{"step", 3}}, true);
+    CHECK(readJson(backupPath(file)).at("step") == 1);
+    writeTextAtomic(file, "");
+    writeJson(file, {{"step", 4}}, true);
+    CHECK(readJson(backupPath(file)).at("step") == 1);
+    // A complete previous version is backed up as before.
+    writeJson(file, {{"step", 5}}, true);
+    CHECK(readJson(backupPath(file)).at("step") == 4);
+    CHECK(worthBackingUp(file, "{\"a\": 1}"));
+    CHECK_FALSE(worthBackingUp(file, "{\"a\": "));
+    CHECK_FALSE(worthBackingUp(file, " \n"));
+    // Files that are not JSON are backed up whenever they hold something.
+    CHECK(worthBackingUp(folder / "notes.txt", "{not json"));
+    CHECK_FALSE(worthBackingUp(folder / "notes.txt", ""));
+}
+
+TEST_CASE("keys named with + or - bind as they are; the suffix rule is for analog inputs") {
+    InputState input;
+    input.define("zoom_out", {"key:-", "key:Keypad -"});
+    input.define("zoom_in", {"key:Keypad +"});
+    input.define("left", {"pad:leftx-"});
+    input.define("right", {"pad:leftx+"});
+    CHECK(input.parseBinding("key:-").input == "key:-");
+    CHECK(input.parseBinding("key:-").direction == 0);
+    CHECK(input.parseBinding("key:Keypad +").direction == 0);
+    CHECK(input.parseBinding("pad:leftx-").input == "pad:leftx");
+    CHECK(input.parseBinding("pad:leftx-").direction == -1);
+    CHECK(input.parseBinding("pad2:righty+").direction == 1);
+    input.feed("key:-", 1);
+    input.tick(1.0 / 60);
+    CHECK(input.pressed("zoom_out"));
+    input.feed("key:-", 0);
+    input.feed("key:Keypad +", 1);
+    input.tick(1.0 / 60);
+    CHECK(input.released("zoom_out"));
+    CHECK(input.pressed("zoom_in"));
+    input.feed("pad:leftx", -0.9f);
+    input.tick(1.0 / 60);
+    CHECK(input.held("left"));
+    CHECK_FALSE(input.held("right"));
+    input.feed("pad:leftx", 0.9f);
+    input.tick(1.0 / 60);
+    CHECK(input.held("right"));
+    CHECK_FALSE(input.held("left"));
+    // An input an axis lists as analog takes the suffix too.
+    input.defineAxis("throttle", {{}, {}, {"wheel:axis"}, 0.1f});
+    CHECK(input.parseBinding("wheel:axis+").input == "wheel:axis");
+    CHECK(input.parseBinding("wheel:other+").input == "wheel:other+");
+}
+
+TEST_CASE("the per-tick collapse honours each action's threshold") {
+    InputState input;
+    input.define("fire", {"pad:righttrigger"}, 0.9f);
+    input.define("aim", {"pad:righttrigger"}, 0.3f);
+    // A pull past 0.9 and back to 0.6 inside one tick: fire is pressed this
+    // tick and released the next; aim stays held throughout.
+    input.feed("pad:righttrigger", 0.95f);
+    input.feed("pad:righttrigger", 0.6f);
+    input.tick(1.0 / 60);
+    CHECK(input.pressed("fire"));
+    CHECK(input.pressed("aim"));
+    input.tick(1.0 / 60);
+    CHECK(input.released("fire"));
+    CHECK(input.held("aim"));
+    CHECK(input.raw("pad:righttrigger") == doctest::Approx(0.6f));
+    // Values between the thresholds collapse: nothing an action sees changes.
+    input.feed("pad:righttrigger", 0.7f);
+    input.feed("pad:righttrigger", 0.8f);
+    input.feed("pad:righttrigger", 0.5f);
+    input.tick(1.0 / 60);
+    CHECK(input.held("aim"));
+    CHECK_FALSE(input.held("fire"));
+    CHECK(input.raw("pad:righttrigger") == doctest::Approx(0.5f));
+    input.tick(1.0 / 60);
+    CHECK(input.held("aim"));
+    // A directional threshold: a flick through both sides of a stick axis.
+    input.define("left", {"pad:leftx-"}, 0.7f);
+    input.define("right", {"pad:leftx+"}, 0.7f);
+    input.feed("pad:leftx", -0.8f);
+    input.feed("pad:leftx", 0.8f);
+    input.tick(1.0 / 60);
+    CHECK(input.pressed("left"));
+    CHECK_FALSE(input.held("right"));
+    input.tick(1.0 / 60);
+    CHECK(input.released("left"));
+    CHECK(input.pressed("right"));
+}
+
+namespace {
+class CountingRecorder final : public InputRecorder {
+public:
+    void input(const std::string& name, float value) override { inputs.emplace_back(name, value); }
+    void mouse(glm::vec2 position) override { mice.push_back(position); }
+    void wheel(float delta) override { wheels.push_back(delta); }
+    void text(std::string_view utf8) override { texts.emplace_back(utf8); }
+    void composition(const std::string& text, int cursor) override {
+        compositions.emplace_back(text, cursor);
+    }
+    std::vector<std::pair<std::string, float>> inputs;
+    std::vector<glm::vec2> mice;
+    std::vector<float> wheels;
+    std::vector<std::string> texts;
+    std::vector<std::pair<std::string, int>> compositions;
+};
+} // namespace
+
+TEST_CASE("an input recorder sees everything fed, including focus-loss releases") {
+    InputState input;
+    CountingRecorder recorder;
+    input.setRecorder(&recorder);
+    input.define("confirm", {"key:Z"});
+    input.feed("key:Z", 1);
+    input.feed("pad:a", 1);
+    input.feedMouse({3, 4});
+    input.feedWheel(-1);
+    input.feedText("hi");
+    input.feedComposition("か", 1);
+    input.tick(1.0 / 60);
+    CHECK(input.held("confirm"));
+    input.focusLost();
+    input.tick(1.0 / 60);
+    CHECK(input.released("confirm"));
+    CHECK(input.composition().empty());
+    REQUIRE(recorder.inputs.size() == 4);
+    CHECK(recorder.inputs[0] == std::pair<std::string, float>{"key:Z", 1});
+    CHECK(recorder.inputs[1] == std::pair<std::string, float>{"pad:a", 1});
+    CHECK(recorder.inputs[2] == std::pair<std::string, float>{"key:Z", 0});
+    CHECK(recorder.inputs[3] == std::pair<std::string, float>{"pad:a", 0});
+    CHECK(recorder.mice == std::vector<glm::vec2>{{3, 4}});
+    CHECK(recorder.wheels == std::vector<float>{-1});
+    CHECK(recorder.texts == std::vector<std::string>{"hi"});
+    REQUIRE(recorder.compositions.size() == 2);
+    CHECK(recorder.compositions[1] == std::pair<std::string, int>{"", 0});
+    // A second focus loss with nothing held and no composition records nothing.
+    input.focusLost();
+    CHECK(recorder.inputs.size() == 4);
+    CHECK(recorder.compositions.size() == 2);
+    input.setRecorder(nullptr);
+    input.feed("key:Z", 1);
+    CHECK(recorder.inputs.size() == 4);
+}
+
+namespace {
+// A backend that keeps documents in memory and counts reads, standing in for
+// a cloud or console save API.
+class MemorySaveBackend final : public SaveBackend {
+public:
+    [[nodiscard]] std::string name() const override { return "memory"; }
+    [[nodiscard]] std::optional<std::string> read(const std::string& key, bool backup) const override {
+        ++reads[key];
+        const auto& store = backup ? backups : current;
+        const auto found = store.find(key);
+        return found == store.end() ? std::nullopt : std::optional(found->second);
+    }
+    void write(const std::string& key, const std::string& bytes, bool keepBackup) override {
+        if (keepBackup && current.contains(key)) {
+            backups[key] = current[key];
+        }
+        current[key] = bytes;
+    }
+    [[nodiscard]] std::vector<std::string> list(const std::string& folder) const override {
+        std::vector<std::string> names;
+        const auto prefix = folder + "/";
+        for (const auto& [key, bytes] : current) {
+            if (key.starts_with(prefix)) {
+                names.push_back(key.substr(prefix.size()));
+            }
+        }
+        for (const auto& [key, bytes] : backups) {
+            if (key.starts_with(prefix)) {
+                names.push_back(key.substr(prefix.size()) + ".bak");
+            }
+        }
+        return names;
+    }
+    void remove(const std::string& key) override {
+        current.erase(key);
+        backups.erase(key);
+    }
+    [[nodiscard]] std::optional<Stat> stat(const std::string& key, bool backup) const override {
+        const auto& store = backup ? backups : current;
+        const auto found = store.find(key);
+        if (found == store.end()) {
+            return std::nullopt;
+        }
+        return Stat{1700000000.0, found->second.size()};
+    }
+    std::map<std::string, std::string> current, backups;
+    mutable std::map<std::string, int> reads;
+};
+} // namespace
+
+TEST_CASE("a save backend stores the slots, settings and sidecar summaries") {
+    const auto folder = std::filesystem::temp_directory_path() / "fengine-save-backend-test";
+    std::filesystem::remove_all(folder);
+    auto owned = std::make_unique<MemorySaveBackend>();
+    auto* memory = owned.get();
+    SaveStore store(folder, std::move(owned));
+    CHECK(store.backend().name() == "memory");
+    store.write("slot1", {{"gold", 10}}, {{"location", "Town"}});
+    store.write("slot1", {{"gold", 11}}, {{"location", "Woods"}});
+    CHECK(memory->current.contains("saves/slot1.json"));
+    CHECK(memory->current.contains("saves/slot1.meta.json"));
+    CHECK(memory->backups.contains("saves/slot1.json"));
+    CHECK_FALSE(std::filesystem::exists(folder / "saves"));
+    CHECK(store.read("slot1")->data.at("gold") == 11);
+    // Listing reads the sidecar, never the slot document.
+    memory->reads.clear();
+    const auto slots = store.list();
+    REQUIRE(slots.size() == 1);
+    CHECK(slots[0].meta.at("location") == "Woods");
+    CHECK(slots[0].modified == doctest::Approx(1700000000.0));
+    CHECK(memory->reads["saves/slot1.meta.json"] == 1);
+    CHECK(memory->reads["saves/slot1.json"] == 0);
+    // A sidecar that no longer matches the document falls back to the full read.
+    memory->current["saves/slot1.json"] = memory->backups["saves/slot1.json"];
+    CHECK(store.list()[0].meta.at("location") == "Town");
+    CHECK(memory->reads["saves/slot1.json"] == 1);
+    // A cut-short document reads the backup, and the listing says so.
+    memory->current["saves/slot1.json"] = "{\"format\": 1, \"data\": ";
+    CHECK(store.read("slot1")->fromBackup);
+    CHECK(store.list()[0].fromBackup);
+    memory->current.erase("saves/slot1.json");
+    CHECK(store.read("slot1")->data.at("gold") == 10);
+    store.writeConfig({{"volume", 0.5}});
+    CHECK(store.readConfig().at("volume") == 0.5);
+    store.remove("slot1");
+    CHECK_FALSE(store.read("slot1"));
+    CHECK(store.list().empty());
+    CHECK_FALSE(memory->current.contains("saves/slot1.meta.json"));
+}
+
+TEST_CASE("the file backend writes sidecar summaries and the save size is capped") {
+    const auto folder = std::filesystem::temp_directory_path() / "fengine-save-sidecar-test";
+    std::filesystem::remove_all(folder);
+    SaveStore store(folder);
+    CHECK(store.backend().name() == "file");
+    store.write("slot1", {{"gold", 1}}, {{"where", "town"}});
+    const auto sidecar = folder / "saves" / "slot1.meta.json";
+    REQUIRE(std::filesystem::is_regular_file(sidecar));
+    const auto summary = readJson(sidecar);
+    CHECK(summary.at("meta").at("where") == "town");
+    CHECK(summary.at("size") == std::filesystem::file_size(folder / "saves" / "slot1.json"));
+    CHECK(store.list()[0].meta.at("where") == "town");
+    // Without the sidecar the slot is read in full.
+    std::filesystem::remove(sidecar);
+    CHECK(store.list()[0].meta.at("where") == "town");
+    // A slot document over the limit is refused and the previous save kept.
+    const std::string huge(SaveStore::MaxSlotBytes, 'x');
+    CHECK_THROWS_WITH(store.write("slot1", {{"blob", huge}}, {}), doctest::Contains("at most 16 MiB"));
+    CHECK(store.read("slot1")->data.at("gold") == 1);
+    store.remove("slot1");
+    CHECK_FALSE(std::filesystem::exists(sidecar));
+}
+
+TEST_CASE("the asset cache evicts least recently used assets outside the referenced set") {
+    AssetCache assets(FENGINE_TEST_GAME, FENGINE_LUALIB);
+    CHECK(assets.budget() == AssetCache::DefaultBudget);
+    const std::string a = "@fe/assets/ui/cursor.png", b = "@fe/assets/ui/bubble.png",
+                      c = "@fe/assets/ui/spark.png";
+    const auto first = assets.image(a);
+    assets.image(b);
+    assets.image(c);
+    CHECK(assets.loaded(a));
+    CHECK(assets.cachedCount() == 3);
+    CHECK(assets.bytesOf(a) == decodedBytes(*first));
+    CHECK(assets.cachedBytes() == assets.bytesOf(a) + assets.bytesOf(b) + assets.bytesOf(c));
+    // Within budget nothing is evicted.
+    CHECK(assets.releaseUnused({}) == 0);
+    // `a` was used first; touching it makes `b` the oldest.
+    assets.image(a);
+    const auto generation = assets.generation();
+    assets.setBudget(assets.cachedBytes() - 1);
+    CHECK(assets.releaseUnused({}) == 1);
+    CHECK_FALSE(assets.loaded(b));
+    CHECK(assets.loaded(a));
+    CHECK(assets.loaded(c));
+    CHECK(assets.generation() == generation + 1);
+    // Referenced assets stay however old; the budget is met by the others.
+    assets.setBudget(0);
+    CHECK(assets.releaseUnused({c}) == 1);
+    CHECK(assets.loaded(c));
+    CHECK_FALSE(assets.loaded(a));
+    CHECK(assets.releaseUnused({c}) == 0);
+    // release() drops one asset at once; an evicted asset loads again on use.
+    CHECK(assets.release(c));
+    CHECK_FALSE(assets.release(c));
+    CHECK(assets.cachedCount() == 0);
+    CHECK(assets.image(b)->width > 0);
+    CHECK(assets.loaded(b));
+    // Finished preload tickets are forgotten and read as complete.
+    const int ticket = assets.preload({a});
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (assets.progress(ticket) < 1 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    CHECK(assets.progress(ticket) == 1);
+    CHECK(assets.progress(ticket + 100) == 1);
+}
+
+TEST_CASE("a font reloads only for the files it names") {
+    AssetCache assets(FENGINE_TEST_GAME, FENGINE_LUALIB);
+    assets.defineFont("default", {{"files", {"@fe/assets/fonts/pixel.fnt"}}});
+    const auto fonts = std::filesystem::path(FENGINE_LUALIB) / "fe" / "assets" / "fonts";
+    const auto generation = assets.generation();
+    std::weak_ptr<FontSet> before = assets.font("default");
+    // The face and its page image rebuild the font; a neighbour in the folder does not.
+    CHECK(assets.reload(fonts / "pixel.png"));
+    CHECK(assets.generation() > generation);
+    assets.releaseRetiredFonts();
+    CHECK(before.expired());
+    before = assets.font("default");
+    CHECK_FALSE(assets.reload(fonts / "other-font.fnt"));
+    assets.releaseRetiredFonts();
+    CHECK_FALSE(before.expired());
+    CHECK(assets.reload(fonts / "pixel.fnt"));
+}
+
+TEST_CASE("save blobs live next to their slot through the backend and go with the slot") {
+    const auto folder = std::filesystem::temp_directory_path() / "fengine-save-blob-test";
+    std::filesystem::remove_all(folder);
+    std::string bytes("PNG\0\1\2\xff binary", 14);
+    bytes.push_back('\0');
+    SUBCASE("file backend") {
+        SaveStore store(folder);
+        store.write("slot1", {{"gold", 1}}, {});
+        store.writeBlob("slot1", "snapshot", bytes);
+        store.writeBlob("slot1", "inputs", "abc");
+        CHECK(std::filesystem::is_regular_file(folder / "saves" / "slot1.snapshot.blob"));
+        CHECK(store.readBlob("slot1", "snapshot") == bytes);
+        CHECK(store.listBlobs("slot1") == std::vector<std::string>{"inputs", "snapshot"});
+        // Blobs are not slots, and a slot need not exist for its blobs.
+        CHECK(store.list().size() == 1);
+        store.writeBlob("later", "preview", "x");
+        CHECK(store.list().size() == 1);
+        CHECK(store.listBlobs("later") == std::vector<std::string>{"preview"});
+        store.removeBlob("slot1", "inputs");
+        CHECK_FALSE(store.readBlob("slot1", "inputs"));
+        store.remove("slot1");
+        CHECK_FALSE(store.readBlob("slot1", "snapshot"));
+        CHECK(store.listBlobs("slot1").empty());
+        CHECK_FALSE(std::filesystem::exists(folder / "saves" / "slot1.snapshot.blob"));
+        CHECK_THROWS(store.writeBlob("slot1", "Bad Name", "x"));
+        CHECK_THROWS(store.writeBlob("../x", "name", "x"));
+        CHECK_THROWS_WITH(store.writeBlob("slot1", "big", std::string(SaveStore::MaxSlotBytes + 1, 'x')),
+                          doctest::Contains("at most 16 MiB"));
+    }
+    SUBCASE("a backend without blob storage of its own stores them as keys") {
+        auto owned = std::make_unique<MemorySaveBackend>();
+        auto* memory = owned.get();
+        SaveStore store(folder, std::move(owned));
+        store.write("slot1", {{"gold", 1}}, {});
+        store.writeBlob("slot1", "snapshot", bytes);
+        CHECK(memory->current.at("saves/slot1.snapshot.blob") == bytes);
+        CHECK(store.readBlob("slot1", "snapshot") == bytes);
+        CHECK(store.list().size() == 1);
+        store.remove("slot1");
+        CHECK_FALSE(memory->current.contains("saves/slot1.snapshot.blob"));
+    }
 }

@@ -25,8 +25,8 @@ Programs find `lualib` and the compiled shaders next to their executable (develo
 
 | Test | Checks |
 | --- | --- |
-| `fengine_tests` | C++ core: pak archives (round trip, compression, damaged and path-traversing archives, mounts and loose-file precedence, the asset cache, `require` and `fe.fs` reading a packed game), `user://` images and `fe.save.thumbnail_path`, grid, paths, reachability, line of sight, text layout and markup, world entities, movement and contacts, saves, input maps, canvas, the Lua sandbox and bindings, editor map edits and undo, the replay harness and recorder, text input queueing, display requests, adaptive vsync, background world loading, local dates, the platform backends and protected table reads, and the renderer's CPU side (light binning, shadow cascades, light shadow selection and tiles, decal projection, pixel snapping, blend pass order, tangents, glTF material import, KTX headers) |
-| `fengine_runtime_tests` | Runtime services without a window: audio through the mixer with no device (volumes, fades, voice release, playing/position, music seek, stem alignment, pitch, global pause, low-pass, reverb tail, ducking envelope, positional gain and pan), SDL input translation (focus, gamepads, mouse buttons, text and IME events), gamepad layouts and rumble on SDL virtual gamepads, window focus tracking |
+| `fengine_tests` | C++ core: pak archives (round trip, compression, damaged and path-traversing archives, mounts and loose-file precedence, the asset cache, `require` and `fe.fs` reading a packed game), `user://` images and `fe.save.thumbnail_path`, grid, paths, reachability, line of sight, text layout and markup, world entities, movement and contacts, saves (backends, the size cap, sidecar summaries, the backup kept by rename and the guard against truncated files), input maps (the `+`/`-` suffix rule, per-action collapse thresholds, recorders and focus loss), canvas and `canvas_fit`, the Lua sandbox and bindings, editor map edits and undo, the replay harness and recorder (ordered inputs, `wait_for` timeouts), text input queueing, display requests, adaptive vsync, the frame cap, background world loading, asset eviction and the referenced set, the log file, level filter, sink hook and crash report, `game.json` HDR fields and `fe.app.display().hdr`, game ids, executable self-location, local dates, the platform backends (stat tolerance and coalesced writes) and protected table reads, and the renderer's CPU side (light binning, shadow cascades, light shadow selection and tiles, decal projection, pixel snapping, blend pass order, tangents, glTF material import, KTX headers, the HDR output transform) |
+| `fengine_runtime_tests` | Runtime services without a window: audio through the mixer with no device (volumes, fades, voice release, playing/position, music seek, stem alignment, pitch, the pitch-preserving shifter's spectrum and duration, global pause, low-pass, reverb tail, ducking envelope, positional gain and pan), SDL input translation (focus, gamepads, mouse buttons, text and IME events), gamepad layouts and rumble on SDL virtual gamepads, window focus tracking |
 | `mirror_folder` | `cmake/MirrorFolder.cmake` in copy mode (how Windows builds stage `lualib` and shaders): a first copy, an update after files change, appear and disappear, and removal |
 | `check_unicode_path` | `fengine_headless --check` on a copy of `samples/ridgeline` in a folder named `Józef-łódź-ゲーム` (on Windows, the executables' manifest makes arguments and paths UTF-8) |
 | `lua_library` | Every kit, against the fixture game in `lualib/tests/game` (`fengine_headless --test`) |
@@ -53,11 +53,11 @@ A replay is a JSON array of commands, each with a `tick`, or an object `{"seed":
 
 | Command | Meaning |
 | --- | --- |
-| `{"input": {"key:Return": 1}}` | Set raw inputs (see [input names](authoring.md#input-names)); 0 releases |
+| `{"input": [["key:Return", 1]]}` or `{"input": {"key:Return": 1}}` | Set raw inputs (see [input names](authoring.md#input-names)) in list order (what `--record` writes) or, for an object, in key order; 0 releases |
 | `{"mouse": [x, y]}`, `{"wheel": n}` | Move the mouse (canvas pixels), scroll |
 | `{"text": "Aria"}`, `{"text": "かな", "cursor": 2}` | Commit typed text, or set the IME's pre-edit string and cursor (as `fe.input.feed_text`) |
 | `{"lua": "code"}` | Run Lua in the game |
-| `{"wait_for": "expr", "timeout": ticks}` | Pause the replay until a Lua expression is true; later ticks shift by the wait |
+| `{"wait_for": "expr", "timeout": ticks}` | Pause the replay until a Lua expression is true; later ticks shift by the wait. A timeout (default 600 ticks) fails the replay; the command's other fields still run |
 | `{"assert": "expr", "message": "text"}` | Fail unless the expression is true |
 | `{"capture": "path.png"}` | Screenshot (windowed runs only). It fails unless it looks like a rendered frame: in a 64-level brightness histogram no level may cover more than 95% of the pixels and at least 4 levels must each hold 0.5% of them, so a black, cleared or single-colour frame fails. |
 | `{"capture": "out.png", "compare": "reference/{backend}/out.png", "tolerance": 0.02}` | Screenshot and compare with a reference image (relative to the replay file; `{backend}` is the renderer backend's folder, see below). The capture is box-filtered to the reference's size (320 pixels across) and fails when the aspect ratios differ or the mean per-channel difference exceeds the tolerance (0..1, default 0.02). When the running backend has no reference, only the rendered-frame check applies (logged). |
@@ -71,7 +71,7 @@ A replay is a JSON array of commands, each with a `tick`, or an object `{"seed":
 ./build/fengine_headless samples/ridgeline --replay samples/ridgeline/replays/battle.json
 ```
 
-A failed assertion, a timed-out wait, a screenshot difference or a Lua error makes the process exit non-zero. Use a separate `--user-data` folder so saved settings don't change key bindings; headless replays use a fresh temporary folder unless you pass `--user-data`.
+A failed assertion, a timed-out wait, a screenshot difference or a Lua error makes the process exit non-zero. Use a separate `--user-data` folder so saved settings don't change key bindings; headless replays use a fresh temporary folder unless you pass `--user-data`. The windowed runtime also writes `log.txt` (and `crash.txt` after a crash) into the user-data folder, which is the first place to look when a replay fails on a CI machine.
 
 To make a replay by playing, run `fengine <game> --record session.json`. It writes the seed and every raw input, mouse position, wheel movement, typed text and IME pre-edit string per tick; add `assert` or `capture` commands by hand afterwards.
 

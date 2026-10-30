@@ -50,10 +50,11 @@ private:
 // Tags: {color:name|#rrggbb|#rrggbbaa|reset} {icon:id} {wait:seconds}
 // {speed:cps} ({speed:0} shows the rest at once) {size:scale} ... {/size}
 // {b} ... {/b} {shake} ... {/shake} {wave} ... {/wave} and
-// {ruby:base|reading} (furigana: `reading` set small above `base`). "{{" is a
-// literal brace. Unknown tags go to the resolver; tags in its replacements
-// resolve too, 4 levels deep, and more than MaxResolvedBytes of replacements
-// in one parse throw std::runtime_error.
+// {ruby:base|reading} (furigana: `reading` set small above `base`). {size}
+// and {b} nest: {/size} restores the scale in force before its {size}, and
+// {b}{b}x{/b}y{/b} keeps y bold. "{{" is a literal brace. Unknown tags go to
+// the resolver; tags in its replacements resolve too, 4 levels deep, and more
+// than MaxResolvedBytes of replacements in one parse throw std::runtime_error.
 inline constexpr std::size_t MaxResolvedBytes = std::size_t{1} << 20;
 std::vector<Glyph> parseMarkup(std::string_view source, std::uint32_t baseColor, const ColorPalette& palette,
                                const MarkupResolver& resolver = {});

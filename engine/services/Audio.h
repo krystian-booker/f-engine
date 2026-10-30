@@ -13,6 +13,10 @@ struct MusicOptions {
     float volume = 1, pitch = 1;
     bool loop = true;
     bool sync = false; // start at the main layer's position (stems)
+    // `pitch` shifts the pitch only and the track keeps its duration (within
+    // 0.5..2; outside that it plays as varispeed). Default: varispeed, where
+    // speed and pitch change together.
+    bool preserveSpeed = false;
 };
 
 // Where positional sounds are heard from: a world's camera.
@@ -35,6 +39,7 @@ inline Spatial spatialize(const Listener& listener, glm::vec3 position, float ra
 
 struct SoundOptions {
     float volume = 1, pitch = 1, pan = 0;
+    bool preserveSpeed = false; // as MusicOptions::preserveSpeed
     bool loop = false;
     std::string bus = "sfx";
     // Positional sounds are attenuated and panned from the named listener;
@@ -50,6 +55,7 @@ struct VoiceChange {
     // (GCC's -Wmissing-field-initializers).
     std::optional<float> volume{}, pan{}, pitch{};
     std::optional<glm::vec3> position{};
+    std::optional<bool> preserveSpeed{}; // with or without `pitch`
 };
 
 struct BusEffect {
@@ -76,7 +82,8 @@ public:
     virtual void playMusic(const std::filesystem::path& file, const MusicOptions& options) = 0;
     virtual void stopMusic(const std::string& layer, double fade) = 0; // empty layer = all
     virtual void setMusicVolume(const std::string& layer, float volume, double fade) = 0;
-    virtual void setMusicPitch(const std::string& layer, float pitch) = 0;
+    // `preserveSpeed` as MusicOptions::preserveSpeed.
+    virtual void setMusicPitch(const std::string& layer, float pitch, bool preserveSpeed = false) = 0;
     // The volume and pitch a layer was last given (1 when it has none).
     [[nodiscard]] virtual float musicVolume(const std::string& layer) const = 0;
     [[nodiscard]] virtual float musicPitch(const std::string& layer) const = 0;
@@ -121,7 +128,7 @@ public:
         }
     }
     void setMusicVolume(const std::string& layer, float volume, double) override { volumes_[layer] = volume; }
-    void setMusicPitch(const std::string& layer, float pitch) override { pitches_[layer] = pitch; }
+    void setMusicPitch(const std::string& layer, float pitch, bool) override { pitches_[layer] = pitch; }
     [[nodiscard]] float musicVolume(const std::string& layer) const override {
         const auto found = volumes_.find(layer);
         return found == volumes_.end() ? 1.0f : found->second;

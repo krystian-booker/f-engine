@@ -33,7 +33,6 @@ PostPass::PostPass(GpuAssets& gpu, const Uniforms& uniforms, CustomShaders& cust
       bloomUniform_(bgfx::createUniform("u_bloom", bgfx::UniformType::Vec4, 2)),
       dofUniform_(bgfx::createUniform("u_dof", bgfx::UniformType::Vec4, 3)),
       ssaoUniform_(bgfx::createUniform("u_ssao", bgfx::UniformType::Vec4, 2)),
-      paramsUniform_(bgfx::createUniform("u_params", bgfx::UniformType::Vec4, 4)),
       source_(bgfx::createUniform("s_source", bgfx::UniformType::Sampler)),
       half_(bgfx::createUniform("s_half", bgfx::UniformType::Sampler)),
       near_(bgfx::createUniform("s_near", bgfx::UniformType::Sampler)),
@@ -73,7 +72,8 @@ void PostPass::endFrame() {
 }
 
 void PostPass::render(World& world, const ScreenFx& screen, SceneTarget& scene, const PostOutput& output,
-                      double time, const std::function<std::uint16_t()>& takeView, std::uint32_t& calls) {
+                      double alpha, double time, const std::function<std::uint16_t()>& takeView,
+                      std::uint32_t& calls) {
     const auto& s = world.environment().post;
     const auto& camera = world.camera();
     const auto* caps = bgfx::getCaps();
@@ -81,15 +81,18 @@ void PostPass::render(World& world, const ScreenFx& screen, SceneTarget& scene, 
     auto& targets = targets_.acquire({scene.size.x, scene.size.y}, [] { return Targets(); });
     const glm::ivec2 halfSize = glm::max(glm::ivec2(1), scene.size / 2);
     const glm::vec2 size(scene.size), half(halfSize);
-    const float pixelScale = static_cast<float>(std::max(1, s.pixelScale));
+    const float pixelScale = std::max(1.0f, s.pixelScale);
     const float blurRadius = s.dofRadius / pixelScale; // scene pixels
+    // The scene was drawn with the interpolated camera; the focus plane and
+    // field of view follow it per frame, not per tick.
+    const float cameraDistance = camera.interpolatedDistance(alpha);
     glm::vec4 dof[3] = {glm::vec4(camera.nearPlane, camera.farPlane,
-                                  s.focusDistance > 0 ? s.focusDistance : camera.distance, s.aperture),
+                                  s.focusDistance > 0 ? s.focusDistance : cameraDistance, s.aperture),
                         glm::vec4(s.focus, s.focusRange,
                                   s.dofMode == "depth"  ? 0.0f
                                   : s.dofMode == "tilt" ? 1.0f
                                                         : 2.0f,
-                                  flag(caps->homogeneousDepth)),
+                                  flag(caps->homogeneousDepth) + (camera.orthographic ? 2.0f : 0.0f)),
                         glm::vec4(1.0f / size, 0, bottomLeft)};
 
     auto ao = gpu_.white();
@@ -98,8 +101,10 @@ void PostPass::render(World& world, const ScreenFx& screen, SceneTarget& scene, 
             targets.ao = colorTarget(halfSize, bgfx::TextureFormat::RGBA8);
             targets.aoBlur = colorTarget(halfSize, bgfx::TextureFormat::RGBA8);
         }
-        const float tanY = std::tan(glm::radians(camera.fov) * 0.5f);
-        const glm::vec4 ssao[2] = {glm::vec4(tanY * size.x / size.y, tanY, 0, 0),
+        // Half the view's extent per unit of depth, or in world units when orthographic.
+        const float tanY = camera.orthographic ? camera.viewHeight(alpha) * 0.5f
+                                               : std::tan(glm::radians(camera.interpolatedFov(alpha)) * 0.5f);
+        const glm::vec4 ssao[2] = {glm::vec4(tanY * size.x / size.y, tanY, flag(camera.orthographic), 0),
                                    glm::vec4(s.ssaoRadius, s.ssaoStrength, s.ssaoBias, 0)};
         auto view = takeView();
         target(view, "Ambient occlusion", targets.ao.get(), halfSize);
@@ -171,7 +176,7 @@ void PostPass::render(World& world, const ScreenFx& screen, SceneTarget& scene, 
                              level == 0 ? scene.color.get()
                                         : bgfx::getTexture(targets.bloom[level - 1].get()));
             const glm::vec4 settings[2] = {glm::vec4(1.0f / source, flag(level == 0), s.bloomThreshold),
-                                           glm::vec4(s.bloomThreshold * s.bloomKnee, 0, 0, 0)};
+                                           glm::vec4(bloomKnee(s), 0, 0, 0)};
             bgfx::setUniform(bloomUniform_.get(), settings, 2);
             fullscreen(view, bloomDown_.get(), WriteAll, calls);
         }
@@ -204,7 +209,8 @@ void PostPass::render(World& world, const ScreenFx& screen, SceneTarget& scene, 
                                               colorTarget(outSize, bgfx::TextureFormat::RGBA8)};
         });
     }
-    const auto finalState = WriteAll | AlphaBlend;
+    // fs_post.sc writes premultiplied colour (see the class comment).
+    const auto finalState = WriteAll | PremultipliedBlend;
 
     auto view = takeView();
     if (chain) {
@@ -212,8 +218,9 @@ void PostPass::render(World& world, const ScreenFx& screen, SceneTarget& scene, 
     } else {
         target(view, "Post", output.framebuffer, output.rect);
     }
-    bgfx::setTexture(0, uniforms_.scene.get(), scene.color.get(),
-                     s.pixelScale > 1 ? PointClamp : LinearClamp);
+    // A whole pixel scale keeps every scene pixel a crisp block; a fraction
+    // (dynamic resolution) is filtered up.
+    bgfx::setTexture(0, uniforms_.scene.get(), scene.color.get(), s.pixelated() ? PointClamp : LinearClamp);
     bgfx::setTexture(1, uniforms_.bloom.get(), bloom);
     bgfx::setTexture(2, uniforms_.lut.get(), gpu_.lut(s.lut));
     bgfx::setTexture(3, uniforms_.depth.get(), scene.depth.get(), PointClamp);
@@ -249,7 +256,7 @@ void PostPass::render(World& world, const ScreenFx& screen, SceneTarget& scene, 
         bgfx::setTexture(0, input_.get(), bgfx::getTexture((*chain)[current].get()));
         bgfx::setTexture(1, uniforms_.depth.get(), scene.depth.get(), PointClamp);
         const auto params = packCustomParams(passes[i].second->params);
-        bgfx::setUniform(paramsUniform_.get(), params.data(), 4);
+        bgfx::setUniform(uniforms_.params.get(), params.data(), Uniforms::ParamsCount);
         bgfx::setUniform(uniforms_.info.get(), glm::value_ptr(info));
         fullscreen(view, passes[i].first, last ? finalState : WriteAll, calls);
         current = 1 - current;

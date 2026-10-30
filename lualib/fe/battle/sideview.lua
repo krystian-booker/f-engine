@@ -2,31 +2,43 @@
 ---
 --- The stage is a map (maps/<stage>) loaded as a second world, so the field
 --- stays loaded underneath. Stage points "party1".."party8" and
---- "enemy1".."enemy16" place battlers (defaults are used otherwise).
+--- "enemy1".."enemy16" place battlers (settings.formation otherwise).
 --- Actions play timelines from data/timelines.json (built-in defaults
 --- below); a timeline's "effect" command marks when results appear.
+--- Timeline times and every pause (settings.waits) are divided by the
+--- battle speed (Battle.speed: Battle.settings.speed or the player's
+--- battle_speed setting).
 ---
 --- Customise with `sideview.settings`, `sideview.commands` (new battle
 --- commands), `sideview.modifier` (e.g. a boost gauge), `sideview.overlays`
---- (extra HUD drawing) and by replacing `sideview.draw_hud`.
+--- (extra HUD drawing) and by replacing `sideview.draw_hud`. The module is
+--- split in three: this file (scene, sprites and events),
+--- fe.battle.sideview_hud (the HUD and the victory window) and
+--- fe.battle.sideview_commands (the command menu, target picking); the
+--- shared popup, banner and fade helpers are fe.battle.presenter_common.
 ---
 --- The HUD's turn bar shows the scheduler's preview: initiative's next
 --- turns, or round_order's remaining turns this round plus the predicted
---- next round (the acting battler highlighted). Battlers added mid-battle
+--- next round (the acting battler highlighted); it is recomputed after
+--- each battle event, not every frame. Battlers added mid-battle
 --- (`battle:add`, `battle:summon`) get a sprite at their formation slot;
 --- swapped-in back-row battlers (`battle:swap`) take the leaver's place, and
 --- a party member with a living back-row partner gets a Swap command.
 --- Battlers that already left (a dismissed summon) have no sprite: their
---- late popups, fades and clips are skipped. Item
---- commands use the battle's inventory (Battle:inventory). Text comes from
---- `fe.battle.*` i18n keys; `settings.command_names[name]` overrides a
---- command's label.
+--- late popups, fades and clips are skipped. Cancelled (nullified) results
+--- show as such. Item commands use the battle's inventory
+--- (Battle:inventory). Text comes from `fe.battle.*` i18n keys;
+--- `settings.command_names[name]` overrides a command's label.
 local Battle = require("fe.battle.core")
 local camera = require("fe.camera")
-local data = require("fe.data")
+local class = require("fe.class")
+local common = require("fe.battle.presenter_common")
+local commands = require("fe.battle.sideview_commands")
+local hud = require("fe.battle.sideview_hud")
 local i18n = require("fe.i18n")
 local scene = require("fe.scene")
 local sound = require("fe.sound")
+local stats = require("fe.rpg.stats")
 local task = require("fe.task")
 local tablex = require("fe.tablex")
 local timeline = require("fe.timeline")
@@ -42,6 +54,16 @@ local sideview = {
     transition = "swirl",
     --- Labels by command name, overriding the fe.battle.command.* texts.
     command_names = {},
+    --- Default positions when the stage has no partyN / enemyN points:
+    --- the party in a column stepping back per slot, the enemies in rows.
+    formation = {
+      party = { x = 11, step = 0.4, z = 7.8, spacing = 1.3 },
+      enemy = { x = 4.5, column = 1.4, rows = 4, z = 7.8, spacing = 1.35 },
+    },
+    --- Pauses in seconds (divided by the battle speed).
+    waits = { results = 0.15, state_tick = 0.4, defend = 0.3, flee = 0.4, escape_failed = 0.6, assist = 0.3,
+      opening = 0.8, level_up = 0.8, defeat = 2, finish = 0.4,
+      timeline = 0.2 }, -- a timeline `wait` step without a duration
   },
   --- Extra commands: commands[name] = {label = "Steal", run = function(presenter, battler, battle) -> action|nil}
   commands = {},
@@ -76,11 +98,9 @@ local sideview = {
 
 i18n.defaults({ fe = { battle = {
   command = { attack = "Attack", skill = "Skills", item = "Items", defend = "Defend", flee = "Flee", swap = "Swap" },
-  swap_with = "Swap: {name}", miss = "Miss", defends = "{name} defends", escape = "Escape!",
-  escape_failed = "Couldn't escape!", fallen = "The party has fallen...", victory = "Victory!",
-  rewards = "{exp} EXP   {money} {currency}", jp = "{jp} JP", found = "Found {item}",
-  level_up = "{name} reached level {level}!", learned = "  Learned {skill}", next = "Next",
-  counters = "{name} counters!", assists = "{name} lends a hand!", leaves = "{name} leaves",
+  swap_with = "Swap: {name}", defends = "{name} defends", escape = "Escape!",
+  escape_failed = "Couldn't escape!", fallen = "The party has fallen...", next = "Next",
+  assists = "{name} lends a hand!", leaves = "{name} leaves",
 } } })
 
 --- Label of a battle command: `commands[name].label`, settings.command_names,
@@ -96,33 +116,39 @@ function sideview.command_label(name, user)
   return #types > 0 and types[1].type:gsub("^%l", string.upper) or name
 end
 
-local function modifier_label()
-  local label = sideview.modifier.label
-  return type(label) == "function" and label() or label
-end
-
 local function formation(stage_points, side, slot, count)
   local name = (side == "party" and "party" or "enemy") .. slot
   local point = stage_points[name]
   if point then return point.position end
+  local f = sideview.settings.formation
   if side == "party" then
-    return { x = 11 + slot * 0.4, z = 7.8 - (slot - (count + 1) / 2) * 1.3 }
+    return { x = f.party.x + slot * f.party.step, z = f.party.z - (slot - (count + 1) / 2) * f.party.spacing }
   end
-  local column = math.floor((slot - 1) / 4)
-  local row = (slot - 1) % 4
-  return { x = 4.5 - column * 1.4, z = 7.8 - (row - 1.5) * 1.35 }
+  local column = math.floor((slot - 1) / f.enemy.rows)
+  local row = (slot - 1) % f.enemy.rows
+  return { x = f.enemy.x - column * f.enemy.column, z = f.enemy.z - (row - (f.enemy.rows - 1) / 2) * f.enemy.spacing }
 end
 
-local Presenter = {}
-Presenter.__index = Presenter
+---@class SideviewPresenter
+local Presenter = class("SideviewPresenter")
 
-function sideview.new(battle, options)
+function Presenter:init(battle, options)
   local timelines = tablex.copy(sideview.timelines)
   if fe.fs.exists("data/timelines.json") then
     for name, entries in pairs(fe.json.read("data/timelines.json")) do timelines[name] = entries end
   end
-  return setmetatable({ battle = battle, options = options, timelines = timelines, popups = {}, banner = nil,
-    shown = {} }, Presenter)
+  self.battle = battle
+  self.options = options
+  self.timelines = timelines
+  self.popups = {}
+  self.banner = nil
+  self.shown = {}
+  self.stamp = 0 -- bumped by every battle event; the HUD's turn preview is cached against it
+  battle.events:connect(function() self.stamp = self.stamp + 1 end)
+end
+
+function sideview.new(battle, options)
+  return Presenter(battle, options)
 end
 
 -------------------------------------------------------------------------------
@@ -134,10 +160,9 @@ BattleScene.__index = BattleScene
 function BattleScene:update(dt)
   local p = self.presenter
   if p.rig then p.rig:update(dt) end
-  for _, popup in ipairs(p.popups) do popup.age = popup.age + dt end
-  p.popups = tablex.filter(p.popups, function(popup) return popup.age < 1.2 end)
+  common.age_popups(p, dt)
   for b, shown in pairs(p.shown) do
-    for _, def in ipairs(require("fe.rpg.stats").resource_list) do
+    for _, def in ipairs(stats.resource_list) do
       shown[def.id] = tween.approach(shown[def.id] or b:resource(def.id), b:resource(def.id), 10, dt)
     end
   end
@@ -192,25 +217,20 @@ function Presenter:start(battle)
 end
 
 function Presenter:show_banner(text, duration)
-  self.banner = text
-  task.spawn(function()
-    task.wait(duration or 0.9)
-    if self.banner == text then self.banner = nil end
-  end)
+  common.banner(self, text, duration or 0.9, "banner")
 end
 
--- The battler's sprite while it still exists.
-local function sprite_of(b)
-  local entity = b.entity
-  if entity and entity:valid() then return entity end
+--- Wait `seconds` of battle time (scaled by Battle.speed).
+function Presenter:wait(seconds)
+  common.wait(seconds)
 end
 
 function Presenter:popup(b, text, color)
-  local entity = sprite_of(b)
-  if not entity then return end
-  local x, y = entity:screen_position(1.4)
-  self.popups[#self.popups + 1] = { x = x, y = y, text = text, color = color or ui.theme.text, age = 0 }
+  common.popup(self, b, text, color)
 end
+
+-- The battler's sprite while it still exists.
+local sprite_of = common.sprite_of
 
 -- Timeline commands for side-view actions.
 local handlers = {}
@@ -227,7 +247,7 @@ end
 
 function handlers.anim(ctx, params)
   local entity = sprite_of(ctx.action.user)
-  if entity and fe.app.sprite_clips(entity:sprite().animation)[params.clip] then entity:clip(params.clip) end
+  common.play_clip(entity, params.clip)
 end
 
 function handlers.effect(ctx)
@@ -257,7 +277,7 @@ function handlers.shake(ctx, params)
 end
 
 function handlers.wait(_, params)
-  task.wait(params.duration or 0.2)
+  common.wait(params.duration or sideview.settings.waits.timeline)
 end
 
 function handlers.particles(ctx, params)
@@ -277,6 +297,22 @@ function sideview.timeline_command(name, fn)
   handlers[name] = fn
 end
 
+-- A timeline's entries with their times divided by the battle speed.
+local function paced(entries)
+  local speed = Battle.speed()
+  if speed == 1 then return entries end
+  return tablex.map(entries, function(entry)
+    local copy = tablex.copy(entry)
+    copy.time = (entry.time or 0) / speed
+    return copy
+  end)
+end
+
+function Presenter:opening(payload)
+  self:show_banner(i18n.t("fe.battle." .. payload.kind), 1.2)
+  common.wait(sideview.settings.waits.opening)
+end
+
 function Presenter:action(action)
   local source = action.source
   self:show_banner(source.name, 1.0)
@@ -285,38 +321,19 @@ function Presenter:action(action)
   local entries = self.timelines[name] or self.timelines.skill
   local ctx = { presenter = self, action = action }
   self.current = ctx
-  ctx.task = task.spawn(timeline.play, entries, handlers, ctx)
+  ctx.task = task.spawn(timeline.play, paced(entries), handlers, ctx)
   task.wait_until(function() return ctx.reached_effect or ctx.task.status ~= "running" end, 10)
 end
 
 function Presenter:results(payload)
   local ctx = self.current or { presenter = self, action = payload.action }
-  for _, r in ipairs(payload.results) do
-    local b = r.target
-    if r.missed then
-      self:popup(b, i18n.t("fe.battle.miss"), ui.theme.muted)
-    elseif r.type == "damage" then
-      local color = r.critical and 0xffd060ff or 0xffffffff
-      if r.affinity and r.affinity > 1 then color = 0xff9070ff end
-      self:popup(b, tostring(r.amount) .. (r.critical and "!" or ""), color)
-      local entity = sprite_of(b)
-      if r.amount > 0 and entity then
-        entity:sprite({ flash = { 1, 1, 1, 0.8 } })
-        task.spawn(function()
-          tween.run(0.25, function(t) if entity:valid() then entity:sprite({ flash = { 1, 1, 1, 0.8 * (1 - t) } }) end end)
-        end)
-      end
-      if r.amount > 0 and r.critical then self.rig:shake(0.12, 0.3) end
-    elseif r.type == "heal" or r.type == "resource" or r.type == "revive" then
-      if (r.amount or 0) ~= 0 then self:popup(b, tostring(r.amount), ui.theme.good) end
-    elseif r.type == "add_state" and r.applied then
-      self:popup(b, data.get("states", r.state).name, ui.theme.heading)
-    end
-  end
+  common.result_popups(self, payload.results, { on_damage = function(r)
+    if r.critical then self.rig:shake(0.12, 0.3) end
+  end })
   ctx.results = payload.results
   if ctx.task then task.join(ctx.task) end
   self.current = nil
-  task.wait(0.15)
+  common.wait(sideview.settings.waits.results)
 end
 
 function Presenter:knocked_out(b)
@@ -326,17 +343,14 @@ function Presenter:knocked_out(b)
     entity:clip("ko")
   else
     sound.play("defeat_enemy")
-    task.spawn(function()
-      tween.run(0.4, function(t) if entity:valid() then entity:sprite({ tint = { 1, 0.4, 0.4, 1 - t } }) end end)
-      if entity:valid() and not b:alive() then entity:sprite({ visible = false }) end
-    end)
+    common.fade_out(entity, b, { 1, 0.4, 0.4 })
   end
 end
 
 function Presenter:revived(b)
   local entity = sprite_of(b)
   if not entity then return end
-  entity:sprite({ visible = true, tint = { 1, 1, 1, 1 } })
+  common.restore(entity)
   entity:clip("idle")
 end
 
@@ -358,7 +372,7 @@ end
 
 function Presenter:assist(payload)
   self:show_banner(i18n.t("fe.battle.assists", { name = payload.battler:name() }), 0.9)
-  task.wait(0.3)
+  common.wait(sideview.settings.waits.assist)
 end
 
 function Presenter:battler_removed(b)
@@ -370,33 +384,48 @@ end
 function Presenter:state_tick(payload)
   for _, r in ipairs(payload.results) do
     if r.amount and r.amount ~= 0 then
-      self:popup(payload.battler, tostring(math.abs(r.amount)), r.type == "damage" and 0xc890ffff or ui.theme.good)
+      self:popup(payload.battler, tostring(math.abs(r.amount)),
+        r.type == "damage" and common.settings.colors.state_tick or ui.theme.good)
     end
   end
-  task.wait(0.4)
+  common.wait(sideview.settings.waits.state_tick)
+end
+
+--- Experience gained for an action (Battle.settings.exp_per_action): a
+--- popup, and a banner per level gained.
+function Presenter:exp(payload)
+  self:popup(payload.battler, i18n.t("fe.battle.exp_gain", { exp = payload.amount }), ui.theme.good)
+  for _, line in ipairs(common.level_up_lines({ { battler = payload.battler, gains = payload.gains } })) do
+    self:show_banner(line, sideview.settings.waits.level_up)
+    common.wait(sideview.settings.waits.level_up)
+  end
 end
 
 function Presenter:defend(action)
   self:show_banner(i18n.t("fe.battle.defends", { name = action.user:name() }))
-  task.wait(0.3)
+  common.wait(sideview.settings.waits.defend)
 end
-function Presenter:flee() self:show_banner(i18n.t("fe.battle.escape")) task.wait(0.4) end
-function Presenter:escape_failed() self:show_banner(i18n.t("fe.battle.escape_failed")) task.wait(0.6) end
+function Presenter:flee() self:show_banner(i18n.t("fe.battle.escape")) common.wait(sideview.settings.waits.flee) end
+function Presenter:escape_failed()
+  self:show_banner(i18n.t("fe.battle.escape_failed"))
+  common.wait(sideview.settings.waits.escape_failed)
+end
 
 function Presenter:finish(payload)
   local outcome = payload.outcome
+  local waits = sideview.settings.waits
   if outcome == "victory" then
     for _, b in ipairs(self.battle:side("party")) do
       local entity = sprite_of(b)
-      if entity and fe.app.sprite_clips(entity:sprite().animation).victory then entity:clip("victory") end
+      common.play_clip(entity, "victory")
     end
     sound.music(sideview.settings.victory_music)
     sideview.show_rewards(self, payload.rewards)
   elseif outcome == "defeat" then
-    self:show_banner(i18n.t("fe.battle.fallen"), 2)
-    task.wait(2)
+    self:show_banner(i18n.t("fe.battle.fallen"), waits.defeat)
+    common.wait(waits.defeat)
   else
-    task.wait(0.4)
+    common.wait(waits.finish)
   end
   transition.out("fade", 0.4)
   self:close()
@@ -406,8 +435,7 @@ end
 --- Remove the battle scene and stage world and bring the field music back,
 --- at once. Runs once (finish and abort both end here).
 function Presenter:close()
-  if self.closed then return end
-  self.closed = true
+  if not common.once(self, "closed") then return end
   if self.scene then scene.remove(self.scene) end
   local name = sideview.settings.world_name
   if self.world and fe.world.get(name) == self.world then fe.world.unload(name) end
@@ -423,282 +451,21 @@ function Presenter:abort()
   transition.clear()
 end
 
+--- Command input for a party battler (fe.battle.sideview_commands);
+--- returns an action or nil. Choosing Swap trades places with the back-row
+--- partner, who then chooses.
+function Presenter:command(user, battle)
+  return commands.command(sideview, self, user, battle)
+end
+
 --- Victory window: experience, money, items, level ups. Waits for Confirm.
 function sideview.show_rewards(presenter, rewards)
-  local inventory = presenter.battle:inventory()
-  local currency = inventory and inventory.settings and inventory.settings.currency or ""
-  local lines = { "{color:heading}" .. i18n.t("fe.battle.victory") .. "{color:reset}" }
-  lines[#lines + 1] = i18n.t("fe.battle.rewards", { exp = rewards.exp, money = rewards.money, currency = currency })
-  if rewards.jp and rewards.jp > 0 then lines[#lines + 1] = i18n.t("fe.battle.jp", { jp = rewards.jp }) end
-  for _, id in ipairs(rewards.items) do
-    lines[#lines + 1] = i18n.t("fe.battle.found", { item = data.get("items", id).name })
-  end
-  for _, entry in ipairs(rewards.levels or {}) do
-    for _, gain in ipairs(entry.gains) do
-      lines[#lines + 1] = "{color:good}" .. i18n.t("fe.battle.level_up", { name = entry.actor:name(), level = gain.level })
-        .. "{color:reset}"
-      for _, skill in ipairs(gain.skills) do
-        lines[#lines + 1] = i18n.t("fe.battle.learned", { skill = data.get("skills", skill).name })
-      end
-    end
-  end
-  presenter.rewards_text = table.concat(lines, "\n")
-  task.frame()
-  task.wait_until(function() return fe.input.pressed("confirm") end)
-  presenter.rewards_text = nil
+  return hud.show_rewards(sideview, presenter, rewards)
 end
 
--------------------------------------------------------------------------------
--- Player input
-
-local function choose_targets(presenter, battle, user, kind)
-  local candidates = battle:targets_for(user, kind)
-  if #candidates == 0 then return nil end
-  if kind:find("^all") or kind == "everyone" or kind == "self" then
-    presenter.targeting = candidates
-    task.frame()
-    while true do
-      if fe.input.pressed("confirm") then presenter.targeting = nil return candidates end
-      if fe.input.pressed("cancel") then presenter.targeting = nil return nil end
-      task.frame()
-    end
-  end
-  local index = 1
-  -- Start on the side the skill is meant for.
-  presenter.targeting = { candidates[index] }
-  task.frame()
-  while true do
-    local step = (fe.input.repeating("down") or fe.input.repeating("right")) and 1
-      or (fe.input.repeating("up") or fe.input.repeating("left")) and -1 or 0
-    if step ~= 0 then
-      index = (index - 1 + step) % #candidates + 1
-      presenter.targeting = { candidates[index] }
-      ui.sound("move")
-    end
-    if fe.input.pressed("confirm") then
-      ui.sound("confirm")
-      presenter.targeting = nil
-      return { candidates[index] }
-    end
-    if fe.input.pressed("cancel") then
-      ui.sound("cancel")
-      presenter.targeting = nil
-      return nil
-    end
-    task.frame()
-  end
-end
-
-local function pick_from(presenter, title, entries)
-  local cw, ch = fe.canvas.size()
-  local index, item = ui.choose(entries, { title = title, x = 8, y = ch - 112, width = math.floor(cw * 0.55),
-    rows = 6, columns = 2, cancel = true })
-  return index and item
-end
-
-local function skill_entries(battle, user, skill_type)
-  return tablex.map(user:skills(skill_type), function(skill)
-    local cost = {}
-    for resource, amount in pairs(skill.cost) do cost[#cost + 1] = amount .. " " .. resource:upper() end
-    table.sort(cost)
-    return { label = skill.name, right = table.concat(cost, " "), value = skill,
-      enabled = battle:usable(user, skill) and skill.scope ~= "field" }
-  end)
-end
-
-local function item_entries(battle)
-  local inventory = battle:inventory()
-  if not inventory or not inventory.list then return {} end
-  return tablex.map(inventory.list(function(item) return item.use and item.use.scope ~= "field" end), function(entry)
-    return { label = entry.item.name, right = "x" .. entry.count, value = entry.item, icon = entry.item.icon }
-  end)
-end
-
--- The command menu: a ui.Menu shown with ui.run_screen. While it is open
--- page left/right change the modifier (boost).
-local function choose_command(presenter, user, battle)
-  local entries = tablex.map(user:commands(), function(name)
-    return { label = sideview.command_label(name, user), value = name, enabled = name ~= "flee" or battle.escapable }
-  end)
-  local partner = battle:partner(user)
-  if partner then
-    entries[#entries + 1] = { label = i18n.t("fe.battle.swap_with", { name = partner:name() }), value = "swap" }
-  end
-  local _, ch = fe.canvas.size()
-  local menu
-  menu = ui.Menu({ items = entries, x = 8, y = ch - 98, width = 92, rows = 6,
-    on_confirm = function(item) ui.close(menu, item.value) end })
-  function menu.update(view, dt)
-    ui.Menu.update(view, dt)
-    if sideview.modifier then
-      local max = sideview.modifier.max(user)
-      if fe.input.pressed("page_right") then presenter.modifier_value = math.min(max, presenter.modifier_value + 1) end
-      if fe.input.pressed("page_left") then presenter.modifier_value = math.max(0, presenter.modifier_value - 1) end
-    end
-  end
-  return ui.run_screen(menu)
-end
-
---- Command input for a party battler; returns an action or nil. Choosing
---- Swap trades places with the back-row partner, who then chooses.
-function Presenter:command(user, battle)
-  self.active = user
-  self.modifier_value = 0
-  -- The battle can end while this player is choosing (active time).
-  local forget = task.current():finally(function()
-    self.active, self.targeting = nil, nil
-  end)
-  while true do
-    local choice = choose_command(self, user, battle)
-    local action
-    if choice == "swap" then
-      local partner = battle:partner(user)
-      forget()
-      battle:swap(user, partner)
-      return self:command(partner, battle)
-    elseif choice == "attack" then
-      local targets = choose_targets(self, battle, user, "enemy")
-      if targets then action = { kind = "skill", user = user, skill = Battle.settings.attack_skill, targets = targets } end
-    elseif choice == "defend" then
-      action = { kind = "defend", user = user }
-    elseif choice == "flee" then
-      action = { kind = "flee", user = user }
-    elseif choice == "item" then
-      local item = pick_from(self, sideview.command_label("item", user), item_entries(battle))
-      if item then
-        local targets = choose_targets(self, battle, user, item.value.use.target)
-        if targets then action = { kind = "item", user = user, item = item.value.id, targets = targets } end
-      end
-    elseif sideview.commands[choice] then
-      action = sideview.commands[choice].run(self, user, battle)
-    else
-      local skill_type = choice ~= "skill" and choice or nil
-      local picked = pick_from(self, sideview.command_label(choice, user), skill_entries(battle, user, skill_type))
-      if picked then
-        local targets = choose_targets(self, battle, user, picked.value.target)
-        if targets then action = { kind = "skill", user = user, skill = picked.value.id, targets = targets } end
-      end
-    end
-    if action then
-      if sideview.modifier and self.modifier_value > 0 then
-        sideview.modifier.apply(action, self.modifier_value)
-      end
-      self.active = nil
-      forget()
-      return action
-    end
-  end
-end
-
--------------------------------------------------------------------------------
--- HUD
-
---- Draw the battle HUD; replace for a different look.
+--- Draw the battle HUD (fe.battle.sideview_hud); replace for a different look.
 function sideview.draw_hud(p)
-  local battle = p.battle
-  local cw, ch = fe.canvas.size()
-  local life = require("fe.rpg.combatant").life
-  -- Party status (bottom right)
-  local members = battle:side("party", true)
-  local h = #members * 16 + 12
-  local x, y, w = math.floor(cw * 0.42), ch - h - 6, math.floor(cw * 0.58) - 8
-  ui.window(x, y, w, h)
-  for i, b in ipairs(members) do
-    local row = y + 6 + (i - 1) * 16
-    local shown = p.shown[b] or {}
-    local color = b == p.active and ui.theme.highlight or (b:alive() and ui.theme.text or ui.theme.bad)
-    ui.text(b:name(), x + 8, row, { color = color })
-    local hp = math.floor((shown[life] or b:resource(life)) + 0.5)
-    ui.text(string.format("%d/%d", hp, b:max_resource(life)), x + 66, row, { width = 70, align = "right" })
-    ui.gauge(x + 66, row + 9, 70, 3, hp, b:max_resource(life), ui.theme.gauges.hp)
-    -- The first resource after life (MP, SP...) is shown as a number.
-    for _, def in ipairs(require("fe.rpg.stats").resource_list) do
-      if def.id ~= life and not def.battle_only and b:max_resource(def.id) > 0 then
-        ui.text(tostring(b:resource(def.id)), x + 140, row, { width = 30, align = "right", color = ui.theme.gauges[def.id] or ui.theme.gauges.mp })
-        break
-      end
-    end
-    local pips = ""
-    for _, def in ipairs(require("fe.rpg.stats").resource_list) do
-      if def.battle_only then
-        local n = b:resource(def.id)
-        pips = pips .. def.name .. " " .. string.rep("◆", n) .. string.rep("·", math.max(0, b:max_resource(def.id) - n)) .. " "
-      end
-    end
-    if pips ~= "" then ui.text(pips, x + 176, row, { color = ui.theme.heading }) end
-    if battle.scheduler.gauge then
-      local fill = battle.scheduler.gauge(b)
-      ui.gauge(x + w - 52, row + 3, 44, 4, fill, 1, fill >= 1 and ui.theme.highlight or ui.theme.gauges.mp)
-    end
-  end
-  -- Enemy names (bottom left) when no menu is open
-  if not p.active then
-    local enemies = battle:side("enemy")
-    local eh = math.max(1, #enemies) * 11 + 12
-    ui.window(8, ch - eh - 6, math.floor(cw * 0.42) - 12, eh)
-    for i, b in ipairs(enemies) do
-      ui.text(b:name(), 16, ch - eh + (i - 1) * 11)
-    end
-  end
-  -- Modifier gauge (boost)
-  if sideview.modifier and p.active then
-    local max = sideview.modifier.max(p.active)
-    ui.text(modifier_label() .. " " .. string.rep("◆", p.modifier_value or 0) .. string.rep("·", max - (p.modifier_value or 0)),
-      104, ch - 112, { color = ui.theme.heading })
-  end
-  -- Turn order (if the scheduler can preview): this round, then the next.
-  if battle.scheduler.preview then
-    local order, next_round = battle.scheduler.preview(battle, 8)
-    local bx = 8
-    local function chip(b, alpha)
-      ui.window(bx, 6, 26, 14, { alpha = alpha })
-      local color = b == battle.current and ui.theme.highlight or (b:is_party() and ui.theme.good or ui.theme.bad)
-      ui.text(b:name():sub(1, 3), bx + 4, 9, { color = color })
-      bx = bx + 28
-    end
-    for i, b in ipairs(order) do
-      if i > 8 then break end
-      chip(b, b:is_party() and 1 or 0.8)
-    end
-    if next_round and #next_round > 0 then
-      local label = i18n.t("fe.battle.next")
-      ui.text(label, bx + 2, 9, { color = ui.theme.muted })
-      bx = bx + ui.measure(label) + 6
-      for i, b in ipairs(next_round) do
-        if i > 8 then break end
-        chip(b, 0.55)
-      end
-    end
-  end
-  -- Targeting cursor
-  for _, b in ipairs(p.targeting or {}) do
-    local entity = sprite_of(b)
-    if entity then
-      local tx, ty = entity:screen_position(1.5)
-      ui.text("▼", tx - 3, ty - 10 + math.floor(task.time() * 4) % 2, { color = ui.theme.highlight })
-    end
-  end
-  -- Banner
-  if p.banner then
-    local bw = ui.measure(p.banner) + 24
-    local bx = math.floor((cw - bw) / 2)
-    ui.window(bx, 24, bw, 18)
-    ui.text(p.banner, bx + 12, 29, { color = ui.theme.heading })
-  end
-  -- Popups
-  for _, popup in ipairs(p.popups) do
-    local rise = math.min(1, popup.age * 4) * 10
-    local alpha = popup.age > 0.9 and 1 - (popup.age - 0.9) / 0.3 or 1
-    fe.canvas.push({ alpha = alpha })
-    fe.canvas.text(popup.text, popup.x - 40, popup.y - rise, { color = popup.color, outline = 0x000000ff, width = 80, align = "center" })
-    fe.canvas.pop()
-  end
-  if p.rewards_text then
-    local rw, rh = 220, select(2, ui.measure(p.rewards_text, { width = 200 })) + 18
-    local rx, ry = ui.anchor(rw, rh, "center")
-    ui.window(rx, ry, rw, rh)
-    ui.text(p.rewards_text, rx + 10, ry + 8, { width = 200 })
-  end
+  return hud.draw(sideview, p)
 end
 
 sideview.Presenter = Presenter

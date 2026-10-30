@@ -10,10 +10,15 @@
 --- they arrive in. `on_round` hooks and the "round" event mark each new
 --- round (round-based timers and objectives count these). A battler
 --- swapped in (Battle:swap) keeps the leaver's CT and its place in the
---- round. Battlers added mid-battle start with 0 CT.
+--- round. Battlers added mid-battle start with 0 CT; the battlers present
+--- at the start get a random CT up to `start_fill` of the threshold
+--- (Battle.settings.initiative.start_fill by default). A turn a rule
+--- layer skips (Battle:skips_turn) is upkeep only (Battle:turn).
+local Battle = require("fe.battle.core")
+
 local initiative = {}
 
----@param settings? {threshold?: number, cost?: fun(result: any): number, rate?: fun(b: table): number}
+---@param settings? {threshold?: number, cost?: fun(result: any): number, rate?: fun(b: table): number, start_fill?: number}
 function initiative.new(settings)
   settings = settings or {}
   local threshold = settings.threshold or 100
@@ -116,8 +121,9 @@ function initiative.new(settings)
   end
 
   function scheduler.run(battle)
+    local start_fill = settings.start_fill or Battle.settings.initiative.start_fill
     for _, b in ipairs(battle.battlers) do
-      b.data.ct = b.data.ct or battle.random:float() * threshold * 0.25
+      b.data.ct = b.data.ct or battle.random:float() * threshold * start_fill
     end
     begin_round(battle)
     while not battle:outcome() do

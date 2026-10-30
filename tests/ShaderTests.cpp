@@ -58,6 +58,13 @@ TEST_CASE("game shader names map to stable slots with one program per engine ver
     CHECK(shaders.slot("glint") == glint);
     shaders.reload(FENGINE_ENGINE_SHADERS);
     CHECK(shaders.slot("glint") == glint);
+    // Without a renderer there is no shader backend; naming a shader must still work.
+    CHECK(shaders.slot("glint_shadow") == glint + 2);
+    // The variants are looked up through the colour shader's slot, not slots of their own.
+    CHECK(shaders.slot("glint_distort") == glint + 3);
+    CHECK_FALSE(bgfx::isValid(shaders.distortProgram(glint, ShaderVertex::Sprite)));
+    CHECK_FALSE(bgfx::isValid(shaders.shadowProgram(glint, ShaderVertex::Sprite)));
+    CHECK(shaders.slot("glint") == glint);
     CHECK(std::string(shaderVertexName(ShaderVertex::World)) == "vs_world");
     CHECK(std::string(shaderVertexName(ShaderVertex::WorldInstanced)) == "vs_world_instanced");
     CHECK(std::string(shaderVertexName(ShaderVertex::Sprite)) == "vs_sprite");
@@ -124,7 +131,9 @@ TEST_CASE("GPU assets look at files only after a file change, and bake chunks pe
         CustomShaders shaders(root, FENGINE_ENGINE_SHADERS);
         CHECK_FALSE(bgfx::isValid(shaders.program("glint", ShaderVertex::World)));
         CHECK_FALSE(bgfx::isValid(shaders.program("glint", ShaderVertex::WorldInstanced)));
-        CHECK_FALSE(bgfx::isValid(shaders.program("glint", ShaderVertex::World)));
+        // No fs_glint_shadow.sc or fs_glint_distort.sc: the variants are simply absent.
+        CHECK_FALSE(bgfx::isValid(shaders.shadowProgram(shaders.slot("glint"), ShaderVertex::World)));
+        CHECK_FALSE(bgfx::isValid(shaders.distortProgram(shaders.slot("glint"), ShaderVertex::Sprite)));
     }
     std::filesystem::remove_all(root);
 }

@@ -38,11 +38,23 @@ constexpr int blendPass(BlendMode mode) {
 struct TransparentKey {
     BlendMode blend = BlendMode::Alpha;
     float distance = 0; // from the camera
+    // Water surfaces draw first in their pass and write depth, so the blended
+    // draws after them are depth-tested against the surface: a sprite above
+    // the water draws over it, one below it is hidden by it, whatever their
+    // distances. A single back-to-front order cannot place a large surface
+    // against both at once.
+    bool water = false;
 };
 
-// Strict weak order: by pass, then back to front.
+// Strict weak order: by pass, water surfaces first, then back to front.
 constexpr bool drawsBefore(const TransparentKey& a, const TransparentKey& b) {
     const int pa = blendPass(a.blend), pb = blendPass(b.blend);
-    return pa != pb ? pa < pb : a.distance > b.distance;
+    if (pa != pb) {
+        return pa < pb;
+    }
+    if (a.water != b.water) {
+        return a.water;
+    }
+    return a.distance > b.distance;
 }
 } // namespace fe

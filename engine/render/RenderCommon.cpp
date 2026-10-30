@@ -188,6 +188,7 @@ Uniforms::Uniforms() {
     post = vec4("u_post", PostCount);
     present = vec4("u_present", PresentCount);
     info = vec4("u_info");
+    params = vec4("u_params", ParamsCount);
     albedo = sampler("s_albedo");
     normal = sampler("s_normal");
     shadow = sampler("s_shadow");

@@ -87,22 +87,38 @@ void CanvasRenderer::render(const Canvas& canvas, glm::ivec2 viewport, std::uint
     bgfx::TextureHandle current = BGFX_INVALID_HANDLE;
     Rect clip{0, 0, -1, -1};
     bool additive = false, premultiplied = false;
+    // Quads mostly repeat the previous quad's texture (a run of glyphs, a
+    // nine-slice), so the lookup by name happens once per run, not per quad.
+    const CanvasTexture* lastTexture = nullptr;
+    bgfx::TextureHandle lastHandle = BGFX_INVALID_HANDLE;
+    bool lastFlip = false, lastTarget = false;
     for (const auto index : order_) {
         const auto& q = quads[index];
         bgfx::TextureHandle texture = gpu_.white();
         bool flipV = false, target = false;
-        if (q.texture.kind == CanvasTexture::Kind::Image &&
-            q.texture.image.starts_with(Canvas::TargetPrefix)) {
-            texture = targets(std::string_view(q.texture.image).substr(Canvas::TargetPrefix.size()));
-            if (!bgfx::isValid(texture)) {
-                continue;
+        if (lastTexture && *lastTexture == q.texture) {
+            texture = lastHandle;
+            flipV = lastFlip;
+            target = lastTarget;
+        } else {
+            if (q.texture.kind == CanvasTexture::Kind::Image &&
+                q.texture.image.starts_with(Canvas::TargetPrefix)) {
+                texture = targets(std::string_view(q.texture.image).substr(Canvas::TargetPrefix.size()));
+                flipV = bgfx::getCaps()->originBottomLeft;
+                target = true;
+            } else if (q.texture.kind == CanvasTexture::Kind::Image) {
+                texture =
+                    gpu_.image(q.texture.image, q.texture.linear ? TextureUse::UiSmooth : TextureUse::Ui);
+            } else if (q.texture.kind == CanvasTexture::Kind::FontPage) {
+                texture = gpu_.fontPage(q.texture.font, q.texture.page);
             }
-            flipV = bgfx::getCaps()->originBottomLeft;
-            target = true;
-        } else if (q.texture.kind == CanvasTexture::Kind::Image) {
-            texture = gpu_.image(q.texture.image, q.texture.linear ? TextureUse::UiSmooth : TextureUse::Ui);
-        } else if (q.texture.kind == CanvasTexture::Kind::FontPage) {
-            texture = gpu_.fontPage(q.texture.font, q.texture.page);
+            lastTexture = &q.texture;
+            lastHandle = texture;
+            lastFlip = flipV;
+            lastTarget = target;
+        }
+        if (!bgfx::isValid(texture)) {
+            continue; // a render target no world drew this frame
         }
         const bool sameClip =
             q.clip.x == clip.x && q.clip.y == clip.y && q.clip.w == clip.w && q.clip.h == clip.h;

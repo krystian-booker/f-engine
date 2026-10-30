@@ -18,29 +18,38 @@ local settings = config.settings
 
 i18n.defaults({ fe = { tactics = { collision = "Collision", fall = "Fall" } } })
 
+--- How `user` stands to `target` on the board: {height_bonus (signed
+--- damage share from the height difference), from_behind, from_side,
+--- multiplier}. nil when either is off the board. The forecast panel
+--- shows it; rules.positional applies it.
+function rules.positional_info(battle, user, target)
+  if not user.cell or not target.cell or not battle.tactical then return nil end
+  local world = battle.tactical.world
+  local diff = grid.cell_height(world, user.cell) - grid.cell_height(world, target.cell)
+  local info = { height_bonus = tablex.clamp(diff, -3, 3) * settings.height_bonus, from_behind = false, from_side = false }
+  info.multiplier = 1 + info.height_bonus
+  if not target.obstacle and user ~= target then
+    local facing = target.facing or { x = 0, z = 1 }
+    local incoming = grid.direction_between(target.cell, user.cell)
+    local dot = facing.x * incoming.x + facing.z * incoming.z
+    if dot < -0.5 then
+      info.from_behind = true
+      info.multiplier = info.multiplier * (1 + settings.back_bonus)
+    elseif dot < 0.5 then
+      info.from_side = true
+      info.multiplier = info.multiplier * (1 + settings.side_bonus)
+    end
+  end
+  return info
+end
+
 --- Height and facing: attacking from above, the side or behind deals more
 --- (obstacles have no back). Skipped for self-targeted and environmental
 --- damage (poison, terrain).
 function rules.positional(ctx)
-  local battle = ctx.battle
   if ctx.effect.type ~= "damage" or ctx.environmental or ctx.user == ctx.target then return end
-  local user, target = ctx.user, ctx.target
-  if not user.cell or not target.cell then return end
-  local world = battle.tactical.world
-  local diff = grid.cell_height(world, user.cell) - grid.cell_height(world, target.cell)
-  ctx.height_bonus = tablex.clamp(diff, -3, 3) * settings.height_bonus
-  ctx.multiplier = ctx.multiplier * (1 + ctx.height_bonus)
-  if target.obstacle then return end
-  local facing = target.facing or { x = 0, z = 1 }
-  local incoming = grid.direction_between(target.cell, user.cell)
-  local dot = facing.x * incoming.x + facing.z * incoming.z
-  if dot < -0.5 then
-    ctx.from_behind = true
-    ctx.multiplier = ctx.multiplier * (1 + settings.back_bonus)
-  elseif dot < 0.5 then
-    ctx.from_side = true
-    ctx.multiplier = ctx.multiplier * (1 + settings.side_bonus)
-  end
+  local info = rules.positional_info(ctx.battle, ctx.user, ctx.target)
+  if info then ctx.multiplier = ctx.multiplier * info.multiplier end
 end
 
 local function percent_damage(name, fraction)
@@ -90,6 +99,7 @@ effects.handler("push", function(ctx)
   if moved > 0 then battle:present("pushed", { battler = target, from = from, to = target.cell }) end
   return { moved = moved }
 end)
+effects.schema("push", { distance = { type = "integer", min = 1, optional = true } })
 
 --- The skill an ally follows up with: its first affordable skill tagged
 --- "follow_up" (an archer's volley), else the attack skill.
@@ -129,7 +139,9 @@ function rules.follow_ups(battle, action, results)
       local allies = tablex.filter(battle:allies(action.user), function(ally)
         return ally ~= action.user and ally.cell ~= nil and ally:can_act() and flanks(battle, ally, target, action.user)
       end)
-      tablex.sort_by(allies, function(ally) return vec.manhattan(ally.cell, target.cell) * 10000 + ally.key end)
+      tablex.sort_by(allies, function(ally)
+        return vec.manhattan(ally.cell, target.cell) * Battle.settings.priority_scale + ally.key
+      end)
       for i, ally in ipairs(allies) do
         if (settings.follow_up_max and i > settings.follow_up_max) or not target:alive() then break end
         battle:present("follow_up", { user = ally, target = target })
@@ -155,21 +167,34 @@ function rules.reinforce(battle, spec)
   pending[#pending + 1] = tablex.copy(spec)
 end
 
+--- Add a unit to the battle and put it on its cell: `spec` is a Battler
+--- spec with a `cell` (and optionally `id`, the unit id). Before the
+--- battle starts the board places it here; afterwards the tactical layer's
+--- on_battler_added does (Battle:add presents it too).
+function rules.add_unit(battle, spec)
+  local id = spec.id
+  spec = tablex.copy(spec)
+  spec.id = nil
+  local u = battle:add(spec)
+  u.unit_id = id or u.unit_id
+  if not (battle.started and not battle.finished) and u.cell then grid.place(battle, u, u.cell) end
+  return u
+end
+
 --- Bring in every scheduled reinforcement that is due; returns the units.
+--- One with no free cell near its own stays pending and tries again at the
+--- next round or turn.
 function rules.arrive(battle)
   local t = battle.tactical
   local arrived = {}
   for _, spec in ipairs(tablex.copy(t.reinforcements)) do
     if battle:outcome() then break end
     if (spec.turn and battle.round >= spec.turn) or (spec.when and spec.when(battle)) then
-      tablex.remove_value(t.reinforcements, spec)
       local cell = grid.nearest_free(battle, spec.cell)
       if cell then
-        local u = battle:add({ enemy = spec.enemy, side = spec.side or "enemy", name = spec.name, cell = cell,
-          facing = spec.facing or { x = 0, z = 1 } })
-        u.unit_id = spec.id or spec.enemy
-        grid.place(battle, u, cell)
-        arrived[#arrived + 1] = u
+        tablex.remove_value(t.reinforcements, spec)
+        arrived[#arrived + 1] = rules.add_unit(battle, { enemy = spec.enemy, side = spec.side or "enemy", name = spec.name,
+          cell = cell, facing = spec.facing or { x = 0, z = 1 }, id = spec.id or spec.enemy })
       end
     end
   end
@@ -186,14 +211,36 @@ function rules.ct_cost(moved, acted)
   return ct
 end
 
---- One unit's turn: upkeep and hazards, then a plan (player input,
---- `plan` rule hook or the AI): move, act, face. Terrain reacts and
---- follow-ups happen only if the action was actually performed.
+--- Terrain reactions for a performed action (the tactical layer's
+--- after_action, so counters, follow-ups and companions' actions count
+--- too): the skill's element lands on its area when it targets a cell
+--- (`target = "cell"`) or at least one of its results hit (not missed, not
+--- nullified).
+function rules.terrain_reaction(battle, action, results)
+  local skill = action.performed and action.cell and grid.skill_of(action)
+  if not skill or not skill.element then return end
+  local user = action.user
+  if not user.cell then return end
+  local landed = skill.target == "cell" or tablex.find(results or {}, function(r)
+    return not r.missed and not r.cancelled
+  end) ~= nil
+  if not landed then return end
+  local _, cells = grid.affected(battle, user, skill, action.cell)
+  terrain.react(battle, skill.element, cells)
+end
+
+--- One unit's turn: upkeep and hazards, then a plan (player input through
+--- the `player_controller` hook or the presenter's `command`, the `plan`
+--- rule hook or the AI; all return a plan {move = path?, action = action?,
+--- facing = dir?, choose_facing = boolean?}): move, act, face. A turn a
+--- rule layer skips (Battle:skips_turn) is upkeep only. Terrain reacts
+--- (rules.terrain_reaction) and follow-ups happen only if the action was
+--- actually performed.
 function rules.take_turn(battle, b)
   battle:turn_start(b)
   terrain.hazards(battle, b)
   local plan
-  if b:can_act() and not battle:outcome() then
+  if b:can_act() and not battle:outcome() and not battle:skips_turn(b) then
     if b:is_party() and not b.auto then
       plan = battle:decide(b) or {}
     else
@@ -207,11 +254,6 @@ function rules.take_turn(battle, b)
       if plan.action.cell then grid.face(battle, b, grid.direction_between(b.cell, plan.action.cell)) end
       local results = battle:perform(plan.action)
       if plan.action.performed then
-        local skill = grid.skill_of(plan.action)
-        if skill and plan.action.cell then
-          local _, cells = grid.affected(battle, b, skill, plan.action.cell)
-          terrain.react(battle, skill.element, cells)
-        end
         rules.follow_ups(battle, plan.action, results)
         battle:settle()
       end
@@ -255,12 +297,13 @@ end
 
 --- Set up the board on `world` and add the tactical rule layer: positional
 --- damage (per battle), objectives (`win`/`lose`, defaults: defeat all),
---- terrain ticking each round, corpses for fallen units, destroyed
---- obstacles changing their cell, placement of battlers added with a
---- `cell` (and of battlers without one: rules.arrival_cell), units leaving
---- the board when removed from the battle, scheduled reinforcements
---- arriving, and every terrain change reverted when the battle ends or is
---- aborted (`on_end` and `on_abort`).
+--- terrain ticking each round and reacting to performed actions
+--- (rules.terrain_reaction), corpses for fallen units, destroyed obstacles
+--- changing their cell, placement of every battler when the battle starts
+--- and of battlers added later (those without a `cell`: rules.arrival_cell),
+--- units leaving the board when removed from the battle, scheduled
+--- reinforcements arriving, and every terrain change reverted when the
+--- battle ends or is aborted (`on_end` and `on_abort`).
 ---@param options? {win?: table[], lose?: table[]}
 function rules.board(battle, world, options)
   options = options or {}
@@ -275,7 +318,7 @@ function rules.board(battle, world, options)
     effect_hooks = { { phase = "modify", fn = rules.positional, priority = 40 } },
     setup = function(b)
       for _, unit in ipairs(b.battlers) do
-        if not unit.cell then arrive_on_board(b, unit) end
+        if not unit.cell or grid.unit_at(b, unit.cell) ~= unit then arrive_on_board(b, unit) end
       end
     end,
     on_round = function(b, round)
@@ -283,6 +326,7 @@ function rules.board(battle, world, options)
       rules.arrive(b)
     end,
     on_turn_start = function(b) rules.arrive(b) end,
+    after_action = rules.terrain_reaction,
     on_knocked_out = function(b, unit)
       grid.lay_down(b, unit)
       if unit.obstacle then terrain.destroyed(b, unit) end

@@ -103,18 +103,28 @@ struct ModelAnimation {
 };
 
 // A static glTF scene: node hierarchy, rigid TRS animations, markers.
-// Skinned meshes are rejected; characters are sprites.
+// Skinned meshes are rejected; characters are sprites. Images a .gltf
+// references by URI must lie in the model's folder (or below it); a node
+// matrix with a negative determinant imports as a mirrored scale.
 struct Model {
     std::vector<ModelNode> nodes;
     std::vector<int> order; // parents before children
     std::vector<ModelPart> parts;
-    std::vector<ModelAnimation> animations;
+    std::vector<ModelAnimation> animations; // each one's channels sorted by node
     std::vector<ModelMarker> markers;
     glm::vec3 min{0}, max{0};
+    // Baked at load: each node's local matrix at rest and the rest pose (the
+    // world matrix of every node), so posing a model without an animation
+    // is a copy.
+    std::vector<glm::mat4> restLocal, restPose;
 
     static Model load(const std::filesystem::path& path);
     [[nodiscard]] int animation(const std::string& name) const;
-    // World matrices for every node; animation -1 gives the rest pose.
+    // World matrices for every node; animation -1 gives the rest pose. Writes
+    // into `matrices` only (sized to the nodes), so a frame allocates nothing
+    // here once it is warm.
     void pose(int animation, float time, std::vector<glm::mat4>& matrices) const;
+    // Fills restLocal and restPose from the nodes (load() does this).
+    void bakeRestPose();
 };
 } // namespace fe

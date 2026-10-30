@@ -9,6 +9,7 @@
 #include <cstring>
 #include <limits>
 #include <sstream>
+#include <tuple>
 
 namespace fe {
 namespace {
@@ -273,8 +274,8 @@ GpuAssets::GpuAssets(AssetCache& assets) : assets_(assets), revision_(nextRevisi
     flatNormal_ = Texture(upload(Image::solid(128, 128, 255), uploadFor(TextureUse::Ui)));
 }
 
-GpuAssets::Cooked GpuAssets::cookedState(const std::filesystem::path& original) {
-    Cooked state;
+CookedTexture GpuAssets::cookedState(const std::filesystem::path& original) {
+    CookedTexture state;
     state.file = cookedTexture(original);
     if (!state.file.empty()) {
         std::error_code error;
@@ -283,16 +284,15 @@ GpuAssets::Cooked GpuAssets::cookedState(const std::filesystem::path& original) 
     return state;
 }
 
-bool GpuAssets::uploadCooked(const std::filesystem::path& original, bool srgb, ImageEntry& entry,
-                             std::uint64_t flags) {
-    entry.original = original;
-    entry.cooked = cookedState(original);
-    if (entry.cooked.file.empty()) {
+bool GpuAssets::uploadCooked(const std::filesystem::path& original, bool srgb, std::uint64_t flags,
+                             Texture& texture, CookedTexture& cooked) {
+    cooked = cookedState(original);
+    if (cooked.file.empty()) {
         return false;
     }
     std::string file;
     try {
-        file = readFile(entry.cooked.file);
+        file = readFile(cooked.file);
     } catch (const std::exception& error) {
         log(LogLevel::Warning, error.what());
         return false;
@@ -305,9 +305,9 @@ bool GpuAssets::uploadCooked(const std::filesystem::path& original, bool srgb, I
                                : bgfx::getCaps()->formats[format] &
                                      (srgb ? BGFX_CAPS_FORMAT_TEXTURE_2D_SRGB : BGFX_CAPS_FORMAT_TEXTURE_2D);
     if (!supported) {
-        if (failed_.insert(entry.cooked.file.string()).second) {
+        if (failed_.insert(cooked.file.string()).second) {
             log(LogLevel::Warning, "Using " + original.filename().string() + ": the GPU cannot sample " +
-                                       entry.cooked.file.filename().string());
+                                       cooked.file.filename().string());
         }
         return false;
     }
@@ -317,7 +317,7 @@ bool GpuAssets::uploadCooked(const std::filesystem::path& original, bool srgb, I
     if (!bgfx::isValid(handle)) {
         return false;
     }
-    entry.texture = Texture(handle);
+    texture = Texture(handle);
     return true;
 }
 
@@ -344,19 +344,39 @@ void GpuAssets::sync() {
                 }
             }
         }
-        const auto changed = std::erase_if(modelTextures_, [](const auto& entry) {
-            return !entry.second.original.empty() &&
-                   cookedState(entry.second.original) != entry.second.cooked;
-        });
-        if (changed > 0) {
-            // Model parts hold texture handles, so models re-upload with the new texture.
-            models_.clear();
+        bool stale = false;
+        for (auto& [key, texture] : modelTextures_) {
+            if (!texture->original.empty() && cookedState(texture->original) != texture->cooked) {
+                texture->stale = true;
+                stale = true;
+            }
+        }
+        if (stale) {
+            // Only the models that use a changed texture re-upload; the rest keep theirs.
+            std::erase_if(models_, [](const auto& entry) {
+                for (const auto& part : entry.second->parts) {
+                    for (const auto& texture : part.textures) {
+                        if (texture && texture->stale) {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            });
+            std::erase_if(modelTextures_, [](const auto& entry) { return entry.second->stale; });
         }
     }
+    // An asset the cache no longer holds (evicted) or replaced (reloaded)
+    // takes its GPU copy with it. loaded() starts no load, so an evicted
+    // asset stays evicted until something uses it again.
+    const auto imageGone = [&](const std::string& path, const std::shared_ptr<const Image>& image) {
+        return !assets_.loaded(path) || assets_.tryImage(path) != image;
+    };
     for (auto& [path, uses] : images_) {
-        const auto current = assets_.tryImage(path);
+        const bool loaded = assets_.loaded(path);
+        const auto current = loaded ? assets_.tryImage(path) : nullptr;
         for (auto& entry : uses) {
-            if (entry.source != current) {
+            if (entry.source && (!loaded || entry.source != current)) {
                 entry = {};
             }
         }
@@ -364,18 +384,18 @@ void GpuAssets::sync() {
     std::erase_if(sheets_, [&](const auto& entry) {
         const auto& sheet = entry.second;
         const auto replaced = [&](const std::string& path, const std::shared_ptr<const Image>& image) {
-            return !path.empty() && assets_.tryImage(path) != image;
+            return !path.empty() && imageGone(path, image);
         };
-        return assets_.trySprite(entry.first) != sheet.animation ||
+        return !assets_.loaded(entry.first) || assets_.trySprite(entry.first) != sheet.animation ||
                (sheet.animation &&
                 (replaced(sheet.atlasPath, sheet.atlas) || replaced(sheet.normalPath, sheet.normalImage) ||
                  replaced(sheet.emissivePath, sheet.emissiveImage)));
     });
     std::erase_if(models_, [&](const auto& entry) {
-        return assets_.tryModel(entry.first.first) != entry.second->source;
+        return !assets_.loaded(entry.first.first) || assets_.tryModel(entry.first.first) != entry.second->source;
     });
-    // A texture whose image only this cache still holds belonged to a replaced model.
-    std::erase_if(modelTextures_, [](const auto& entry) { return entry.second.source.use_count() == 1; });
+    // A texture no model part holds any more belonged to dropped models only.
+    std::erase_if(modelTextures_, [](const auto& entry) { return entry.second.use_count() == 1; });
     failed_.clear();
     if (assetsChanged) {
         // Redefined fonts are new objects that may reuse a freed address, so
@@ -399,8 +419,11 @@ bgfx::TextureHandle GpuAssets::image(const std::string& path, TextureUse use) {
     }
     entry.source = source;
     const auto how = uploadFor(use);
-    if (cookedUse(use) && uploadCooked(assets_.file(path), how.srgb, entry, how.flags)) {
-        return entry.texture.get();
+    if (cookedUse(use)) {
+        entry.original = assets_.file(path);
+        if (uploadCooked(entry.original, how.srgb, how.flags, entry.texture, entry.cooked)) {
+            return entry.texture.get();
+        }
     }
     entry.texture = Texture(upload(*source, how));
     return entry.texture.get();
@@ -493,19 +516,30 @@ bgfx::TextureHandle GpuAssets::lut(const std::string& path) {
     return luts_.emplace(path, std::move(entry)).first->second.texture.get();
 }
 
-bgfx::TextureHandle GpuAssets::modelTexture(const ModelImage& image, bool srgb,
-                                            bgfx::TextureHandle fallback) {
+std::shared_ptr<const ModelTexture> GpuAssets::modelTexture(const ModelImage& image, bool srgb, bool mips) {
     if (!image) {
-        return fallback;
+        return nullptr;
     }
-    auto& entry = modelTextures_[{image.image.get(), srgb}];
-    if (!entry.texture.valid()) {
-        entry.source = image.image;
-        if (!uploadCooked(image.file, srgb, entry, 0)) {
-            entry.texture = Texture(upload(*image.image, {srgb, true, 0}));
+    // Every model that references the same file shares the upload; an
+    // embedded (.glb) image is its own, identified by its address, which
+    // stays unique while the entry holds the image.
+    const std::string key = image.file.empty()
+                                ? "#" + std::to_string(reinterpret_cast<std::uintptr_t>(image.image.get()))
+                                : image.file.generic_string();
+    auto& entry = modelTextures_[{key, srgb, mips}];
+    if (!entry) {
+        entry = std::make_shared<ModelTexture>();
+        if (image.file.empty()) {
+            entry->embedded = image.image;
+        } else {
+            entry->original = image.file;
+        }
+        // A cooked file carries a mip chain, so a sampler without mips takes the PNG.
+        if (!mips || !uploadCooked(image.file, srgb, 0, entry->texture, entry->cooked)) {
+            entry->texture = Texture(upload(*image.image, {srgb, mips, 0}));
         }
     }
-    return entry.texture.get();
+    return entry;
 }
 
 const GpuModel* GpuAssets::model(const std::string& path, bool bakeChunks) {
@@ -538,9 +572,16 @@ const GpuModel* GpuAssets::model(const std::string& path, bool bakeChunks) {
                            static_cast<std::uint32_t>(indices.size() * sizeof(std::uint32_t))),
                 BGFX_BUFFER_INDEX32));
         }
-        out.albedo = modelTexture(part.material.albedo, true, white_.get());
-        out.normal = modelTexture(part.material.normal, false, flatNormal_.get());
-        out.emission = modelTexture(part.material.emission, true, white_.get());
+        const auto& m = part.material;
+        const auto mips = [](const TextureSampler& sampler) {
+            return sampler.mips != TextureSampler::Mips::None;
+        };
+        out.textures = {modelTexture(m.albedo, true, mips(m.albedoSampler)),
+                        modelTexture(m.normal, false, mips(m.normalSampler)),
+                        modelTexture(m.emission, true, mips(m.emissionSampler))};
+        out.albedo = out.textures[0] ? out.textures[0]->texture.get() : white_.get();
+        out.normal = out.textures[1] ? out.textures[1]->texture.get() : flatNormal_.get();
+        out.emission = out.textures[2] ? out.textures[2]->texture.get() : white_.get();
         out.material = part.material;
         out.node = part.node;
         out.min = min;

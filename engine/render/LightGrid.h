@@ -48,5 +48,15 @@ public:
     std::vector<glm::vec4> lightTexels;
     // cells.y rows of cells.x * MaxPerCell light indices, -1 after the last.
     std::vector<float> cellTexels;
+
+private:
+    struct Candidate {
+        int cell;
+        float score;
+        int light;
+    };
+    // Scratch kept between builds, so a frame allocates nothing here.
+    std::vector<std::size_t> chosen_;
+    std::vector<Candidate> candidates_;
 };
 } // namespace fe
