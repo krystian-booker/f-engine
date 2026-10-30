@@ -3,6 +3,7 @@
 #include "engine/world/World.h"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace fe {
 void applyEdit(World& world, const std::function<void(MapData&)>& edit) {
@@ -18,6 +19,7 @@ void editCollider(World& world, entt::entity entity, const Collider& collider) {
 void editTransform(World& world, entt::entity entity, glm::vec3 position, int layer) {
     auto& transform = world.registry().get<Transform>(entity);
     transform.position = position;
+    transform.previous = position; // no interpolation from where it was: a paused game shows the move
     transform.layer = layer;
     // The hash is no longer rebuilt per tick: a transform written directly
     // must be re-indexed, so queries (and a paused game) see it at once.
@@ -220,6 +222,187 @@ int paint(Grid& grid, const GridBrush& brush, GridPos centre, int radius) {
     return changed;
 }
 
+int fillRect(Grid& grid, const GridBrush& brush, GridPos a, GridPos b) {
+    if (!brushProblem(grid, brush, a.layer).empty()) {
+        return 0;
+    }
+    const int x0 = std::min(a.x, b.x), x1 = std::max(a.x, b.x), z0 = std::min(a.z, b.z), z1 = std::max(a.z, b.z);
+    int changed = 0;
+    for (int z = z0; z <= z1; ++z) {
+        for (int x = x0; x <= x1; ++x) {
+            changed += paint(grid, brush, {x, z, a.layer}, 0);
+        }
+    }
+    return changed;
+}
+
+int floodFill(Grid& grid, const GridBrush& brush, GridPos start) {
+    if (!grid.inRange(start) || brush.mode == GridBrush::Mode::Ramp || !brushProblem(grid, brush, start.layer).empty()) {
+        return 0;
+    }
+    const bool seed = grid.at(start).walkable;
+    std::vector<GridPos> stack{start};
+    std::vector<char> seen(static_cast<std::size_t>(grid.width() * grid.depth()), 0);
+    std::vector<GridPos> region;
+    while (!stack.empty()) {
+        const auto p = stack.back();
+        stack.pop_back();
+        if (!grid.inRange(p)) {
+            continue;
+        }
+        auto& mark = seen[static_cast<std::size_t>(p.z * grid.width() + p.x)];
+        if (mark || grid.at(p).walkable != seed) {
+            continue;
+        }
+        mark = 1;
+        region.push_back(p);
+        stack.push_back({p.x + 1, p.z, p.layer});
+        stack.push_back({p.x - 1, p.z, p.layer});
+        stack.push_back({p.x, p.z + 1, p.layer});
+        stack.push_back({p.x, p.z - 1, p.layer});
+    }
+    int changed = 0;
+    for (const auto& p : region) {
+        changed += paint(grid, brush, p, 0);
+    }
+    return changed;
+}
+
+namespace {
+bool near(float a, float b) {
+    return std::abs(a - b) < 1e-4f;
+}
+// Joins two boxes when they share every extent but one axis, along which
+// they touch or overlap.
+bool tryMerge(const Box& a, const Box& b, Box& out) {
+    for (int axis = 0; axis < 3; ++axis) {
+        bool same = true;
+        for (int other = 0; other < 3; ++other) {
+            if (other != axis && (!near(a.min[other], b.min[other]) || !near(a.max[other], b.max[other]))) {
+                same = false;
+            }
+        }
+        if (!same) {
+            continue;
+        }
+        if (a.max[axis] >= b.min[axis] - 1e-4f && b.max[axis] >= a.min[axis] - 1e-4f) {
+            out = a;
+            out.min[axis] = std::min(a.min[axis], b.min[axis]);
+            out.max[axis] = std::max(a.max[axis], b.max[axis]);
+            return true;
+        }
+    }
+    return false;
+}
+float snapStep(float value) {
+    return std::round(value / BlockStep) * BlockStep;
+}
+} // namespace
+
+std::vector<Box> mergeBoxes(std::vector<Box> boxes) {
+    for (auto& box : boxes) {
+        const auto lo = glm::min(box.min, box.max), hi = glm::max(box.min, box.max);
+        box.min = lo;
+        box.max = hi;
+    }
+    bool merged = true;
+    while (merged) {
+        merged = false;
+        for (std::size_t i = 0; i < boxes.size() && !merged; ++i) {
+            for (std::size_t j = i + 1; j < boxes.size(); ++j) {
+                Box joined;
+                if (tryMerge(boxes[i], boxes[j], joined)) {
+                    boxes[i] = joined;
+                    boxes.erase(boxes.begin() + static_cast<std::ptrdiff_t>(j));
+                    merged = true;
+                    break;
+                }
+            }
+        }
+    }
+    return boxes;
+}
+
+bool paintBlock(MapData& map, glm::vec2 position, int layer, float height, bool add) {
+    auto& grid = map.grid;
+    if (layer < 0 || layer >= grid.layerCount() || height <= 0) {
+        return false;
+    }
+    const glm::vec2 lo(std::floor(position.x / BlockStep) * BlockStep, std::floor(position.y / BlockStep) * BlockStep);
+    const glm::vec2 hi = lo + glm::vec2(BlockStep);
+    const glm::vec2 centre = (lo + hi) * 0.5f;
+    if (!grid.inRange(floorCell(centre.x), floorCell(centre.y), layer)) {
+        return false;
+    }
+    const float surface = grid.heightAt(centre, layer);
+    if (add) {
+        const Box square{{lo.x, snapStep(surface) - 0.05f, lo.y}, {hi.x, snapStep(surface) + height, hi.y}};
+        for (const auto& box : map.colliders) {
+            if (box.min.x <= lo.x + 1e-4f && box.max.x >= hi.x - 1e-4f && box.min.z <= lo.y + 1e-4f &&
+                box.max.z >= hi.y - 1e-4f && box.min.y <= square.min.y + 1e-4f && box.max.y >= square.max.y - 1e-4f) {
+                return false; // already covered
+            }
+        }
+        map.colliders.push_back(square);
+        map.colliders = mergeBoxes(std::move(map.colliders));
+        return true;
+    }
+    // Erase: cut every box covering the square into the parts around it.
+    std::vector<Box> result;
+    bool changed = false;
+    for (const auto& box : map.colliders) {
+        const bool covers = box.min.x < hi.x - 1e-4f && box.max.x > lo.x + 1e-4f && box.min.z < hi.y - 1e-4f &&
+                            box.max.z > lo.y + 1e-4f && box.max.y > surface + 0.01f;
+        if (!covers) {
+            result.push_back(box);
+            continue;
+        }
+        changed = true;
+        // Left and right of the square (full depth), then front and back (within its x span).
+        if (box.min.x < lo.x - 1e-4f) {
+            result.push_back({box.min, {lo.x, box.max.y, box.max.z}});
+        }
+        if (box.max.x > hi.x + 1e-4f) {
+            result.push_back({{hi.x, box.min.y, box.min.z}, box.max});
+        }
+        const float x0 = std::max(box.min.x, lo.x), x1 = std::min(box.max.x, hi.x);
+        if (box.min.z < lo.y - 1e-4f) {
+            result.push_back({{x0, box.min.y, box.min.z}, {x1, box.max.y, lo.y}});
+        }
+        if (box.max.z > hi.y + 1e-4f) {
+            result.push_back({{x0, box.min.y, hi.y}, {x1, box.max.y, box.max.z}});
+        }
+    }
+    if (changed) {
+        map.colliders = mergeBoxes(std::move(result));
+    }
+    return changed;
+}
+
+Box boxForModel(const Model& model, const Placement& placement, float margin) {
+    const float yaw = glm::radians(placement.yaw);
+    const float c = std::cos(yaw), s = std::sin(yaw);
+    Box box{glm::vec3(std::numeric_limits<float>::max()), glm::vec3(std::numeric_limits<float>::lowest())};
+    for (int i = 0; i < 8; ++i) {
+        const glm::vec3 corner = glm::vec3((i & 1) ? model.max.x : model.min.x, (i & 2) ? model.max.y : model.min.y,
+                                           (i & 4) ? model.max.z : model.min.z) *
+                                 placement.scale;
+        // glm::rotate about +y: x' = x cos + z sin, z' = -x sin + z cos.
+        const glm::vec3 turned(corner.x * c + corner.z * s, corner.y, -corner.x * s + corner.z * c);
+        const auto p = placement.position + turned;
+        box.min = glm::min(box.min, p);
+        box.max = glm::max(box.max, p);
+    }
+    const float shrink = std::min(margin, (std::min(box.max.x - box.min.x, box.max.z - box.min.z) - BlockStep) * 0.5f);
+    if (shrink > 0) {
+        box.min.x += shrink;
+        box.max.x -= shrink;
+        box.min.z += shrink;
+        box.max.z -= shrink;
+    }
+    return box;
+}
+
 namespace {
 template<class Settings> std::string roundTripProblem(const Settings& settings) {
     try {
@@ -308,7 +491,13 @@ int importMarkers(MapData& map, const Model& model, std::vector<std::string>& pr
         if (props.contains("collision") && marker.hasBounds) {
             const auto config = props.at("collision").is_object() ? props.at("collision") : Json::object();
             const auto layer = config.value("layer", 0);
-            if (layer < 0 || layer >= grid.layerCount()) {
+            if (config.value("box", false)) {
+                // The exact box, for objects smaller than a cell: bodies are
+                // blocked by it and routes avoid the cells its centre covers.
+                map.colliders.push_back({marker.min, marker.max});
+                map.colliders = mergeBoxes(std::move(map.colliders));
+                ++imported;
+            } else if (layer < 0 || layer >= grid.layerCount()) {
                 problems.push_back(marker.name + ": collision layer " + std::to_string(layer) +
                                    " does not exist");
             } else {

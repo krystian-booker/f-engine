@@ -161,6 +161,8 @@ struct Placement {
     glm::vec3 position{0};
     glm::vec2 facing{0, 1};
     int layer = 0;
+    float yaw = 0;      // degrees about the vertical axis (meshes); written only when not 0
+    glm::vec3 scale{1}; // written only when not 1 (a number when uniform)
     Json props = Json::object();
 };
 

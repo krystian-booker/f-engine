@@ -12,6 +12,7 @@
 #include <map>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace fe {
 // What World::raycast hit.
@@ -33,6 +34,7 @@ struct RayOptions {
     std::vector<std::string> tags; // when not empty, only entities with one of these tags are hit
     int pixelsPerUnit = 32;        // for sprites whose animation does not set one
     double alpha = 1;              // camera interpolation that orients sprites
+    const Camera* camera = nullptr; // orients sprite quads instead of the world's camera (an editor view)
 };
 
 // Flicker noise seeds, fixed for each light whatever else is lit: map lights
@@ -152,6 +154,9 @@ public:
     // hash current; code that writes Transform::position directly (the
     // editor) calls this afterwards.
     void refreshCollision() { collision_.refresh(); }
+    // Cells routes may not pass through because a static box stands on them
+    // (boxBlockedCells); current for the live grid and boxes.
+    [[nodiscard]] const std::unordered_set<std::int64_t>& boxBlockedCells() const;
 
     // First thing a ray hits: grid surfaces and cliff faces, static colliders,
     // and entities (their collider, or their sprite's quad when they have no
@@ -160,7 +165,7 @@ public:
                                                   const RayOptions& options) const;
     // The visible sprite nearest along a ray (the one drawn on top), or null.
     [[nodiscard]] entt::entity pickSprite(glm::vec3 origin, glm::vec3 direction, double alpha,
-                                          int pixelsPerUnit) const;
+                                          int pixelsPerUnit, const Camera* camera = nullptr) const;
     // World-space light list for this frame (static + entity lights, flicker applied).
     [[nodiscard]] std::vector<LightSettings> activeLights() const;
     [[nodiscard]] glm::vec3 interpolated(entt::entity entity, double alpha) const;
@@ -168,6 +173,9 @@ public:
 private:
     std::string name_;
     MapData map_;
+    mutable std::unordered_set<std::int64_t> boxBlocked_;
+    mutable std::uint64_t boxBlockedGrid_ = ~std::uint64_t{0}, boxBlockedBoxes_ = ~std::uint64_t{0};
+    std::uint64_t boxesRevision_ = 0; // bumped by rebuildStatic
     MapData authored_;
     AssetCache& assets_;
     entt::registry registry_;

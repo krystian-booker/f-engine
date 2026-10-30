@@ -554,6 +554,14 @@ MapData MapData::fromJson(const Json& j) {
         if (p.contains("facing")) {
             placement.facing = jsonVec2(p.at("facing"));
         }
+        placement.yaw = p.value("yaw", 0.0f);
+        if (const auto scale = p.find("scale"); scale != p.end()) {
+            placement.scale = scale->is_number() ? glm::vec3(scale->get<float>()) : jsonVec3(*scale);
+        }
+        if (!std::isfinite(placement.yaw) || !std::isfinite(placement.scale.x) ||
+            !std::isfinite(placement.scale.y) || !std::isfinite(placement.scale.z)) {
+            throw std::runtime_error("Placement '" + placement.id + "' has a non-finite yaw or scale");
+        }
         if (placement.id.empty() || !ids.insert(placement.id).second) {
             throw std::runtime_error("Duplicate or empty placement id: " + placement.id);
         }
@@ -608,12 +616,20 @@ Json MapData::toJson() const {
             {"position", fe::toJson(p.position)}, {"facing", fe::toJson(p.facing)}, {"layer", p.layer}};
     }
     for (const auto& p : placements) {
-        placementsJson.push_back({{"id", p.id},
-                                  {"type", p.type},
-                                  {"position", fe::toJson(p.position)},
-                                  {"facing", fe::toJson(p.facing)},
-                                  {"layer", p.layer},
-                                  {"props", p.props}});
+        Json out = {{"id", p.id},
+                    {"type", p.type},
+                    {"position", fe::toJson(p.position)},
+                    {"facing", fe::toJson(p.facing)},
+                    {"layer", p.layer},
+                    {"props", p.props}};
+        // Absent when at their defaults, so maps without them re-serialise unchanged.
+        if (p.yaw != 0) {
+            out["yaw"] = p.yaw;
+        }
+        if (p.scale != glm::vec3(1)) {
+            out["scale"] = p.scale.x == p.scale.y && p.scale.y == p.scale.z ? Json(p.scale.x) : fe::toJson(p.scale);
+        }
+        placementsJson.push_back(std::move(out));
     }
     for (const auto& z : zones) {
         zonesJson.push_back({{"id", z.id},

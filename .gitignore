@@ -10,3 +10,6 @@ __pycache__/
 # Local FF6 sample and tooling.
 /samples/ff6_narshe/
 /tools/ff6/
+
+# Editor walkthrough screenshots
+tools/editor_walkthrough/out/

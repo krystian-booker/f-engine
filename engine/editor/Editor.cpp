@@ -1,23 +1,43 @@
 #include "engine/editor/Editor.h"
+#include "engine/core/Log.h"
 #include "engine/core/Paths.h"
 #include "engine/editor/EditorWidgets.h"
+#include "engine/editor/MapFiles.h"
+#include "engine/editor/SceneEdits.h"
+#include "engine/render/FrameRenderer.h"
 #include "engine/runtime/Engine.h"
 #include "engine/script/LuaHost.h"
 #include "engine/world/World.h"
+#include <IconsFontAwesome6.h>
+#include <cstdlib>
 #include <imgui.h>
+#include <ImGuizmo.h>
 #include <imgui_internal.h>
 #include <imgui_stdlib.h>
 
 namespace fe {
 using namespace editorui;
 
-Editor::Editor(Engine& engine) : engine_(engine) {
+Editor::Editor(Engine& engine)
+    : engine_(engine), catalog_(engine.lua().gameRoot(), engine.lua().libraryRoot()),
+      importQueue_(std::make_shared<ImportQueue>()) {
+    // For screenshots and tests: the folder the Assets panel opens on.
+    if (const char* folder = std::getenv("FENGINE_EDITOR_ASSET_FOLDER")) {
+        assetFolder_ = folder;
+    }
+    loadScript();
+}
+
+void Editor::attach(FrameRenderer& frame) {
+    frame_ = &frame;
+    gpu_ = &frame.gpu();
 }
 
 void Editor::toggle() {
     open_ = !open_;
     if (open_) {
         refreshSchemas();
+        setMode(mode_);
     } else {
         close();
     }
@@ -32,13 +52,51 @@ void Editor::close() {
         }
     }
     cursorShown_ = false;
+    paused_ = false;
     gridOverlayKey_.clear();
     zoneOverlayKey_.clear();
+}
+
+void Editor::setLayoutFile(std::filesystem::path file) {
+    layoutFile_ = file.string();
+    ImGui::GetIO().IniFilename = layoutFile_.empty() ? nullptr : layoutFile_.c_str();
+    if (!layoutFile_.empty()) {
+        std::error_code error;
+        std::filesystem::create_directories(file.parent_path(), error);
+        if (std::filesystem::exists(file, error)) {
+            ImGui::LoadIniSettingsFromDisk(layoutFile_.c_str());
+            layoutBuilt_ = ImGui::FindWindowSettingsByID(ImHashStr("Scene")) != nullptr;
+        }
+    }
+}
+
+void Editor::setMode(Mode mode) {
+    mode_ = mode;
+    if (mode == Mode::Edit) {
+        paused_ = pauseInEdit_;
+        if (const auto w = world()) {
+            if (!cameraAdopted_) {
+                editorCamera_.adopt(w->camera());
+                cameraAdopted_ = true;
+            }
+        }
+    } else {
+        paused_ = false;
+        if (const auto w = world()) {
+            std::erase_if(w->overlays(), [](const auto& overlay) { return overlay.first.starts_with("editor:"); });
+            w->cursor().visible = false;
+        }
+        gridOverlayKey_.clear();
+        zoneOverlayKey_.clear();
+    }
 }
 
 bool Editor::capturesInput() const {
     if (!open_) {
         return false;
+    }
+    if (mode_ == Mode::Edit) {
+        return true;
     }
     const auto& io = ImGui::GetIO();
     return io.WantCaptureKeyboard || io.WantCaptureMouse;
@@ -49,6 +107,9 @@ std::shared_ptr<World> Editor::world() {
         return w;
     }
     auto focus = engine_.focusWorld();
+    if (!focus && !engine_.worlds().empty()) {
+        focus = engine_.worlds().begin()->second;
+    }
     if (focus) {
         worldName_ = focus->name();
     }
@@ -91,6 +152,9 @@ void Editor::refreshSchemas() {
         const auto parsed = Json::parse(result.get<std::string>(), nullptr, false);
         schemas_ = parsed.is_object() ? parsed : Json::object();
     }
+    log(LogLevel::Debug, "editor: schemas refreshed: " + std::to_string(jsonObject(schemas_, "entities").size()) +
+                             " placement type(s), " + std::to_string(jsonArray(schemas_, "tables").size()) +
+                             " table(s)" + (status_.empty() ? "" : "; status: " + status_));
 }
 
 std::string Editor::defaultType(const char* group) const {
@@ -122,9 +186,11 @@ void Editor::edit(World& w, const std::function<void(MapData&)>& change) {
 
 void Editor::undo(World& w, bool forward) {
     try {
+        const MapData before = w.authored();
         if (forward ? history_.redo(w) : history_.undo(w)) {
             ++revision_;
             status_ = forward ? "Redone" : "Undone";
+            placementsChanged(w, before);
         }
     } catch (const std::exception& error) {
         status_ = std::string("Cannot restore: ") + error.what();
@@ -141,6 +207,240 @@ void Editor::saveMap(World& w) {
     } catch (const std::exception& error) {
         status_ = std::string("Not saved: ") + error.what();
     }
+}
+
+void Editor::select(const Selection& selection) {
+    selection_ = selection;
+    extra_.clear();
+}
+
+void Editor::placementChanged(World& w, const std::string& id) {
+    if (gesture_) {
+        // Part of a drag or a typed edit: respawn once when it ends.
+        if (std::find(pendingRespawns_.begin(), pendingRespawns_.end(), id) == pendingRespawns_.end()) {
+            pendingRespawns_.push_back(id);
+        }
+        return;
+    }
+    const auto hook = devtool("placement_changed");
+    if (hook == sol::lua_nil) {
+        status_ = "Placement edited; it respawns when the map is saved (fe.devtools.placement_changed is undefined)";
+        return;
+    }
+    // The call-out may replace or destroy entities; nothing here holds one.
+    succeeded(engine_.lua().invoke(hook, w.name(), id));
+}
+
+void Editor::placementsChanged(World& w, const MapData& before) {
+    for (const auto& id : changedPlacementIds(before, w.authored())) {
+        placementChanged(w, id);
+    }
+}
+
+void Editor::deleteOne(World& w, const Selection& s) {
+    if (!selectionValid(w, s)) {
+        return;
+    }
+    switch (s.kind) {
+    case Selection::Kind::Placement:
+        edit(w, [&](MapData& m) {
+            std::erase_if(m.placements, [&](const Placement& p) { return p.id == s.id; });
+        });
+        gesture_ = false;
+        placementChanged(w, s.id);
+        break;
+    case Selection::Kind::Zone:
+        edit(w, [&](MapData& m) { std::erase_if(m.zones, [&](const Zone& z) { return z.id == s.id; }); });
+        break;
+    case Selection::Kind::Point:
+        edit(w, [&](MapData& m) { m.points.erase(s.id); });
+        break;
+    case Selection::Kind::Light:
+        edit(w, [&](MapData& m) {
+            if (s.index >= 0 && s.index < static_cast<int>(m.lights.size())) {
+                m.lights.erase(m.lights.begin() + s.index);
+            }
+        });
+        break;
+    case Selection::Kind::Emitter:
+        edit(w, [&](MapData& m) {
+            if (s.index >= 0 && s.index < static_cast<int>(m.emitters.size())) {
+                m.emitters.erase(m.emitters.begin() + s.index);
+            }
+        });
+        break;
+    case Selection::Kind::Collider:
+        edit(w, [&](MapData& m) {
+            if (s.index >= 0 && s.index < static_cast<int>(m.colliders.size())) {
+                m.colliders.erase(m.colliders.begin() + s.index);
+            }
+        });
+        break;
+    case Selection::Kind::Entity:
+        if (w.alive(s.entity, s.serial)) {
+            w.destroy(s.entity);
+        }
+        break;
+    case Selection::Kind::None: break;
+    }
+}
+
+void Editor::deleteSelection(World& w) {
+    std::vector<Selection> all = extra_;
+    if (!selection_.empty()) {
+        all.push_back(selection_);
+    }
+    if (all.empty()) {
+        return;
+    }
+    // Index-based kinds go highest index first, so earlier indices stay valid.
+    std::sort(all.begin(), all.end(), [](const Selection& a, const Selection& b) {
+        return a.kind != b.kind ? a.kind < b.kind : a.index > b.index;
+    });
+    all.erase(std::unique(all.begin(), all.end()), all.end());
+    const auto label = all.size() == 1 ? selectionLabel(w, all.front()) : std::to_string(all.size()) + " objects";
+    gesture_ = false;
+    for (const auto& s : all) {
+        deleteOne(w, s);
+        gesture_ = true; // one undo step for the whole group
+    }
+    gesture_ = false;
+    status_ = "Deleted " + label;
+    selection_ = {};
+    extra_.clear();
+}
+
+void Editor::toggleExtra(const Selection& s) {
+    if (s.empty() || s == selection_) {
+        return;
+    }
+    if (const auto found = std::find(extra_.begin(), extra_.end(), s); found != extra_.end()) {
+        extra_.erase(found);
+    } else {
+        extra_.push_back(s);
+    }
+}
+
+bool Editor::isSelected(const Selection& s) const {
+    return !s.empty() && (s == selection_ || std::find(extra_.begin(), extra_.end(), s) != extra_.end());
+}
+
+void Editor::moveExtras(World& w, glm::vec3 delta) {
+    if (extra_.empty() || glm::length(delta) < 1e-6f) {
+        return;
+    }
+    for (const auto& s : extra_) {
+        if (s.kind == Selection::Kind::Entity) {
+            if (w.alive(s.entity, s.serial)) {
+                const auto& t = w.registry().get<Transform>(s.entity);
+                editTransform(w, s.entity, t.position + delta, t.layer);
+            }
+            continue;
+        }
+        auto transform = selectionTransform(w, s);
+        if (!transform) {
+            continue;
+        }
+        transform->position += delta;
+        edit(w, [&](MapData& m) { applySelectionTransform(m, s, *transform); });
+        if (s.kind == Selection::Kind::Placement) {
+            if (const auto* p = findPlacement(w.authored(), s.id)) {
+                syncPlacementEntity(w, *p);
+            }
+        }
+    }
+}
+
+void Editor::duplicateSelection(World& w) {
+    const auto s = selection_;
+    if (!selectionValid(w, s)) {
+        return;
+    }
+    gesture_ = false;
+    const auto& map = w.authored();
+    if (!extra_.empty()) {
+        // A group: copies of every placement in it, beside the originals.
+        std::vector<Selection> group = extra_;
+        group.push_back(s);
+        std::vector<std::string> copies;
+        for (const auto& member : group) {
+            if (member.kind != Selection::Kind::Placement || !findPlacement(map, member.id)) {
+                continue;
+            }
+            const auto copy = duplicatePlacement(*findPlacement(map, member.id), map.placements);
+            edit(w, [&](MapData& m) { m.placements.push_back(copy); });
+            copies.push_back(copy.id);
+        }
+        gesture_ = false;
+        extra_.clear();
+        for (const auto& id : copies) {
+            placementChanged(w, id);
+            if (selection_.kind != Selection::Kind::Placement || selection_.id != copies.front()) {
+                selection_ = Selection::placement(copies.front());
+            }
+            if (id != copies.front()) {
+                extra_.push_back(Selection::placement(id));
+            }
+        }
+        status_ = "Duplicated " + std::to_string(copies.size()) + " placement(s)";
+        return;
+    }
+    switch (s.kind) {
+    case Selection::Kind::Placement: {
+        const auto copy = duplicatePlacement(*findPlacement(map, s.id), map.placements);
+        edit(w, [&](MapData& m) { m.placements.push_back(copy); });
+        gesture_ = false;
+        selection_ = Selection::placement(copy.id);
+        placementChanged(w, copy.id);
+        break;
+    }
+    case Selection::Kind::Zone: {
+        auto copy = *findZone(map, s.id);
+        copy.id = uniqueId(copy.id, map.zones);
+        copy.min.x += 1;
+        copy.max.x += 1;
+        edit(w, [&](MapData& m) { m.zones.push_back(copy); });
+        selection_ = Selection::zone(copy.id);
+        break;
+    }
+    case Selection::Kind::Point: {
+        auto copy = map.points.at(s.id);
+        copy.position.x += 1;
+        std::string name = s.id + "_copy";
+        for (int n = 2; map.points.contains(name); ++n) {
+            name = s.id + "_copy" + std::to_string(n);
+        }
+        edit(w, [&](MapData& m) { m.points[name] = copy; });
+        selection_ = Selection::point(name);
+        break;
+    }
+    case Selection::Kind::Light: {
+        auto copy = map.lights[static_cast<std::size_t>(s.index)];
+        copy.position.x += 1;
+        edit(w, [&](MapData& m) { m.lights.push_back(copy); });
+        selection_ = Selection::light(static_cast<int>(map.lights.size()) - 1);
+        break;
+    }
+    case Selection::Kind::Emitter: {
+        auto copy = map.emitters[static_cast<std::size_t>(s.index)];
+        copy.position.x += 1;
+        edit(w, [&](MapData& m) { m.emitters.push_back(copy); });
+        selection_ = Selection::emitter(static_cast<int>(map.emitters.size()) - 1);
+        break;
+    }
+    case Selection::Kind::Collider: {
+        auto copy = map.colliders[static_cast<std::size_t>(s.index)];
+        copy.min.x += 1;
+        copy.max.x += 1;
+        edit(w, [&](MapData& m) { m.colliders.push_back(copy); });
+        selection_ = Selection::collider(static_cast<int>(map.colliders.size()) - 1);
+        break;
+    }
+    case Selection::Kind::Entity:
+    case Selection::Kind::None: return;
+    }
+    gesture_ = false;
+    status_ = "Duplicated as " + selectionLabel(w, selection_);
 }
 
 bool Editor::editJson(const char* label, Json& value, float height) {
@@ -166,6 +466,228 @@ bool Editor::editJson(const char* label, Json& value, float height) {
     return changed;
 }
 
+namespace {
+// A JSON value of the type a spec asks for, filled from the spec's default.
+Json blankFor(const Json& spec) {
+    if (const auto fallback = spec.find("default"); fallback != spec.end()) {
+        return *fallback;
+    }
+    const auto type = jsonString(spec, "type", "any");
+    if (type == "number" || type == "integer") {
+        return 0;
+    }
+    if (type == "boolean") {
+        return false;
+    }
+    if (type == "list") {
+        return Json::array();
+    }
+    if (type == "record" || type == "map") {
+        Json out = Json::object();
+        if (type == "record") {
+            // Held in a local: items() keeps a reference to the object it walks.
+            const auto fields = jsonObject(spec, "fields");
+            for (const auto& [name, field] : fields.items()) {
+                if (!jsonBool(field, "optional", false)) {
+                    out[name] = blankFor(field);
+                }
+            }
+        }
+        return out;
+    }
+    if (type == "enum") {
+        const auto options = jsonArray(spec, "options");
+        return options.empty() ? Json("") : options.front();
+    }
+    return "";
+}
+AssetKind assetKindNamed(const std::string& kind) {
+    return kind == "sprite"  ? AssetKind::Sprite
+           : kind == "image" ? AssetKind::Image
+           : kind == "model" ? AssetKind::Model
+           : kind == "audio" ? AssetKind::Audio
+           : kind == "lut"   ? AssetKind::Lut
+           : kind == "shader" ? AssetKind::Shader
+                              : AssetKind::Other;
+}
+} // namespace
+
+bool Editor::editValue(const char* label, const Json& spec, Json& value, int depth) {
+    const auto type = jsonString(spec, "type", "any");
+    const bool optional = jsonBool(spec, "optional", false);
+    bool changed = false;
+    ImGui::PushID(label);
+    if (type == "asset" && (value.is_string() || value.is_null())) {
+        std::string text = value.is_string() ? value.get<std::string>() : std::string{};
+        if (assetPicker(label, text, assetKindNamed(jsonString(spec, "asset", "sprite")), optional)) {
+            value = text;
+            changed = true;
+        }
+    } else if (type == "module" && (value.is_string() || value.is_null())) {
+        std::string text = value.is_string() ? value.get<std::string>() : std::string{};
+        if (modulePicker(label, text, jsonString(spec, "folder", ""), optional)) {
+            value = text;
+            changed = true;
+        }
+    } else if (type == "map_id" && (value.is_string() || value.is_null())) {
+        std::string text = value.is_string() ? value.get<std::string>() : std::string{};
+        if (mapPicker(label, text, optional)) {
+            value = text;
+            changed = true;
+        }
+    } else if (type == "ref" && (value.is_string() || value.is_null())) {
+        std::string text = value.is_string() ? value.get<std::string>() : std::string{};
+        if (refPicker(label, text, jsonString(spec, "table", {}), optional)) {
+            value = text;
+            changed = true;
+        }
+    } else if (type == "string" && (value.is_string() || value.is_null())) {
+        std::string text = value.is_string() ? value.get<std::string>() : std::string{};
+        if (ImGui::InputText(label, &text)) {
+            value = text;
+            changed = true;
+        }
+    } else if ((type == "number" || type == "integer") && (value.is_number() || value.is_null())) {
+        double number = value.is_number() ? value.get<double>() : jsonNumber(spec, "default", 0.0);
+        if (ImGui::InputDouble(label, &number)) {
+            value = type == "integer" ? Json(static_cast<long long>(number)) : Json(number);
+            changed = true;
+        }
+    } else if (type == "boolean" && (value.is_boolean() || value.is_null())) {
+        bool flag = value.is_boolean() ? value.get<bool>() : jsonBool(spec, "default", false);
+        if (ImGui::Checkbox(label, &flag)) {
+            value = flag;
+            changed = true;
+        }
+    } else if (type == "enum" && (value.is_string() || value.is_null())) {
+        const std::string current = value.is_string() ? value.get<std::string>() : jsonString(spec, "default", {});
+        if (ImGui::BeginCombo(label, current.c_str())) {
+            for (const auto& option : jsonArray(spec, "options")) {
+                if (!option.is_string()) {
+                    continue;
+                }
+                const auto text = option.get<std::string>();
+                if (ImGui::Selectable(text.c_str(), text == current)) {
+                    value = text;
+                    changed = true;
+                }
+            }
+            ImGui::EndCombo();
+        }
+    } else if (type == "list" && (value.is_array() || value.is_null()) && depth < 6) {
+        if (value.is_null()) {
+            value = Json::array();
+        }
+        const auto of = jsonObject(spec, "of");
+        const auto ofType = jsonString(of, "type", "any");
+        const bool rows = ofType == "record" || ofType == "list" || ofType == "map" || ofType == "any" ||
+                          ofType == "table";
+        const auto header = std::string(label) + " (" + std::to_string(value.size()) + ")";
+        if (ImGui::TreeNodeEx(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+            int remove = -1, up = -1;
+            for (std::size_t i = 0; i < value.size(); ++i) {
+                ImGui::PushID(static_cast<int>(i));
+                if (ImGui::SmallButton("x")) {
+                    remove = static_cast<int>(i);
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Remove");
+                }
+                ImGui::SameLine();
+                ImGui::BeginDisabled(i == 0);
+                if (ImGui::SmallButton(ICON_FA_ARROW_UP)) {
+                    up = static_cast<int>(i);
+                }
+                ImGui::EndDisabled();
+                ImGui::SameLine();
+                const auto name = "#" + std::to_string(i + 1);
+                if (rows) {
+                    if (ImGui::TreeNodeEx(name.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+                        changed |= editValue("##element", of, value[i], depth + 1);
+                        ImGui::TreePop();
+                    }
+                } else {
+                    changed |= editValue(name.c_str(), of, value[i], depth + 1);
+                }
+                ImGui::PopID();
+            }
+            if (remove >= 0) {
+                value.erase(static_cast<std::size_t>(remove));
+                changed = true;
+            } else if (up > 0) {
+                std::swap(value[static_cast<std::size_t>(up)], value[static_cast<std::size_t>(up) - 1]);
+                changed = true;
+            }
+            if (ImGui::SmallButton(ICON_FA_PLUS " Add")) {
+                value.push_back(blankFor(of));
+                changed = true;
+            }
+            ImGui::TreePop();
+        }
+    } else if (type == "record" && (value.is_object() || value.is_null()) && depth < 6) {
+        if (value.is_null()) {
+            value = Json::object();
+        }
+        if (depth == 0 || ImGui::TreeNodeEx(label, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+            const auto fields = spec.find("fields");
+            changed |= editProps(fields != spec.end() ? &*fields : nullptr, value);
+            if (depth != 0) {
+                ImGui::TreePop();
+            }
+        }
+    } else if (type == "map" && (value.is_object() || value.is_null()) && depth < 6) {
+        if (value.is_null()) {
+            value = Json::object();
+        }
+        const auto of = jsonObject(spec, "of");
+        const auto header = std::string(label) + " (" + std::to_string(value.size()) + ")";
+        if (ImGui::TreeNodeEx(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+            std::string remove;
+            for (auto& [key, child] : value.items()) {
+                ImGui::PushID(key.c_str());
+                if (ImGui::SmallButton("x")) {
+                    remove = key;
+                }
+                ImGui::SameLine();
+                changed |= editValue(key.c_str(), of, child, depth + 1);
+                ImGui::PopID();
+            }
+            if (!remove.empty()) {
+                value.erase(remove);
+                changed = true;
+            }
+            static std::map<ImGuiID, std::string> newKeys;
+            auto& newKey = newKeys[ImGui::GetID("newkey")];
+            ImGui::SetNextItemWidth(140);
+            ImGui::InputTextWithHint("##newkey", "key", &newKey);
+            ImGui::SameLine();
+            if (ImGui::SmallButton(ICON_FA_PLUS " Add") && !newKey.empty() && !value.contains(newKey)) {
+                value[newKey] = blankFor(of);
+                newKey.clear();
+                changed = true;
+            }
+            ImGui::TreePop();
+        }
+    } else {
+        // Unknown kinds, and values of another type than the schema says.
+        if (depth == 0) {
+            ImGui::TextUnformatted(label);
+        } else {
+            ImGui::TextDisabled("%s", label);
+        }
+        Json copy = value;
+        if (editJson("##json", copy, 80)) {
+            value = std::move(copy);
+            changed = true;
+        }
+    }
+    if (const auto doc = spec.find("doc"); doc != spec.end() && doc->is_string() && ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s", doc->get<std::string>().c_str());
+    }
+    ImGui::PopID();
+    return changed;
+}
+
 bool Editor::editProps(const Json* schema, Json& props) {
     if (!schema || !schema->is_object()) {
         return editJson("Props", props);
@@ -179,63 +701,41 @@ bool Editor::editProps(const Json* schema, Json& props) {
         if (!spec.is_object()) {
             continue;
         }
-        const auto type = jsonString(spec, "type", "any");
         const bool optional = jsonBool(spec, "optional", false);
         const auto label = name + (optional ? "" : " *");
-        // A value whose type does not match its schema (a number where the
-        // schema says string, an edited file) is shown in the JSON editor
-        // instead of aborting the form: json.value() would throw on it.
-        const Json* current = props.contains(name) ? &props.at(name) : nullptr;
-        const auto typed = [&](bool (Json::*check)() const) { return !current || (*current.*check)(); };
         ImGui::PushID(name.c_str());
-        if ((type == "string" || type == "ref") && typed(&Json::is_string)) {
-            std::string value = current ? current->get<std::string>() : std::string{};
-            const auto hint = type == "ref" ? label + " (" + jsonString(spec, "table", {}) + " id)" : label;
-            if (ImGui::InputText(hint.c_str(), &value)) {
-                props[name] = value;
+        if (optional && !props.contains(name)) {
+            // Absent optional fields stay absent until asked for, so the
+            // default applies and the file stays small.
+            ImGui::TextDisabled("%s", name.c_str());
+            if (const auto doc = spec.find("doc"); doc != spec.end() && doc->is_string() && ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", doc->get<std::string>().c_str());
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton(ICON_FA_PLUS)) {
+                props[name] = blankFor(spec);
                 changed = true;
             }
-        } else if ((type == "number" || type == "integer") && typed(&Json::is_number)) {
-            double value = current ? current->get<double>() : jsonNumber(spec, "default", 0.0);
-            if (ImGui::InputDouble(label.c_str(), &value)) {
-                props[name] = type == "integer" ? Json(static_cast<long long>(value)) : Json(value);
-                changed = true;
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Set (uses the default until then)");
             }
-        } else if (type == "boolean" && typed(&Json::is_boolean)) {
-            bool value = current ? current->get<bool>() : jsonBool(spec, "default", false);
-            if (ImGui::Checkbox(label.c_str(), &value)) {
-                props[name] = value;
-                changed = true;
-            }
-        } else if (type == "enum" && typed(&Json::is_string)) {
-            const std::string value = current ? current->get<std::string>() : jsonString(spec, "default", {});
-            if (ImGui::BeginCombo(label.c_str(), value.c_str())) {
-                if (const auto options = spec.find("options"); options != spec.end() && options->is_array()) {
-                    for (const auto& option : *options) {
-                        if (!option.is_string()) {
-                            continue;
-                        }
-                        const auto text = option.get<std::string>();
-                        if (ImGui::Selectable(text.c_str(), text == value)) {
-                            props[name] = text;
-                            changed = true;
-                        }
-                    }
-                }
-                ImGui::EndCombo();
-            }
-        } else {
-            Json value = current ? *current : Json();
-            ImGui::TextUnformatted(label.c_str());
-            if (editJson("##json", value, 80)) {
-                props[name] = value;
-                changed = true;
-            }
+            ImGui::PopID();
+            continue;
         }
-        if (const auto doc = spec.find("doc"); doc != spec.end() && doc->is_string() && ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s", doc->get<std::string>().c_str());
+        if (!props.contains(name)) {
+            // A required field the file lacks: show its default (or a blank)
+            // and write it only when the user changes it, so selecting an
+            // object never edits the map by itself.
+            Json value = blankFor(spec);
+            if (editValue(label.c_str(), spec, value)) {
+                props[name] = value;
+                changed = true;
+            }
+            ImGui::PopID();
+            continue;
         }
-        if (optional && props.contains(name)) {
+        changed |= editValue(label.c_str(), spec, props[name]);
+        if (optional) {
             ImGui::SameLine();
             if (ImGui::SmallButton("x")) {
                 props.erase(name);
@@ -246,6 +746,33 @@ bool Editor::editProps(const Json* schema, Json& props) {
             }
         }
         ImGui::PopID();
+    }
+    // Keys the schema does not know keep a JSON editor of their own.
+    Json others = Json::object();
+    for (const auto& [key, child] : props.items()) {
+        if (!fields.contains(key)) {
+            others[key] = child;
+        }
+    }
+    if (!others.empty() || ImGui::GetIO().KeyAlt) {
+        if (ImGui::TreeNode("Other fields (JSON)")) {
+            if (editJson("##others", others, 100)) {
+                std::vector<std::string> gone;
+                for (const auto& [key, child] : props.items()) {
+                    if (!fields.contains(key) && !others.contains(key)) {
+                        gone.push_back(key);
+                    }
+                }
+                for (const auto& key : gone) {
+                    props.erase(key);
+                }
+                for (const auto& [key, child] : others.items()) {
+                    props[key] = child;
+                }
+                changed = true;
+            }
+            ImGui::TreePop();
+        }
     }
     return changed;
 }
@@ -273,62 +800,75 @@ void Editor::drawErrors() {
     ImGui::End();
 }
 
-void Editor::draw(double frameMilliseconds, std::uint32_t drawCalls) {
+void Editor::dropFile(const std::filesystem::path& file, glm::vec2 windowPoint) {
+    droppedFiles_.emplace_back(file, windowPoint);
+}
+
+void Editor::draw(const EditorFrame& frame) {
     if (!open_) {
+        droppedFiles_.clear();
         return;
     }
-    if (gesture_ && !ImGui::IsAnyItemActive() && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+    alpha_ = frame.alpha;
+    if (gesture_ && !ImGui::IsAnyItemActive() && !ImGui::IsMouseDown(ImGuiMouseButton_Left) && !gizmoUsing_ &&
+        !groundDragging_) {
         gesture_ = false;
-        // The stroke or drag is over: record the map it left, once.
+        // The stroke or drag is over: record the map it left, once, and
+        // respawn the placements whose edits waited for it.
         if (const auto w = world()) {
             history_.settle(*w);
+            const auto pending = std::move(pendingRespawns_);
+            pendingRespawns_.clear();
+            for (const auto& id : pending) {
+                placementChanged(*w, id);
+            }
         }
     }
     // Games register tables and types while starting; look again until they have.
-    if (jsonArray(schemas_, "tables").empty() && Clock::now() - schemasFetched_ > std::chrono::seconds(2)) {
+    if ((jsonArray(schemas_, "tables").empty() || jsonObject(schemas_, "entities").empty()) &&
+        Clock::now() - schemasFetched_ > std::chrono::milliseconds(300)) {
         refreshSchemas();
+    }
+    if (Clock::now() - catalogScanned_ > std::chrono::seconds(2)) {
+        const bool first = catalog_.entries().empty();
+        catalogScanned_ = Clock::now();
+        catalog_.scan();
+        if (first && assetFolder_.empty()) {
+            // Open the Assets panel on the art, the folder an artist wants first.
+            const auto folders = catalog_.folders("");
+            if (std::find(folders.begin(), folders.end(), "sprites") != folders.end()) {
+                assetFolder_ = "sprites";
+            }
+        }
+    }
+    {
+        ImportQueue::Purpose purpose;
+        std::string folder;
+        const auto chosen = takeChosenFiles(purpose, folder);
+        if (!chosen.empty()) {
+            if (purpose == ImportQueue::Purpose::Assets) {
+                importFiles(chosen, folder);
+            } else if (purpose == ImportQueue::Purpose::NewMapGeometry) {
+                mapDialog_.geometry = chosen.front().string();
+            } else if (const auto w = world()) {
+                importGeometry(*w, chosen.front());
+            }
+        }
     }
     const bool cursorWas = cursorShown_;
     cursorShown_ = false;
+    // viewportHovered_ keeps last frame's value until drawViewport runs: the
+    // panels drawn before it (the Map panel's brush) read it.
+    runScript();
     ImGuiErrorRecoveryState recovery;
     ImGui::ErrorRecoveryStoreState(&recovery);
     try {
-        ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 430, 10), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(420, std::min(760.0f, ImGui::GetIO().DisplaySize.y - 20)),
-                                 ImGuiCond_FirstUseEver);
-        if (ImGui::Begin("f-engine editor (F1)", &open_)) {
-            ImGui::Checkbox("Pause game", &paused_);
-            ImGui::SameLine();
-            ImGui::TextDisabled("%s", status_.c_str());
-            if (ImGui::BeginTabBar("tabs")) {
-                if (ImGui::BeginTabItem("World")) {
-                    drawWorldTab();
-                    ImGui::EndTabItem();
-                }
-                if (ImGui::BeginTabItem("Map")) {
-                    drawMapTab();
-                    ImGui::EndTabItem();
-                }
-                if (ImGui::BeginTabItem("Data")) {
-                    drawDataTab();
-                    ImGui::EndTabItem();
-                }
-                if (ImGui::BeginTabItem("Console")) {
-                    drawConsoleTab();
-                    ImGui::EndTabItem();
-                }
-                if (ImGui::BeginTabItem("Profiler")) {
-                    drawProfilerTab(frameMilliseconds, drawCalls);
-                    ImGui::EndTabItem();
-                }
-                if (ImGui::BeginTabItem("Launch")) {
-                    drawLaunchTab();
-                    ImGui::EndTabItem();
-                }
-                ImGui::EndTabBar();
-            }
+        ImGuizmo::BeginFrame();
+        if (mode_ == Mode::Edit) {
+            drawEditMode(frame);
+        } else {
+            drawPlayBar();
         }
-        ImGui::End();
     } catch (const std::exception& error) {
         auto& io = ImGui::GetIO();
         const bool assertOnError = io.ConfigErrorRecoveryEnableAssert;
@@ -337,13 +877,14 @@ void Editor::draw(double frameMilliseconds, std::uint32_t drawCalls) {
         io.ConfigErrorRecoveryEnableAssert = assertOnError;
         status_ = std::string("Editor error: ") + error.what();
     }
+    droppedFiles_.clear();
     if (cursorWas && !cursorShown_) {
         if (const auto w = world()) {
             w->cursor().visible = false;
         }
     }
     if (!open_) {
-        close(); // closed with the window's close button
+        close(); // closed from the menu
     }
 }
 } // namespace fe

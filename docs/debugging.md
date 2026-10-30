@@ -32,3 +32,8 @@ Integrate the EmmyLua debugger as an opt-in, dev-only feature:
 4. Add a VS Code `launch.json` example to the docs.
 
 This keeps the sandbox and the boundary rule intact, and it costs nothing in release builds. If the EmmyLua dependency proves hard to build on one of the three CI platforms, the fallback is the C++ DAP server, which shares steps 2–3. This document records the evaluation and the decision. The integration itself has not been built yet.
+
+## Editor walkthroughs
+
+Replays feed the game's input, not the editor's. `FENGINE_EDITOR_SCRIPT=<file.json>` plays a list of steps through ImGui's input queue instead (mouse moves in window points, clicks and drags, keys with modifiers, typed text, mouse wheel, files as the OS dialog or a drop would deliver them, screenshots, and checks: a Lua expression, the selection's label, the status line, Play or Edit mode); the step kinds are documented in `engine/editor/EditorScript.cpp` and results are logged as `editor script: PASS|FAIL ...`. `tools/editor_walkthrough/run.py` runs the scripts in that folder against vale's town (select, drag, gizmo, pickers, Run page, drag an asset into the scene, New map, brush painting, the walkability bake, save and undo, multi-select, the sprite wizard, imports and the OS file dialog) and restores the sample afterwards. `FENGINE_EDITOR_ASSET_FOLDER=<folder>` picks the folder the Assets panel opens on, for screenshots.
+

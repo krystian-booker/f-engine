@@ -21,6 +21,7 @@ add_executable(fengine_tests
 target_link_libraries(fengine_tests PRIVATE fengine_core doctest::doctest)
 target_compile_definitions(fengine_tests PRIVATE
   FENGINE_TEST_GAME="${PROJECT_SOURCE_DIR}/lualib/tests/game"
+  FENGINE_SAMPLES="${PROJECT_SOURCE_DIR}/samples"
   FENGINE_LUALIB="${PROJECT_SOURCE_DIR}/lualib")
 add_test(NAME fengine_tests COMMAND fengine_tests)
 

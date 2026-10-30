@@ -10,60 +10,21 @@
 namespace fe {
 using namespace editorui;
 
-void Editor::drawWorldTab() {
-    if (ImGui::BeginCombo("World", worldName_.c_str())) {
-        for (const auto& entry : engine_.worlds()) {
-            if (ImGui::Selectable(entry.first.c_str(), entry.first == worldName_)) {
-                worldName_ = entry.first;
-                selectedEntity_ = entt::null;
-            }
-        }
-        ImGui::EndCombo();
-    }
-    const auto w = world();
-    if (!w) {
-        ImGui::TextDisabled("No world loaded");
-        return;
-    }
-    auto& registry = w->registry();
-    const auto lights = w->activeLights();
-    ImGui::Text("%zu entities, %zu particles, %zu lights", registry.view<Transform>().size(),
-                w->particles().size(), lights.size());
-    ImGui::BeginChild("entities", ImVec2(0, 180), ImGuiChildFlags_Borders);
-    for (const auto entity : registry.view<Transform>()) {
-        const auto* name = registry.try_get<Name>(entity);
-        const auto key = static_cast<std::uint32_t>(entt::to_integral(entity));
-        ImGui::PushID(static_cast<int>(key));
-        if (ImGui::Selectable((name ? name->id : "#" + std::to_string(entt::to_entity(entity))).c_str(),
-                              selectedEntity_ == entity)) {
-            selectedEntity_ = entity;
-        }
-        ImGui::PopID();
-    }
-    ImGui::EndChild();
-    if (registry.valid(selectedEntity_) && registry.all_of<Transform>(selectedEntity_)) {
-        drawEntity(*w, selectedEntity_);
-    }
-    if (ImGui::CollapsingHeader("Active lights")) {
-        for (std::size_t i = 0; i < lights.size(); ++i) {
-            const auto& l = lights[i];
-            ImGui::Text("%s at (%.1f, %.1f, %.1f) radius %.1f intensity %.2f",
-                        l.type == LightType::Spot ? "Spot" : "Point", l.position.x, l.position.y,
-                        l.position.z, l.radius, l.intensity);
-            ImGui::SameLine();
-            ImGui::ColorButton(("##light" + std::to_string(i)).c_str(),
-                               ImVec4(l.color.r, l.color.g, l.color.b, 1));
-        }
-    }
-}
-
 // Run-time entity state: changes here last until the entity is respawned
 // and are not part of the map.
 // Every section pushes its own ImGui id, so "Radius" of a light and "Layer"
-// of the transform never collide with the Map tab's widgets of those names.
+// of the transform never collide with the Map panel's widgets of those names.
 void Editor::drawEntity(World& w, entt::entity entity) {
     auto& registry = w.registry();
     auto& t = registry.get<Transform>(entity);
+    ImGui::TextDisabled("Live entity: edits last until it is respawned and are not saved");
+    if (const auto* tags = registry.try_get<Tags>(entity); tags && !tags->values.empty()) {
+        std::string list;
+        for (const auto& tag : tags->values) {
+            list += (list.empty() ? "" : ", ") + tag;
+        }
+        ImGui::Text("Tags: %s", list.c_str());
+    }
     ImGui::PushID("transform");
     auto position = t.position;
     int layer = t.layer;
@@ -73,22 +34,44 @@ void Editor::drawEntity(World& w, entt::entity entity) {
         editTransform(w, entity, position, layer); // through the collision hash
     }
     ImGui::DragFloat2("Facing", glm::value_ptr(t.facing), 0.05f);
+    if (registry.all_of<MeshInstance>(entity)) {
+        float yaw = glm::degrees(t.yaw);
+        if (ImGui::DragFloat("Yaw", &yaw, 1, -360, 360)) {
+            t.yaw = glm::radians(yaw);
+            t.previousYaw = t.yaw;
+        }
+        ImGui::DragFloat3("Scale", glm::value_ptr(t.scale), 0.01f, 0.01f, 100);
+    }
     ImGui::PopID();
     if (auto* sprite = registry.try_get<Sprite>(entity)) {
         ImGui::PushID("sprite");
         ImGui::SeparatorText("Sprite");
-        ImGui::InputText("Animation", &sprite->animation);
-        ImGui::InputText("Clip", &sprite->clip);
+        assetPicker("Animation", sprite->animation, AssetKind::Sprite);
+        std::string clip = sprite->clip;
+        if (clipPicker("Clip", clip, sprite->animation)) {
+            w.setClip(entity, clip);
+        }
         ImGui::Checkbox("Visible", &sprite->visible);
+        ImGui::DragFloat("Scale", &sprite->scale, 0.01f, 0.01f, 1000);
         ImGui::ColorEdit4("Tint", glm::value_ptr(sprite->tint));
         ImGui::ColorEdit4("Outline", glm::value_ptr(sprite->outline));
+        ImGui::PopID();
+    }
+    if (auto* mesh = registry.try_get<MeshInstance>(entity)) {
+        ImGui::PushID("mesh");
+        ImGui::SeparatorText("Mesh");
+        assetPicker("Model", mesh->model, AssetKind::Model);
+        ImGui::InputText("Animation", &mesh->animation);
+        ImGui::Checkbox("Visible", &mesh->visible);
+        ImGui::SameLine();
+        ImGui::Checkbox("Playing", &mesh->playing);
+        ImGui::ColorEdit4("Tint", glm::value_ptr(mesh->tint));
         ImGui::PopID();
     }
     if (auto* mover = registry.try_get<Mover>(entity)) {
         ImGui::PushID("mover");
         ImGui::SeparatorText("Mover");
         ImGui::DragFloat("Speed", &mover->speed, 0.05f, 0, 1000);
-        ImGui::DragFloat("Altitude", &mover->altitude, 0.05f, 0, 1000);
         ImGui::Checkbox("Collide", &mover->collide);
         ImGui::PopID();
     }
@@ -114,7 +97,7 @@ void Editor::drawEntity(World& w, entt::entity entity) {
     }
     if (const auto* current = registry.try_get<Collider>(entity)) {
         ImGui::PushID("collider");
-        ImGui::SeparatorText("Collider");
+        ImGui::SeparatorText(current->solid ? "Collider" : "Collider (trigger)");
         auto collider = *current;
         bool changed = ImGui::DragFloat("Radius", &collider.radius, 0.01f, 0, 64);
         changed |= ImGui::DragFloat("Height", &collider.height, 0.05f, 0, 1000);
@@ -122,6 +105,14 @@ void Editor::drawEntity(World& w, entt::entity entity) {
         if (changed) {
             editCollider(w, entity, collider);
         }
+        ImGui::PopID();
+    }
+    if (auto* audio = registry.try_get<AudioEmitter>(entity)) {
+        ImGui::PushID("audio");
+        ImGui::SeparatorText("Audio");
+        assetPicker("Sound", audio->sound, AssetKind::Audio);
+        ImGui::DragFloat("Radius", &audio->radius, 0.1f, 0, 1000);
+        ImGui::DragFloat("Volume", &audio->volume, 0.01f, 0, 4);
         ImGui::PopID();
     }
     if (auto* props = registry.try_get<Props>(entity)) {

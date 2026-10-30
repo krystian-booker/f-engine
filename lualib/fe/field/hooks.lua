@@ -92,10 +92,26 @@ end
 
 --- Handle this tick's world events: contacts (`field.touch`), zones (their
 --- `field.zone` handlers) and footsteps (`settings.footstep_sound`).
+--- The last world events handled, for the editor (fe.devtools.recent_events).
+hooks.recent_events = {}
+local recent_limit = 64
+
+local function remember(world, e)
+  local list = hooks.recent_events
+  local function name_of(entity)
+    if entity == nil then return nil end
+    local ok, id = pcall(function() return entity.id end)
+    return ok and id or nil
+  end
+  list[#list + 1] = { time = world.time, type = e.type, a = name_of(e.a), b = name_of(e.b), name = e.name }
+  if #list > recent_limit then table.remove(list, 1) end
+end
+
 function hooks.handle_events(world)
   local f = field()
   local player = f.player
   for _, e in ipairs(world:events()) do
+    remember(world, e)
     if e.type == "contact_begin" and (e.a == player or e.b == player) then
       f.touch(e.a == player and e.b or e.a)
     elseif (e.type == "zone_enter" or e.type == "zone_exit") and e.a == player then

@@ -13,6 +13,10 @@
 #include <cstring>
 #include <string_view>
 #include <imgui.h>
+#if FENGINE_DEV
+#include <IconsFontAwesome6.h>
+#include <filesystem>
+#endif
 #include <imgui_impl_sdl3.h>
 #include <stdexcept>
 
@@ -227,6 +231,20 @@ Renderer::Renderer(Window& window, const std::filesystem::path& root, const Outp
     io.IniFilename = nullptr;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable | ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();
+#if FENGINE_DEV && defined(FENGINE_EDITOR_FONT)
+    // The editor's icons (Font Awesome 6 Free, solid) merged into the default
+    // font; without the file the icon names render as blank glyphs.
+    io.Fonts->AddFontDefault();
+    if (std::filesystem::is_regular_file(FENGINE_EDITOR_FONT)) {
+        ImFontConfig icons;
+        icons.MergeMode = true;
+        icons.PixelSnapH = true;
+        icons.GlyphMinAdvanceX = 13;
+        icons.GlyphOffset = ImVec2(0, 1);
+        static const ImWchar ranges[] = {ICON_MIN_FA, ICON_MAX_16_FA, 0};
+        io.Fonts->AddFontFromFileTTF(FENGINE_EDITOR_FONT, 13.0f, &icons, ranges);
+    }
+#endif
     if (!ImGui_ImplSDL3_InitForOther(window.native())) {
         ImGui::DestroyContext();
         bgfx::shutdown();

@@ -146,7 +146,10 @@ end
 function placements.prop(world, p)
   local props = p.props
   local entity = world:spawn({
-    id = p.id, position = p.position, layer = p.layer, yaw = props.yaw, scale = props.scale,
+    id = p.id, position = p.position, layer = p.layer,
+    -- The placement's own yaw and scale (the editor's gizmo); `props.yaw`
+    -- and `props.scale` are older maps' way of saying the same thing.
+    yaw = (p.yaw ~= 0 and p.yaw) or props.yaw, scale = (not placements.unit_scale(p.scale) and p.scale) or props.scale,
     mesh = { model = props.model, animation = props.animation, loop = props.loop ~= false, playing = props.animation ~= nil },
     collider = props.solid and { radius = props.radius or 0.45 } or nil, props = props,
   })
@@ -191,49 +194,67 @@ function placements.hidden_item(world, p)
 end
 
 --- The editor's props schema and description of every built-in type.
+--- An event page as a placement's `pages` list holds it (fe.event): the
+--- editor shows these fields; a page may carry more.
+placements.page_schema = { record = {
+  script = { type = { module = "events" }, doc = "Event module run when the page triggers" },
+  trigger = { type = { enum = { "action", "touch", "auto", "parallel" } }, default = "action",
+    doc = "action: Confirm facing it; touch: walk into it; auto: once when active; parallel: every tick" },
+  when = { type = "table", optional = true, doc = "Conditions: {flag = ..., not_flag = ..., var = {...}, check = ...}" },
+  sprite = { type = { asset = "sprite" }, optional = true, doc = "Look while this page is active" },
+  clip = { type = "string", optional = true },
+  solid = { type = "boolean", optional = true },
+  hidden = { type = "boolean", optional = true },
+} }
+
+--- The editor's props schema and description of every built-in type.
 placements.fields = {
   npc = { {
     name = { type = "string", optional = true, doc = "Speaker name" },
-    sprite = { type = "string", doc = "Sprite .anim.json" },
-    script = { type = "string", optional = true, doc = "Event module for a single action page" },
-    pages = { type = { list = "table" }, optional = true, doc = "Event pages" },
+    sprite = { type = { asset = "sprite" }, doc = "Sprite .anim.json" },
+    script = { type = { module = "events" }, optional = true, doc = "Event module for a single action page" },
+    trigger = { type = { enum = { "action", "touch", "auto", "parallel" } }, optional = true,
+      doc = "How `script` fires (default action)" },
+    pages = { type = { list = placements.page_schema }, optional = true, doc = "Event pages" },
     routine = { type = "string", default = "still", doc = "still, wander, patrol or a field.routine name" },
-    route = { type = { list = "table" }, optional = true, doc = "Patrol points [{x, z}]" },
+    route = { type = { list = { record = { x = "number", z = "number" } } }, optional = true, doc = "Patrol points" },
     speed = { type = "number", optional = true },
     solid = { type = "boolean", optional = true },
   }, "A person or creature with event pages." },
   chest = { {
-    item = { type = "string", optional = true }, count = { type = "integer", default = 1 },
-    money = { type = "integer", optional = true }, sprite = { type = "string", optional = true },
+    item = { type = { ref = "items" }, optional = true }, count = { type = "integer", default = 1 },
+    money = { type = "integer", optional = true }, sprite = { type = { asset = "sprite" }, optional = true },
     flag = { type = "string", optional = true, doc = "Defaults to chest:<map>:<id>" },
     empty_text = { type = "string", optional = true },
     locked = { type = "boolean", optional = true, doc = "Shut until its unlock flag is set or the key is held" },
-    key = { type = "string", optional = true, doc = "Item that unlocks it (the RPG kit's `item` condition)" },
+    key = { type = { ref = "items" }, optional = true, doc = "Item that unlocks it (the RPG kit's `item` condition)" },
     unlock_flag = { type = "string", optional = true, doc = "Defaults to unlocked:<map>:<id>" },
     locked_text = { type = "string", optional = true },
+    sound = { type = { asset = "audio" }, optional = true, doc = "Opening sound (default chest)" },
   }, "A treasure chest opened once." },
   door = { {
-    map = { type = "string" }, point = { type = "string" },
+    map = { type = { map_id = true } }, point = { type = { point = "map" }, doc = "Arrival point on that map" },
     trigger = { type = { enum = { "touch", "action" } }, default = "touch" },
-    transition = { type = "string", optional = true }, sprite = { type = "string", optional = true },
+    transition = { type = "string", optional = true }, sprite = { type = { asset = "sprite" }, optional = true },
   }, "Moves the player to another map." },
-  sign = { { text = { type = "string" }, sprite = { type = "string", optional = true } }, "Shows a message." },
+  sign = { { text = { type = "string" }, sprite = { type = { asset = "sprite" }, optional = true } }, "Shows a message." },
   light = { { color = "table", radius = "number", intensity = "number", flicker = { type = "number", optional = true } },
     "A dynamic light (static lights belong in the map's light list)." },
-  emitter = { { sprite = { type = "string", optional = true }, rate = "number" }, "Particles (fire, smoke, sparkles)." },
+  emitter = { { sprite = { type = { asset = "sprite" }, optional = true }, rate = "number" }, "Particles (fire, smoke, sparkles)." },
   prop = { {
-    model = { type = "string", doc = ".glb file" }, animation = { type = "string", optional = true },
-    yaw = { type = "number", optional = true, doc = "degrees" }, solid = { type = "boolean", optional = true },
-    pages = { type = { list = "table" }, optional = true, doc = "Event pages (show and hide the mesh)" },
+    model = { type = { asset = "model" }, doc = ".glb file" }, animation = { type = "string", optional = true },
+    solid = { type = "boolean", optional = true },
+    pages = { type = { list = placements.page_schema }, optional = true, doc = "Event pages (show and hide the mesh)" },
   }, "A 3D object (doors, windmills, crates)." },
-  sound = { { sound = "string", radius = { type = "number", default = 8 } }, "Looping positional sound." },
-  save_point = { { sprite = { type = "string", optional = true } }, "Opens the save screen." },
-  symbol = { { troop = "string", sprite = "string", sight = { type = "number", default = 4 } }, "A visible enemy." },
+  sound = { { sound = { type = { asset = "audio" } }, radius = { type = "number", default = 8 } }, "Looping positional sound." },
+  save_point = { { sprite = { type = { asset = "sprite" }, optional = true } }, "Opens the save screen." },
+  symbol = { { troop = { type = { ref = "troops" } }, sprite = { type = { asset = "sprite" } },
+    sight = { type = "number", default = 4 } }, "A visible enemy." },
   hidden_item = { {
-    item = { type = "string", optional = true }, count = { type = "integer", default = 1 },
+    item = { type = { ref = "items" }, optional = true }, count = { type = "integer", default = 1 },
     money = { type = "integer", optional = true },
     flag = { type = "string", optional = true, doc = "Defaults to hidden:<map>:<id>" },
-    sprite = { type = "string", optional = true, doc = "Usually none: the spot is invisible" },
+    sprite = { type = { asset = "sprite" }, optional = true, doc = "Usually none: the spot is invisible" },
   }, "An item found by searching a spot, once." },
 }
 
@@ -254,29 +275,82 @@ function placements.apply_pages(entity, placement, defaults)
   end
 end
 
+--- Whether a placement scale is the default (1 on every axis).
+---@param scale table?
+---@return boolean
+function placements.unit_scale(scale)
+  return scale == nil or (scale.x == 1 and scale.y == 1 and scale.z == 1)
+end
+
+--- Spawn one placement through its type's spawner and apply the
+--- placement's yaw and scale to the entity it made (so game-defined types
+--- honour the editor's gizmo without reading them). Returns the entity, or
+--- nil (no spawner, the spawner made nothing, or it raised: reported).
+---@param world World
+---@param p table a placement (world:placements() entry)
+---@return Entity?
+function placements.spawn_one(world, p)
+  local spawner = field().types[p.type]
+  if not spawner then
+    if p.type ~= "marker" then fe.log.warn("No field type '" .. p.type .. "' for placement " .. p.id) end
+    return nil
+  end
+  local ok, entity = pcall(spawner, world, p)
+  if not ok then
+    fe.log.error("Placement '" .. p.id .. "' (" .. p.type .. "): " .. tostring(entity))
+    return nil
+  end
+  if entity and entity:valid() then
+    -- Mesh entities turn and scale; sprites face the camera but still scale.
+    if p.yaw and p.yaw ~= 0 and entity:mesh() then entity.yaw = p.yaw end
+    if not placements.unit_scale(p.scale) then
+      if entity:mesh() then
+        entity.scale = p.scale
+      elseif entity:sprite() and p.scale.x ~= 0 then
+        entity:sprite({ scale = (entity:sprite().scale or 1) * p.scale.x })
+      end
+    end
+  end
+  return entity
+end
+
 --- Spawn a world's placements by type (`field.types`) into the field's
 --- entity list (`field.entities()`, cleared in place first), skipping ones
 --- that are following the party; a spawner that raises is reported and
 --- skipped.
 ---@param world World
 function placements.spawn(world)
-  local f = field()
-  local entities = f.entities()
+  local entities = field().entities()
   for key in pairs(entities) do entities[key] = nil end
   local following = require("fe.follower")
   for _, p in ipairs(world:placements()) do
-    local spawner = f.types[p.type]
-    if spawner and not following.has(p.id) then
-      local ok, entity = pcall(spawner, world, p)
-      if not ok then
-        fe.log.error("Placement '" .. p.id .. "' (" .. p.type .. "): " .. tostring(entity))
-      elseif entity then
-        entities[#entities + 1] = entity
-      end
-    elseif not spawner and p.type ~= "marker" then
-      fe.log.warn("No field type '" .. p.type .. "' for placement " .. p.id)
+    if not following.has(p.id) then
+      local entity = placements.spawn_one(world, p)
+      if entity then entities[#entities + 1] = entity end
     end
   end
+end
+
+--- Respawn one placement after the editor changed it: the entity named by
+--- the id is destroyed (and dropped from `field.entities()`), then the
+--- placement as the live map now has it is spawned again; with no such
+--- placement (deleted) the entity is only removed. Returns the new entity.
+---@param world World
+---@param id string
+---@return Entity?
+function placements.respawn(world, id)
+  local entities = field().entities()
+  local existing = world:find(id)
+  for i = #entities, 1, -1 do
+    local e = entities[i]
+    if not e:valid() or e == existing then table.remove(entities, i) end
+  end
+  if existing and existing:valid() then existing:destroy() end
+  local p = world:placement(id)
+  if not p then return nil end
+  local entity = placements.spawn_one(world, p)
+  if entity then entities[#entities + 1] = entity end
+  return entity
 end
 
 --- Register every built-in type with `field.define` (fe.field does this
@@ -291,7 +365,8 @@ function placements.install(field)
       placements.installed[name] = placements[name]
     end
   end
-  local functions = { spawn_placements = placements.spawn, apply_pages = placements.apply_pages }
+  local functions = { spawn_placements = placements.spawn, apply_pages = placements.apply_pages,
+                      respawn_placement = placements.respawn }
   for name, fn in pairs(functions) do
     if field[name] == nil or field[name] == placements.installed[name] then
       field[name] = fn

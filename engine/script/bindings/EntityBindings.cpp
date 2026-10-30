@@ -609,6 +609,16 @@ void bindEntity(Engine& engine) {
                 e.get<Transform>().yaw = glm::radians(lua::as<float>(degrees, "yaw"));
             },
             "number", "Rotation of mesh entities about the vertical axis in degrees.")
+        .property(
+            "scale", [](sol::this_state s, const EntityRef& e) { return lua::table(s, e.get<Transform>().scale); },
+            [](const EntityRef& e, sol::object scale) {
+                e.get<Transform>().scale =
+                    scale.get_type() == sol::type::number
+                        ? glm::vec3(lua::within(lua::as<float>(scale, "scale"), -lua::VectorBound, lua::VectorBound,
+                                                "scale"))
+                        : lua::vec3(scale);
+            },
+            "Vec3", "Scale of mesh entities (set a number for a uniform scale or a vector).")
         .method(
             "configure", [](EntityRef& e, sol::table spec) { configureEntity(e, spec); }, "fun(spec: table)",
             "Add or change components (same fields as world:spawn).")

@@ -71,6 +71,16 @@ function sound.has_music(id)
   return catalog.music[id] ~= nil
 end
 
+--- Whether any catalog group (music, sfx, voice) has an id, or the id is a
+--- file path (ids with a slash or a dot name files).
+---@param id string
+---@return boolean
+function sound.has(id)
+  if type(id) ~= "string" then return false end
+  if id:find("[/%.]") then return true end
+  return catalog.music[id] ~= nil or catalog.sfx[id] ~= nil or catalog.voice[id] ~= nil
+end
+
 --- Play music by id or path (crossfades). Options override the catalog.
 function sound.music(id, options)
   local e = entry("music", id)

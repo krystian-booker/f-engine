@@ -188,6 +188,7 @@ local function start(name, fn, parent, options, ...)
     quiet = options and options.quiet,
     helper = options and options.helper,
     now = 0,
+    started = now,
   }, Task)
   by_thread[t.thread] = t
   if parent then adopt(parent, t) end
@@ -675,6 +676,21 @@ end
 --- `task.clock` for the current task's own clock).
 function task.time()
   return now
+end
+
+--- Every running task, oldest first, for debugging tools: `{task, name,
+--- status, parent, world, age, children}` where `age` is game seconds since
+--- it started and `world` the world it is bound to (nil: its parent's).
+---@return {task: Task, name: string, status: string, parent: string?, world: string|false|nil, age: number, children: integer, helper: boolean?}[]
+function task.list()
+  local out = {}
+  for _, t in ipairs(tasks) do
+    if t.status == "running" then
+      out[#out + 1] = { task = t, name = t.name, status = t.status, parent = t.parent and t.parent.name or nil,
+        world = t.world, age = now - (t.started or now), children = #t.children, helper = t.helper }
+    end
+  end
+  return out
 end
 
 --- Number of running tasks (debugging).

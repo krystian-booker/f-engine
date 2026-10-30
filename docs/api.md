@@ -288,6 +288,7 @@ A world entity. Components are optional; a script decides what an entity is.
 | `:place` | `fun(position: Vec3, layer?: integer, keep_height?: boolean)` | Teleport; height snaps to the grid unless keep_height (then y is kept). |
 | `:face` | `fun(target: Entity/string/{x: number, z: number})` | Face an entity, a compass direction ('north'...) or a vector. |
 | `.yaw` | `number` | Rotation of mesh entities about the vertical axis in degrees. |
+| `.scale` | `Vec3` | Scale of mesh entities (set a number for a uniform scale or a vector). |
 | `:configure` | `fun(spec: table)` | Add or change components (same fields as world:spawn). |
 | `:move_to` | `fun(target: Vec3/nil, options?: {path?: boolean/(Cell/Vec3)[], speed?: number, layer?: integer, rules?: table})` | Walk to a position (pathfinding by default; `speed` 0 to 1000 sets the mover's); options come second, so a planned route is `move_to(nil, {path = cells})`. The target layer defaults to the current one if walkable there, else the walkable layer whose surface is nearest the target's y. `path` may instead be a list of cells ({x, z, layer}: walked through their centres) or points ({x, y, z}) to follow as given, then `target` if any; cells marked `jump` or `climb` (from world:path or world:reachable) are jumped to or climbed. `rules` are the planning rules of world:path (diagonal, blocked_tags, required_tags, tag_costs, blocked, no_stop, zoc, jump, ladders, cost) for the built-in planner; without them it plans 8-directional with the mover's limits and its own blocked_tags/required_tags. Emits 'arrived' once at the end, or 'blocked' (at once when no path exists or the search stops at its 200000-cell cap, without moving); jumps emit 'jump_start'/'landed' and ladder climbs 'climb_start'/'climb_end'. |
 | `:stop` | `fun()` | Stop moving. |
@@ -352,7 +353,8 @@ A loaded map: grid, entities, camera, lights and environment.
 | `.map_name` | `string` | Read-only. Display name. |
 | `:props` | `fun(): table` | Map properties (music or anything else a game stores). |
 | `:points` | `fun(): table<string, {position: Vec3, facing: {x: number, z: number}, layer: integer}>` | Named points (spawns). |
-| `:placements` | `fun(): {id: string, type: string, position: Vec3, facing: {x: number, z: number}, layer: integer, props: table}[]` | Authored placements; scripts decide what to spawn for each type. |
+| `:placements` | `fun(): {id: string, type: string, position: Vec3, facing: {x: number, z: number}, layer: integer, yaw: number, scale: Vec3, props: table}[]` | Authored placements; scripts decide what to spawn for each type. |
+| `:placement` | `fun(id: string): {id: string, type: string, position: Vec3, facing: {x: number, z: number}, layer: integer, yaw: number, scale: Vec3, props: table}/nil` | The authored placement with that id, or nil (the live map: editor edits included). |
 | `:zones` | `fun(): {id: string, type: string, min: {x: number, z: number}, max: {x: number, z: number}, layer: integer, props: table}[]` | Authored zones (camera regions, trigger areas, anything a game defines). |
 | `:zones_at` | `fun(position: Vec3, layer?: integer): {id: string, type: string, props: table}[]` | Zones containing a position. |
 | `:environment` | `fun(): table` | Lighting, fog, sky, weather and post-processing settings. |

@@ -53,6 +53,9 @@ public:
                 const StepRules* rules = nullptr);
     // Cells an A* search of moveTo may expand (default DefaultRouteVisits).
     void setRouteVisitLimit(int limit) { routeVisitLimit_ = limit; }
+    // Cells no planned route may pass through (the world keeps them current:
+    // cells static boxes stand on, see boxBlockedCells); null for none.
+    void setBlockedCells(const std::unordered_set<std::int64_t>* cells) { blockedCells_ = cells; }
     // Follows a route as given (no planning). Each waypoint is reached by
     // walking, a jump arc or a ladder climb; `arrived` is emitted once, at the
     // end. Jumps emit `jump_start` and `landed`, climbs `climb_start` and
@@ -189,5 +192,6 @@ private:
     std::vector<entt::entity> nearScratch_; // carryRiders() query results
     std::unordered_set<entt::entity> resolved_; // attachments placed this tick
     int routeVisitLimit_ = DefaultRouteVisits;
+    const std::unordered_set<std::int64_t>* blockedCells_ = nullptr;
 };
 } // namespace fe

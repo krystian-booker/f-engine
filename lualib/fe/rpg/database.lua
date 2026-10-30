@@ -64,9 +64,9 @@ schema.define("actor", {
   class = { type = { ref = "classes" } },
   level = { type = "integer", min = 1, default = 1 },
   stats = { type = { map = "number" }, doc = "Base stats at level 1" },
-  sprite = { type = "string", optional = true },
-  battle_sprite = { type = "string", optional = true },
-  portrait = { type = "string", optional = true },
+  sprite = { type = { asset = "sprite" }, optional = true },
+  battle_sprite = { type = { asset = "sprite" }, optional = true },
+  portrait = { type = { asset = "image" }, optional = true },
   skills = { type = { list = { ref = "skills" } }, default = {} },
   equipment = { type = { map = "string" }, default = {} },
   slots = { type = { list = "string" }, optional = true, doc = "Equipment slots (default: database.slots)" },
@@ -110,7 +110,7 @@ schema.define("item", {
   description = { type = "string", default = "" },
   kind = { type = { enum = { "consumable", "equipment", "key", "material" } }, default = "consumable" },
   price = { type = "integer", min = 0, default = 0 },
-  icon = { type = "string", optional = true },
+  icon = { type = { asset = "image" }, optional = true },
   stack = { type = "integer", min = 1, default = 99 },
   use = { type = { record = {
     target = { type = "string", default = "ally" },
@@ -133,7 +133,7 @@ schema.define("item", {
 schema.define("state", {
   id = "string",
   name = "string",
-  icon = { type = "string", optional = true },
+  icon = { type = { asset = "image" }, optional = true },
   turns = { type = "integer", min = 0, default = 3, doc = "0 lasts until removed" },
   modifiers = { type = { list = modifier }, default = {} },
   prevents_action = { type = "boolean", default = false },
@@ -147,11 +147,11 @@ schema.define("state", {
 schema.define("enemy", {
   id = "string",
   name = "string",
-  sprite = { type = "string", optional = true },
+  sprite = { type = { asset = "sprite" }, optional = true },
   level = { type = "integer", min = 1, default = 1 },
   stats = { type = { map = "number" } },
   skills = { type = { list = { ref = "skills" } }, default = {} },
-  ai = { type = "string", optional = true, doc = "AI function: module.function" },
+  ai = { type = { module = "ai" }, optional = true, doc = "AI function: module.function" },
   actions = { type = "any", optional = true,
     doc = "Actions per turn: an integer, or a function path module.function(battle, battler) -> integer" },
   rewards = { type = { record = {
@@ -185,10 +185,10 @@ schema.define("troop", {
     } }, optional = true, doc = "Formation slot or {x, z, layer?} cell" },
     facing = { type = direction, optional = true, doc = "Starting facing (tactics)" },
   } } } },
-  stage = { type = "string", optional = true },
-  music = { type = "string", optional = true },
+  stage = { type = { map_id = true }, optional = true, doc = "Battle stage map" },
+  music = { type = { asset = "audio" }, optional = true },
   escapable = { type = "boolean", default = true },
-  script = { type = "string", optional = true, doc = "Module with battle hooks for this fight" },
+  script = { type = { module = "" }, optional = true, doc = "Module with battle hooks for this fight" },
 }, { doc = "An enemy group." })
 
 schema.define("shop", {

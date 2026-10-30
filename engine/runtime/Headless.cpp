@@ -1,4 +1,5 @@
 #include "engine/runtime/Headless.h"
+#include "engine/editor/AssetCatalog.h"
 #include "engine/core/Log.h"
 #include "engine/core/Paths.h"
 #include "engine/runtime/Engine.h"
@@ -241,6 +242,16 @@ int checkGame(const std::filesystem::path& game, const std::filesystem::path& lu
                 std::cerr << "sprite " << relative << ": " << error.what() << "\n";
                 ++problems;
             }
+        }
+    }
+    {
+        // Every file, module, map and audio id that maps, data tables and
+        // sprites name must exist.
+        AssetCatalog catalog(game, lualib);
+        catalog.scan();
+        for (const auto& [target, user] : catalog.missing()) {
+            std::cerr << "missing " << target << " (named by " << user.file << " at " << user.where << ")\n";
+            ++problems;
         }
     }
     if (!engine->start()) {

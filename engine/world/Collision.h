@@ -1,5 +1,6 @@
 #pragma once
 #include "engine/world/Components.h"
+#include <unordered_set>
 #include "engine/world/Events.h"
 #include <functional>
 #include <optional>
@@ -111,4 +112,13 @@ private:
 // Mover or a Collider (anything that walks or can touch things). Zones
 // removed at run time count as left.
 void updateZones(entt::registry& registry, const std::vector<Zone>& zones, EventQueue& events);
+// The cells a body planning a route cannot pass through because a static box
+// stands on them: a box blocks a cell (on a layer) when it covers the disc of
+// `radius` around the cell's centre and its vertical span meets a body of
+// `bodyHeight` standing on the cell's surface, above the step it can climb.
+// Routes avoid these cells (StepRules::blocked); a box that covers only a
+// corner of a cell leaves the centre free, and bodies slide along it.
+[[nodiscard]] std::unordered_set<std::int64_t> boxBlockedCells(const Grid& grid, const std::vector<Box>& boxes,
+                                                               float radius = 0.3f, float stepUp = 0.5f,
+                                                               float bodyHeight = 1.5f);
 } // namespace fe

@@ -48,6 +48,7 @@ World::World(std::string name, MapData map, AssetCache& assets, std::uint64_t se
       collision_(registry_, staticBoxes(map_, assets_, geometryPath())),
       movement_(registry_, map_.grid, collision_, events_), particles_(registry_, assets_, random_) {
     rebuildStatic();
+    movement_.setBlockedCells(&boxBlockedCells());
     // The camera starts on the `start` point, else the first point, else the middle.
     const auto start = map_.points.find("start");
     camera_.target = start != map_.points.end() ? start->second.position
@@ -56,8 +57,18 @@ World::World(std::string name, MapData map, AssetCache& assets, std::uint64_t se
     camera_.snap();
 }
 
+const std::unordered_set<std::int64_t>& World::boxBlockedCells() const {
+    if (boxBlockedGrid_ != map_.grid.revision() || boxBlockedBoxes_ != boxesRevision_) {
+        boxBlockedGrid_ = map_.grid.revision();
+        boxBlockedBoxes_ = boxesRevision_;
+        boxBlocked_ = fe::boxBlockedCells(map_.grid, collision_.boxes());
+    }
+    return boxBlocked_;
+}
+
 void World::rebuildStatic() {
     collision_.setBoxes(staticBoxes(map_, assets_, geometryPath()));
+    ++boxesRevision_;
     collision_.setWrap(map_.grid.wraps() ? glm::vec2(static_cast<float>(map_.grid.width()),
                                                      static_cast<float>(map_.grid.depth()))
                                          : glm::vec2(0));
@@ -124,8 +135,9 @@ std::optional<WorldHit> World::raycast(glm::vec3 origin, glm::vec3 direction,
             if (!animation) {
                 continue;
             }
-            const auto quad = spriteQuad(sprite, *animation, interpolated(entity, options.alpha),
-                                         transform.facing, camera_, options.alpha, options.pixelsPerUnit);
+            const auto quad = spriteQuad(sprite, *animation, interpolated(entity, options.alpha), transform.facing,
+                                         options.camera ? *options.camera : camera_, options.alpha,
+                                         options.pixelsPerUnit);
             const auto t = rayQuad(origin, direction, quad);
             if (t && *t <= (best ? best->distance : options.maxDistance)) {
                 best = WorldHit{.kind = WorldHit::Kind::Entity,
@@ -140,7 +152,8 @@ std::optional<WorldHit> World::raycast(glm::vec3 origin, glm::vec3 direction,
     return best;
 }
 
-entt::entity World::pickSprite(glm::vec3 origin, glm::vec3 direction, double alpha, int pixelsPerUnit) const {
+entt::entity World::pickSprite(glm::vec3 origin, glm::vec3 direction, double alpha, int pixelsPerUnit,
+                               const Camera* camera) const {
     if (glm::length(direction) < 1e-6f) {
         return entt::null;
     }
@@ -156,7 +169,7 @@ entt::entity World::pickSprite(glm::vec3 origin, glm::vec3 direction, double alp
             continue;
         }
         const auto quad = spriteQuad(sprite, *animation, interpolated(entity, alpha), transform.facing,
-                                     camera_, alpha, pixelsPerUnit);
+                                     camera ? *camera : camera_, alpha, pixelsPerUnit);
         if (const auto t = rayQuad(origin, direction, quad); t && *t < nearest) {
             nearest = *t;
             picked = entity;
@@ -283,6 +296,7 @@ void World::playMesh(entt::entity entity, const std::string& animation, bool loo
 }
 
 void World::beginTick() {
+    movement_.setBlockedCells(&boxBlockedCells()); // recomputed when the grid or boxes changed
     if (map_.grid.wraps()) {
         // Scripts may steer the target past a seam; it stays canonical like
         // every position, and the frame already drawn interpolated across it.

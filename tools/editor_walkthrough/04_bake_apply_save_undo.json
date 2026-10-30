@@ -1,0 +1,102 @@
+[
+ {
+  "frame": 60,
+  "mouse": [
+   1070,
+   29
+  ]
+ },
+ {
+  "frame": 64,
+  "click": "left"
+ },
+ {
+  "frame": 72,
+  "mouse": [
+   1047,
+   303
+  ]
+ },
+ {
+  "frame": 76,
+  "click": "left"
+ },
+ {
+  "frame": 84,
+  "mouse": [
+   1047,
+   395
+  ]
+ },
+ {
+  "frame": 88,
+  "click": "left"
+ },
+ {
+  "frame": 98,
+  "mouse": [
+   422,
+   552
+  ]
+ },
+ {
+  "frame": 102,
+  "click": "left"
+ },
+ {
+  "frame": 116,
+  "mouse": [
+   625,
+   552
+  ]
+ },
+ {
+  "frame": 120,
+  "click": "left"
+ },
+ {
+  "frame": 130,
+  "mouse": [
+   1197,
+   395
+  ]
+ },
+ {
+  "frame": 134,
+  "click": "left"
+ },
+ {
+  "frame": 144,
+  "expect": "(function() local w=fe.world.get('field'); local n=0; for x=0,19 do for z=0,15 do local c=w:cell({x=x,z=z,layer=0}); if c and not c.walkable then n=n+1 end end end; return n end)() == 124"
+ },
+ {
+  "frame": 144,
+  "expect_status": "Baked walkability"
+ },
+ {
+  "frame": 145,
+  "capture": "out/21_bake_applied.png"
+ },
+ {
+  "frame": 150,
+  "key": "S",
+  "super": true
+ },
+ {
+  "frame": 158,
+  "expect_status": "Saved maps/town/map.json"
+ },
+ {
+  "frame": 160,
+  "key": "Z",
+  "super": true
+ },
+ {
+  "frame": 170,
+  "expect": "(function() local w=fe.world.get('field'); local n=0; for x=0,19 do for z=0,15 do local c=w:cell({x=x,z=z,layer=0}); if c and not c.walkable then n=n+1 end end end; return n end)() == 120"
+ },
+ {
+  "frame": 172,
+  "quit": true
+ }
+]

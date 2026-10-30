@@ -1,4 +1,6 @@
 #include "engine/world/Collision.h"
+#include "engine/world/Geometry.h"
+#include "engine/nav/Query.h"
 #include "engine/nav/Grid.h"
 #include <algorithm>
 #include <cmath>
@@ -26,50 +28,6 @@ std::int64_t bucketKey(glm::vec3 p) {
     return bucketKey(bucketCoord(p.x), bucketCoord(p.z));
 }
 
-// Entry distance of a ray into the slab lo..hi along one axis, narrowing [near, far].
-bool clipSlab(float start, float step, float lo, float hi, float& near, float& far) {
-    if (std::abs(step) < 1e-9f) {
-        return start >= lo && start <= hi;
-    }
-    float a = (lo - start) / step, b = (hi - start) / step;
-    if (a > b) {
-        std::swap(a, b);
-    }
-    near = std::max(near, a);
-    far = std::min(far, b);
-    return near <= far;
-}
-
-std::optional<float> rayBox(glm::vec3 o, glm::vec3 d, const Box& box, float maxDistance) {
-    float near = 0, far = maxDistance;
-    for (int axis = 0; axis < 3; ++axis) {
-        if (!clipSlab(o[axis], d[axis], box.min[axis], box.max[axis], near, far)) {
-            return std::nullopt;
-        }
-    }
-    return near;
-}
-
-std::optional<float> rayCylinder(glm::vec3 o, glm::vec3 d, glm::vec3 feet, float radius, float height,
-                                 float maxDistance) {
-    float near = 0, far = maxDistance;
-    if (!clipSlab(o.y, d.y, feet.y, feet.y + height, near, far)) {
-        return std::nullopt;
-    }
-    const glm::vec2 p(o.x - feet.x, o.z - feet.z), v(d.x, d.z);
-    const float a = glm::dot(v, v), b = glm::dot(p, v), c = glm::dot(p, p) - radius * radius;
-    if (a < 1e-12f) {
-        return c <= 0 ? std::optional<float>(near) : std::nullopt;
-    }
-    const float discriminant = b * b - a * c;
-    if (discriminant < 0) {
-        return std::nullopt;
-    }
-    const float root = std::sqrt(discriminant);
-    near = std::max(near, (-b - root) / a);
-    far = std::min(far, (-b + root) / a);
-    return near <= far ? std::optional<float>(near) : std::nullopt;
-}
 
 // Whether two upright bodies share any height (feet at `ay` and `by`).
 // Heights below a hair count as a hair, so flat colliders still touch.
@@ -459,5 +417,37 @@ void updateZones(entt::registry& registry, const std::vector<Zone>& zones, Event
             return !exists;
         });
     }
+}
+
+std::unordered_set<std::int64_t> boxBlockedCells(const Grid& grid, const std::vector<Box>& boxes, float radius,
+                                                 float stepUp, float bodyHeight) {
+    std::unordered_set<std::int64_t> blocked;
+    for (const auto& box : boxes) {
+        const auto lo = glm::min(box.min, box.max), hi = glm::max(box.min, box.max);
+        // Cells whose centre disc can reach the box horizontally.
+        const int x0 = std::max(0, floorCell(lo.x - radius - 0.5f)), x1 = std::min(grid.width() - 1, floorCell(hi.x + radius + 0.5f));
+        const int z0 = std::max(0, floorCell(lo.z - radius - 0.5f)), z1 = std::min(grid.depth() - 1, floorCell(hi.z + radius + 0.5f));
+        for (int layer = 0; layer < grid.layerCount(); ++layer) {
+            for (int z = z0; z <= z1; ++z) {
+                for (int x = x0; x <= x1; ++x) {
+                    const glm::vec2 centre(static_cast<float>(x) + 0.5f, static_cast<float>(z) + 0.5f);
+                    // Nearest point of the box's footprint to the centre.
+                    const glm::vec2 nearest(std::clamp(centre.x, lo.x, hi.x), std::clamp(centre.y, lo.z, hi.z));
+                    if (glm::length(nearest - centre) >= radius) {
+                        continue;
+                    }
+                    const auto& cell = grid.at(x, z, layer);
+                    if (!cell.walkable) {
+                        continue; // already unwalkable: nothing to add
+                    }
+                    const float surface = grid.heightAt(centre, layer);
+                    if (lo.y < surface + bodyHeight && hi.y > surface + stepUp) {
+                        blocked.insert(cellKey({x, z, layer}));
+                    }
+                }
+            }
+        }
+    }
+    return blocked;
 }
 } // namespace fe

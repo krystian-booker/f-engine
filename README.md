@@ -41,7 +41,7 @@ Debug builds include the F1 editor, hot reload and the error overlay; Release bu
 
 | Program | Use |
 | --- | --- |
-| `fengine <game> [--mute] [--replay file] [--record file] [--seed n] [--frames n] [--max-fps n] [--user-data dir]` | Play or develop a game. F1 opens the editor (dev builds). `--record` saves the session's input as a replay. Saves, settings and `log.txt` go to the per-user folder named by `game.json`'s `id`. |
+| `fengine <game> [--mute] [--replay file] [--record file] [--seed n] [--frames n] [--max-fps n] [--user-data dir]` | Play or develop a game. F1 opens the editor (dev builds; `--tools` starts with it open). `--record` saves the session's input as a replay. Saves, settings and `log.txt` go to the per-user folder named by `game.json`'s `id`. |
 | `fengine_headless --test <game> [--filter text]` | Run a game's Lua tests (`tests/*.lua`) without a window |
 | `fengine_headless --check <game>` | Validate data tables, maps, scripts and assets |
 | `fengine_headless <game> --replay <file>` | Run a replay without a window or GPU (screenshots skipped) |
@@ -68,6 +68,7 @@ return require("fe.starter").main({
 - [Architecture](docs/architecture.md): the engine/library/game layers and how a frame runs.
 - [Scripting](docs/scripting.md): tasks, scenes, the field, events, battles, effects and tactics in Lua.
 - [Authoring](docs/authoring.md): the game folder, maps, Blender, sprites, data tables and the editor.
+- [Editor guide](docs/editor.md): building a scene with the F1 editor, for artists and designers.
 - [Lua API reference](docs/api.md): every engine binding (generated; `lualib/types/fengine.d.lua` is the LuaLS stub).
 - [Build, test and ship](docs/verification.md): tests, replays, CI and packaging.
 - [Debugging](docs/debugging.md): the error overlay, console and tests, and the VS Code debugger evaluation.

@@ -71,6 +71,12 @@ struct WorldDraw {
     std::string target;
     std::optional<Camera> camera;     // replaces the world's camera for this draw
     std::optional<PostSettings> post; // replaces the world's post-processing for this draw
+    // Editor only: the window pixels {x, y, w, h} the world is drawn into
+    // (the Scene viewport); takes precedence over `rect`.
+    std::optional<glm::ivec4> pixelRect;
+    // The camera override is not interpolated between ticks (an editor camera
+    // moved while the game is paused shows where it is at once).
+    bool snapCamera = false;
 };
 
 struct FrameStats {
@@ -170,7 +176,7 @@ public:
     // cache is over its budget; returns how many were evicted.
     std::size_t releaseUnusedAssets();
     // Worlds scripts asked to draw this frame, in order.
-    void queueDraw(const std::shared_ptr<World>& world) { drawList_.push_back({world, {}, {}, {}, {}}); }
+    void queueDraw(const std::shared_ptr<World>& world) { drawList_.push_back(WorldDraw{.world = world}); }
     void queueDraw(WorldDraw draw) { drawList_.push_back(std::move(draw)); }
     [[nodiscard]] const std::vector<WorldDraw>& drawList() const { return drawList_; }
     // The world most recently drawn (editor).

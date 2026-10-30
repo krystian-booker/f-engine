@@ -30,7 +30,7 @@ schema.define("encounter_table", {
     troop = { type = { ref = "troops" } },
     weight = { type = "number", min = 0, default = 1 },
   } } } },
-  stage = { type = "string", optional = true, doc = "Battle stage map for this area" },
+  stage = { type = { map_id = true }, optional = true, doc = "Battle stage map for this area" },
 })
 
 schema.zone("encounter", {

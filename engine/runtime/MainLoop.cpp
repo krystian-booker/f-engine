@@ -243,6 +243,11 @@ public:
             input_.record(&*recorder_);
         }
 #if FENGINE_DEV
+        editor_.attach(frame_);
+        editor_.setWindow(window_.native());
+        if (!options.userData.empty()) {
+            editor_.setLayoutFile(options.userData / "editor.ini");
+        }
         if (options.tools) {
             editor_.toggle();
         }
@@ -358,6 +363,11 @@ private:
                 editor_.toggle();
                 continue;
             }
+            if (event.type == SDL_EVENT_DROP_FILE && event.drop.data) {
+                // Window coordinates (points); the editor scales them to pixels.
+                editor_.dropFile(std::filesystem::path(event.drop.data), {event.drop.x, event.drop.y});
+                continue;
+            }
             const bool captured = editor_.capturesInput();
 #else
             const bool captured = false;
@@ -423,7 +433,9 @@ private:
             }
         }
 #if FENGINE_DEV
-        if (editor_.paused()) {
+        // Replays never pause (like focus loss), so a replay can drive the
+        // game under an open editor.
+        if (editor_.paused() && !replay_) {
             return;
         }
 #endif
@@ -445,14 +457,22 @@ private:
             frame_.captureScene(file);
         }
         requests.sceneCaptures.clear();
+#if FENGINE_DEV
+        // The editor runs before the frame renders: the Scene viewport it
+        // lays out this frame is where the world is drawn this frame. ImGui's
+        // own draw data is submitted in endFrame, after everything else.
+        editor_.drawErrors();
+        editor_.draw({frameMilliseconds, engine_.stats().drawCalls, step_.alpha(), viewport_});
+        std::vector<WorldDraw> draws = engine_.drawList();
+        editor_.adjustDraws(draws);
+        frame_.render(draws, engine_.canvas(), engine_.screen(), viewport_, step_.alpha(), engine_.gameTime(),
+                      engine_.ticks());
+#else
         frame_.render(engine_.drawList(), engine_.canvas(), engine_.screen(), viewport_, step_.alpha(),
                       engine_.gameTime(), engine_.ticks());
+#endif
         engine_.stats().frame = frameMilliseconds;
         engine_.stats().drawCalls = frame_.drawCalls();
-#if FENGINE_DEV
-        editor_.drawErrors();
-        editor_.draw(frameMilliseconds, frame_.drawCalls());
-#endif
         for (const auto& file : requests.captures) {
             renderer_.capture(file);
         }

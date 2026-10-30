@@ -133,6 +133,15 @@ add_library(fengine_core STATIC
   engine/runtime/ReplayHarness.cpp
   engine/runtime/WorldLoader.cpp
   engine/editor/MapEdits.cpp
+  engine/editor/AssetCatalog.cpp
+  engine/editor/EditorCamera.cpp
+  engine/editor/Selection.cpp
+  engine/editor/ScenePicking.cpp
+  engine/editor/SceneHandles.cpp
+  engine/editor/SceneEdits.cpp
+  engine/editor/WalkBake.cpp
+  engine/editor/MapFiles.cpp
+  engine/assets/SpriteSheetBuilder.cpp
 )
 target_include_directories(fengine_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(fengine_core PUBLIC nlohmann_json::nlohmann_json glm::glm EnTT::EnTT fengine_sol2 fengine_asset_formats)

@@ -1,5 +1,6 @@
 #include "engine/assets/Image.h"
 #include "engine/assets/SpriteAnimation.h"
+#include "engine/assets/SpriteSheetBuilder.h"
 #include "engine/core/Json.h"
 #include "engine/core/Pack.h"
 #include <algorithm>
@@ -128,35 +129,9 @@ void atlas(const std::filesystem::path& manifest, const std::filesystem::path& o
 // Describes a grid-aligned sprite sheet as a .anim.json file.
 void sheet(const std::filesystem::path& manifest, const std::filesystem::path& output) {
     const auto source = fe::readJson(manifest);
-    const auto atlasName = source.at("atlas").get<std::string>();
-    const auto image = fe::Image::load(manifest.parent_path() / atlasName);
-    const int w = source.at("frame_width"), h = source.at("frame_height");
-    const int directions = source.value("directions", 4);
-    if (w < 1 || h < 1 || (directions != 1 && directions != 4 && directions != 8)) {
-        throw std::runtime_error("Invalid sheet frame size or direction count");
-    }
-    Json result{{"atlas", std::filesystem::path(atlasName).filename().string()},
-                {"pixels_per_unit", source.value("pixels_per_unit", 32)},
-                {"clips", Json::object()}};
-    for (const auto& [name, clip] : source.at("clips").items()) {
-        auto& out = result["clips"][name];
-        out["loop"] = clip.value("loop", true);
-        out["directions"] = Json::array();
-        for (int direction = 0; direction < directions; ++direction) {
-            Json frames = Json::array();
-            for (const auto& frame : clip.at("frames")) {
-                const int column = frame.get<int>() + clip.value("column_offset", 0);
-                const int row = direction + clip.value("row_offset", 0);
-                if (column < 0 || row < 0 || column >= image.width / w || row >= image.height / h) {
-                    throw std::runtime_error("Frame outside the sprite sheet in clip " + name);
-                }
-                frames.push_back(
-                    {{"rect", {column * w, row * h, w, h}}, {"duration", clip.value("duration", 0.15)}});
-            }
-            out["directions"].push_back(frames);
-        }
-    }
-    fe::SpriteAnimation::fromJson(result);
+    const auto spec = fe::sheetSpecFromJson(source);
+    const auto image = fe::Image::load(manifest.parent_path() / spec.atlas);
+    const auto result = fe::buildSheetAnimation(spec, image.width, image.height);
     if (output.has_parent_path()) {
         std::filesystem::create_directories(output.parent_path());
     }

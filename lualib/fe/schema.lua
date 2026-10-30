@@ -2,7 +2,13 @@
 ---
 --- Types: "string", "number", "integer", "boolean", "table", "any",
 --- {list = T}, {map = T}, {enum = {...}}, {ref = "table_name"},
---- {record = {field = spec, ...}} or the name of another schema.
+--- {record = {field = spec, ...}} or the name of another schema. Strings
+--- that name files or things get a picker in the editor and an existence
+--- check in fe.data.validate: {asset = "sprite"|"image"|"model"|"audio"|
+--- "lut"|"shader"} (a game-relative path; audio also takes a data/audio.json
+--- id), {module = "events"} (a dotted Lua module under that folder, "" for
+--- any), {map_id = true} (a map folder id) and {point = "map"} (a point of
+--- the map the sibling field names).
 --- A field spec is a type or {type = T, optional = true, default = v,
 --- min = n, max = n, doc = "..."}; table types may carry the field keys
 --- directly ({enum = {...}, optional = true}). Lists must have no holes.
@@ -178,6 +184,14 @@ check = function(f, value, path, errors, refs)
     elseif refs then
       refs[#refs + 1] = { table = t.ref, id = value, path = path }
     end
+  elseif t.asset or t.module or t.map_id or t.point then
+    if type(value) ~= "string" then
+      errors[#errors + 1] = path .. ": expected a string (" ..
+        (t.asset and (t.asset .. " path") or t.module and "module name" or t.map_id and "map id" or "point name") .. ")"
+    elseif refs then
+      refs[#refs + 1] = { asset = t.asset, module = t.module, map = t.map_id and true or nil,
+        point = t.point, id = value, path = path }
+    end
   elseif t.record then
     check_record(t.record, value, path, errors, refs, t.open)
   end
@@ -201,12 +215,20 @@ local function describe(spec)
     out.type = t
   elseif t.list then
     out.type, out.of = "list", describe(t.list)
+  elseif t.map_id then
+    out.type = "map_id"
   elseif t.map then
     out.type, out.of = "map", describe(t.map)
   elseif t.enum then
     out.type, out.options = "enum", t.enum
   elseif t.ref then
     out.type, out.table = "ref", t.ref
+  elseif t.asset then
+    out.type, out.asset = "asset", t.asset
+  elseif t.module then
+    out.type, out.folder = "module", t.module
+  elseif t.point then
+    out.type, out.map_field = "point", t.point
   elseif t.record then
     out.type, out.fields = "record", {}
     for key, child in pairs(t.record) do out.fields[key] = describe(child) end

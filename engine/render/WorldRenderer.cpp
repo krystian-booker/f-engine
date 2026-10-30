@@ -1,4 +1,5 @@
 #include "engine/render/WorldRenderer.h"
+#include "engine/world/Geometry.h"
 #include "engine/render/FrameMath.h"
 #include "engine/world/Animation.h"
 #include <algorithm>
@@ -23,17 +24,6 @@ const glm::mat4 Identity(1);
 
 std::uint64_t cull(const Material& material) {
     return material.doubleSided ? 0 : BGFX_STATE_CULL_CW;
-}
-
-void transformBounds(const glm::mat4& m, glm::vec3 min, glm::vec3 max, glm::vec3& outMin, glm::vec3& outMax) {
-    outMin = glm::vec3(std::numeric_limits<float>::max());
-    outMax = -outMin;
-    for (int i = 0; i < 8; ++i) {
-        const glm::vec3 corner((i & 1) ? max.x : min.x, (i & 2) ? max.y : min.y, (i & 4) ? max.z : min.z);
-        const auto p = glm::vec3(m * glm::vec4(corner, 1));
-        outMin = glm::min(outMin, p);
-        outMax = glm::max(outMax, p);
-    }
 }
 
 float skyMode(const std::string& mode) {

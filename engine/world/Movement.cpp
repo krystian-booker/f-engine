@@ -119,6 +119,11 @@ void MovementSystem::moveTo(entt::entity entity, glm::vec3 target, bool findPath
     }
     planning.footprint = body.footprint;
     planning.fly = body.fly;
+    if (blockedCells_ && !blockedCells_->empty()) {
+        // Static boxes: the route goes around them instead of into them.
+        planning.blocked.insert(blockedCells_->begin(), blockedCells_->end());
+        planning.blocked.erase(cellKey(from)); // a body already beside a box may leave
+    }
     const auto planned = findRoute(grid_, from, {to.x, to.z, goalLayer}, planning, routeVisitLimit_);
     const auto& path = planned.steps;
     // A search stopped by its visit cap may hold a detour (or nothing): the

@@ -408,3 +408,887 @@ TEST_CASE("editor forms read mistyped JSON as absent instead of throwing") {
     CHECK(jsonString(Json::array(), "id", "none") == "none");
     CHECK(jsonString(Json(), "id", "none") == "none");
 }
+
+// --- Asset catalog -----------------------------------------------------------
+
+#include "engine/editor/AssetCatalog.h"
+
+TEST_CASE("the asset catalog classifies files by name") {
+    CHECK(assetKindOf("sprites/elder.anim.json") == AssetKind::Sprite);
+    CHECK(assetKindOf("sprites/elder.png") == AssetKind::Image);
+    CHECK(assetKindOf("maps/town/geometry.glb") == AssetKind::Model);
+    CHECK(assetKindOf("maps/town/map.json") == AssetKind::Map);
+    CHECK(assetKindOf("audio/vale.wav") == AssetKind::Audio);
+    CHECK(assetKindOf("ui/amber.cube") == AssetKind::Lut);
+    CHECK(assetKindOf("events/elder.lua") == AssetKind::Script);
+    CHECK(assetKindOf("data/items.json") == AssetKind::Data);
+    CHECK(assetKindOf("game.json") == AssetKind::Text);
+    CHECK(assetKindOf("shaders/fs_glint.sc") == AssetKind::Shader);
+    CHECK(assetKindOf("README") == AssetKind::Other);
+}
+
+TEST_CASE("the asset catalog lists vale's assets, maps, audio ids and modules, and who uses what") {
+    AssetCatalog catalog(std::filesystem::path(FENGINE_SAMPLES) / "vale", FENGINE_LUALIB);
+    catalog.scan();
+    const auto before = catalog.revision();
+    CHECK(before == 1);
+    CHECK(catalog.find("sprites/elder.anim.json") != nullptr);
+    CHECK(catalog.find("sprites/elder.anim.json")->kind == AssetKind::Sprite);
+    // The atlas belongs to its sprite, so the browser can hide it from loose art.
+    REQUIRE(catalog.find("sprites/elder.png") != nullptr);
+    CHECK(catalog.find("sprites/elder.png")->sprite == "sprites/elder.anim.json");
+    const auto maps = catalog.maps();
+    CHECK(std::any_of(maps.begin(), maps.end(), [](const MapInfo& m) {
+        return m.id == "town" && m.name == "Amber Vale" && m.width == 20 && m.depth == 16;
+    }));
+    const auto audio = catalog.audioIds();
+    CHECK(std::any_of(audio.begin(), audio.end(), [](const AudioId& a) {
+        return a.group == "music" && a.id == "vale" && a.file == "audio/vale.wav";
+    }));
+    const auto modules = catalog.modules("events");
+    CHECK(std::find(modules.begin(), modules.end(), "events.elder") != modules.end());
+    CHECK(std::find(modules.begin(), modules.end(), "ai.slime") == modules.end());
+    // The elder's sprite is referenced by the town map's placement and (via
+    // the script module) its event file is known to be used by that map.
+    const auto& sprite = catalog.references("sprites/elder.anim.json");
+    CHECK(std::any_of(sprite.begin(), sprite.end(), [](const AssetReference& r) {
+        return r.file == "maps/town/map.json" && r.where == "placements/elder/props/sprite";
+    }));
+    const auto& script = catalog.references("events/elder.lua");
+    CHECK(std::any_of(script.begin(), script.end(),
+                      [](const AssetReference& r) { return r.file == "maps/town/map.json"; }));
+    // A door names its target map; the map's music names an audio id.
+    CHECK_FALSE(catalog.references("maps/grotto/map.json").empty());
+    CHECK_FALSE(catalog.references("audio:vale").empty());
+    // The sample ships every asset it names.
+    const auto missing = catalog.missing();
+    for (const auto& [target, user] : missing) {
+        MESSAGE(target << " referenced by " << user.file << " at " << user.where);
+    }
+    CHECK(missing.empty());
+    // Scanning again without changes keeps the revision.
+    catalog.scan();
+    CHECK(catalog.revision() == before);
+    const auto folders = catalog.folders("");
+    CHECK(std::find(folders.begin(), folders.end(), "sprites") != folders.end());
+}
+
+TEST_CASE("the asset catalog reports references to files that do not exist") {
+    AssetCatalog catalog(std::filesystem::path(FENGINE_TEST_GAME), FENGINE_LUALIB);
+    catalog.scan();
+    // Nothing in the library's test game is known to be missing; the check
+    // is that the walk itself does not throw on its data and maps.
+    CHECK_NOTHROW(static_cast<void>(catalog.missing()));
+}
+
+// --- Placement yaw and scale -------------------------------------------------
+
+TEST_CASE("placement yaw and scale round-trip through JSON and stay absent when at their defaults") {
+    auto map = arena();
+    const auto before = map.toJson();
+    for (const auto& p : before.at("placements")) {
+        CHECK_FALSE(p.contains("yaw"));
+        CHECK_FALSE(p.contains("scale"));
+    }
+    // A file without them re-serialises identically (the undo history compares JSON).
+    CHECK(MapData::fromJson(before).toJson() == before);
+    Placement turned;
+    turned.id = "windmill";
+    turned.type = "marker";
+    turned.position = {1.5f, 0, 1.5f};
+    turned.yaw = 90;
+    turned.scale = glm::vec3(2);
+    Placement stretched = turned;
+    stretched.id = "banner";
+    stretched.scale = {1, 3, 1};
+    map.placements.push_back(turned);
+    map.placements.push_back(stretched);
+    const auto json = map.toJson();
+    const auto& last = json.at("placements");
+    const auto& a = last[last.size() - 2];
+    const auto& b = last[last.size() - 1];
+    CHECK(a.at("yaw") == 90);
+    CHECK(a.at("scale") == 2); // uniform scales are one number
+    CHECK(b.at("scale").is_array());
+    const auto back = MapData::fromJson(json);
+    CHECK(back.placements[back.placements.size() - 2].yaw == doctest::Approx(90));
+    CHECK(back.placements.back().scale == glm::vec3(1, 3, 1));
+    auto bad = json;
+    bad["placements"].back()["scale"] = "big";
+    CHECK_THROWS(MapData::fromJson(bad));
+}
+
+// --- Scene viewport: camera, selection, picking, edits ------------------------
+
+#include "engine/editor/EditorCamera.h"
+#include "engine/editor/SceneEdits.h"
+#include "engine/editor/SceneHandles.h"
+#include "engine/editor/ScenePicking.h"
+#include "engine/editor/Selection.h"
+
+namespace {
+// A view 800x600 pixels looking down at the arena from above its middle.
+struct Scene {
+    Worlds worlds;
+    World& world = worlds.field;
+    Camera camera;
+    ViewRect view;
+    Scene() {
+        camera.target = {6, 0, 5};
+        camera.pitch = 60;
+        camera.yaw = 0;
+        camera.distance = 14;
+        camera.snap();
+        view.pixels = {100, 50, 800, 600};
+    }
+    glm::vec2 pixelOf(glm::vec3 point) const { return *projectToView(camera, view, point, 1); }
+    PickOptions options() const {
+        PickOptions o;
+        o.camera = &camera;
+        return o;
+    }
+};
+} // namespace
+
+TEST_CASE("the editor camera adopts the game view, clamps its orbit and frames a box") {
+    Camera game;
+    game.target = {3, 0, 4};
+    game.yaw = 30;
+    game.pitch = 95; // past the limit
+    game.distance = 0.1f;
+    game.snap();
+    EditorCamera editor;
+    editor.adopt(game);
+    CHECK(editor.camera.target == glm::vec3(3, 0, 4));
+    CHECK(editor.camera.yaw == doctest::Approx(30));
+    CHECK(editor.camera.pitch == doctest::Approx(EditorCamera::MaxPitch));
+    CHECK(editor.camera.distance == doctest::Approx(EditorCamera::MinDistance));
+    editor.orbit({40, -2000});
+    CHECK(editor.camera.yaw == doctest::Approx(40));
+    CHECK(editor.camera.pitch == doctest::Approx(EditorCamera::MaxPitch));
+    editor.zoom(-1000);
+    CHECK(editor.camera.distance == doctest::Approx(EditorCamera::MaxDistance));
+    editor.frame({0, 0, 0}, {12, 2, 10});
+    CHECK(editor.camera.target == glm::vec3(6, 1, 5));
+    // Every corner of the box projects inside the view.
+    for (const auto corner : {glm::vec3(0, 0, 0), glm::vec3(12, 0, 0), glm::vec3(0, 2, 10), glm::vec3(12, 2, 10)}) {
+        const auto ndc = editor.camera.project(corner, 4.0f / 3.0f);
+        CHECK(std::abs(ndc.x) <= 1);
+        CHECK(std::abs(ndc.y) <= 1);
+        CHECK(ndc.z <= 1);
+    }
+    // Pan by half the view moves the target by half the view height.
+    const auto before = editor.camera.target;
+    editor.pan({0, 300}, 600);
+    CHECK(glm::length(editor.camera.target - before) == doctest::Approx(editor.camera.viewHeight() * 0.5f).epsilon(0.01));
+    editor.setOrthographic(true);
+    CHECK(editor.camera.orthographic);
+    CHECK(editor.camera.orthoHeight > 0);
+}
+
+TEST_CASE("selections name map objects by id and entities by serial, and know what a gizmo may do") {
+    Scene s;
+    auto& map = s.world.authored();
+    Placement npc;
+    npc.id = "elder";
+    npc.type = "marker";
+    npc.position = {4.5f, 0, 4.5f};
+    map.placements.push_back(npc);
+    s.world.map().placements.push_back(npc);
+    Zone zone{"plaza", "camera", {2, 2}, {6, 7}, -1, Json::object()};
+    map.zones.push_back(zone);
+    map.colliders.push_back({{1, 0, 1}, {2, 1, 3}});
+    // The placement's entity: named like it (what fe.field does).
+    const auto entity = s.world.spawn("elder", npc.position);
+    s.world.registry().emplace<Sprite>(entity, Sprite{.animation = "@fe/assets/ui/spark.anim.json"});
+    CHECK(placementEntity(s.world, "elder") == entity);
+    CHECK(entityPlacement(s.world, entity) == "elder");
+    const auto loose = s.world.spawn("stray", {1.5f, 0, 1.5f});
+    CHECK(entityPlacement(s.world, loose).empty());
+
+    const auto selected = Selection::placement("elder");
+    CHECK(selectionValid(s.world, selected));
+    CHECK(selectionLabel(s.world, selected) == "elder (marker)");
+    auto t = selectionTransform(s.world, selected);
+    REQUIRE(t);
+    CHECK(t->snapsToGrid);
+    CHECK(t->canRotate);
+    CHECK(t->facingOnly); // a sprite turns by facing
+    CHECK(t->uniformScale);
+    // Zones and colliders expose centre and size.
+    auto zt = selectionTransform(s.world, Selection::zone("plaza"));
+    REQUIRE(zt);
+    CHECK(zt->position.x == doctest::Approx(4));
+    CHECK(zt->position.z == doctest::Approx(4.5f));
+    CHECK(zt->scale.x == doctest::Approx(4));
+    CHECK(zt->scale.z == doctest::Approx(5));
+    CHECK(zt->canScale);
+    zt->position.x = 5;
+    zt->scale.x = 2;
+    CHECK(applySelectionTransform(map, Selection::zone("plaza"), *zt));
+    CHECK(findZone(map, "plaza")->min.x == doctest::Approx(4));
+    CHECK(findZone(map, "plaza")->max.x == doctest::Approx(6));
+    auto ct = selectionTransform(s.world, Selection::collider(0));
+    REQUIRE(ct);
+    CHECK(ct->position == glm::vec3(1.5f, 0.5f, 2));
+    ct->scale = {2, 1, 2};
+    CHECK(applySelectionTransform(map, Selection::collider(0), *ct));
+    CHECK(map.colliders[0].min == glm::vec3(0.5f, 0, 1));
+    CHECK(map.colliders[0].max == glm::vec3(2.5f, 1, 3));
+    // An entity selection dies with its serial, a map selection with its object.
+    auto live = Selection::ofEntity(s.world, loose);
+    CHECK(selectionValid(s.world, live));
+    s.world.destroy(loose);
+    CHECK_FALSE(selectionValid(s.world, live));
+    map.placements.clear();
+    CHECK_FALSE(selectionValid(s.world, selected));
+    CHECK_FALSE(selectionValid(s.world, Selection::collider(1)));
+    CHECK(selectionValid(s.world, Selection::collider(0)));
+}
+
+TEST_CASE("picking finds handles by screen distance, entities and placements by ray, zones by ground hit") {
+    Scene s;
+    auto& map = s.world.authored();
+    map.points["mark"] = MapPoint{{9.5f, 0, 2.5f}, {0, 1}, 0};
+    Placement ghost; // no entity: picked by its handle
+    ghost.id = "ghost";
+    ghost.type = "marker";
+    ghost.position = {2.5f, 0, 8.5f};
+    map.placements.push_back(ghost);
+    Placement npc;
+    npc.id = "elder";
+    npc.type = "marker";
+    npc.position = {6.5f, 0, 6.5f};
+    map.placements.push_back(npc);
+    s.world.map().placements = map.placements;
+    const auto entity = s.world.spawn("elder", npc.position);
+    s.world.registry().emplace<Collider>(entity, Collider{0.3f, 1.2f, true});
+    map.zones.push_back(Zone{"plaza", "camera", {3, 3}, {5, 5}, -1, Json::object()});
+    map.colliders.push_back({{8, 0, 7}, {9, 1, 8}});
+    s.world.map().colliders = map.colliders; // the live map feeds the collision boxes
+    s.world.rebuildStatic();
+
+    CHECK(pickScene(s.world, s.view, s.pixelOf({9.5f, 0, 2.5f}), s.options()) == Selection::point("mark"));
+    CHECK(pickScene(s.world, s.view, s.pixelOf({2.5f, 0, 8.5f}) + glm::vec2(4, -4), s.options()) ==
+          Selection::placement("ghost"));
+    // The elder's body (its collider) is under the ray: the placement, not a bare entity.
+    CHECK(pickScene(s.world, s.view, s.pixelOf({6.5f, 0.6f, 6.5f}), s.options()) == Selection::placement("elder"));
+    CHECK(pickScene(s.world, s.view, s.pixelOf({4, 0, 4}), s.options()) == Selection::zone("plaza"));
+    CHECK(pickScene(s.world, s.view, s.pixelOf({8.5f, 0.5f, 7.5f}), s.options()) == Selection::collider(0));
+    // Open ground selects nothing; outside the view picks nothing.
+    CHECK_FALSE(pickScene(s.world, s.view, s.pixelOf({8, 0, 9}), s.options()));
+    CHECK_FALSE(pickScene(s.world, s.view, {10, 10}, s.options()));
+    // Kind toggles hide things from the pick.
+    auto noZones = s.options();
+    noZones.zones = false;
+    CHECK_FALSE(pickScene(s.world, s.view, s.pixelOf({4, 0, 4}), noZones));
+    // A mesh without a collider is picked through its model bounds.
+    const auto prop = s.world.spawn("prop", {1.5f, 0, 3.5f});
+    s.world.registry().emplace<MeshInstance>(prop, MeshInstance{.model = s.world.geometryPath()});
+    const auto model = s.world.assets().tryModel(s.world.geometryPath());
+    REQUIRE(model);
+    const auto centre = glm::vec3(1.5f, 0, 3.5f) + (model->min + model->max) * 0.5f;
+    const auto picked = pickScene(s.world, s.view, s.pixelOf(centre), s.options());
+    REQUIRE(picked);
+    CHECK((picked->kind == Selection::Kind::Entity && picked->entity == prop));
+    // The ground under a pixel, and the ray through it, agree with the camera.
+    const auto hit = pickGround(s.world, s.camera, s.view, s.pixelOf({7.5f, 0, 3.5f}), 1);
+    REQUIRE(hit);
+    CHECK(hit->cell.x == 7);
+    CHECK(hit->cell.z == 3);
+}
+
+TEST_CASE("scene edits snap to cells, make placements for dropped assets and move live entities at once") {
+    Scene s;
+    const auto& grid = s.world.authored().grid;
+    CHECK(snapToCell(grid, {3.7f, 0, 2.1f}, 0) == GridPos{3, 2, 0});
+    CHECK(snapToCell(grid, {-5, 0, 99}, 7).x == 0);
+    CHECK(snapToCell(grid, {-5, 0, 99}, 7).z == grid.depth() - 1);
+    CHECK(snapToCell(grid, {-5, 0, 99}, 7).layer == grid.layerCount() - 1);
+    CHECK(cellCentre(grid, {3, 2, 0}) == glm::vec3(3.5f, grid.heightAt({3.5f, 2.5f}, 0), 2.5f));
+    CHECK(snapToStep({1.3f, 0.6f, -0.2f}, 0.5f) == glm::vec3(1.5f, 0.5f, 0));
+    std::vector<Placement> existing;
+    CHECK(uniquePlacementId("chest", existing) == "chest");
+    existing.push_back(Placement{.id = "chest"});
+    CHECK(uniquePlacementId("chest", existing) == "chest2");
+    const auto sprite = placementForAsset(AssetKind::Sprite, "sprites/chest.anim.json", {4, 5, 0}, grid, "npc", existing);
+    REQUIRE(sprite);
+    CHECK(sprite->id == "chest2");
+    CHECK(sprite->type == "npc");
+    CHECK(sprite->props.at("sprite") == "sprites/chest.anim.json");
+    CHECK(sprite->position == cellCentre(grid, {4, 5, 0}));
+    const auto model = placementForAsset(AssetKind::Model, "fx/Crate-01.glb", {1, 1, 0}, grid, "npc", existing);
+    REQUIRE(model);
+    CHECK(model->type == "prop");
+    CHECK(model->id == "crate_01");
+    CHECK(model->props.at("model") == "fx/Crate-01.glb");
+    CHECK_FALSE(placementForAsset(AssetKind::Audio, "audio/x.wav", {1, 1, 0}, grid, "npc", existing));
+    const auto copy = duplicatePlacement(*sprite, existing);
+    CHECK(copy.id == "chest2"); // "chest2" is free in `existing` (only "chest" is taken)
+    CHECK(copy.position.x == doctest::Approx(sprite->position.x + 1));
+
+    // Moving a placement moves its entity, without interpolation from the old spot.
+    auto& map = s.world.authored();
+    Placement p;
+    p.id = "elder";
+    p.type = "marker";
+    p.position = {2.5f, 0, 2.5f};
+    map.placements.push_back(p);
+    const auto entity = s.world.spawn("elder", p.position);
+    s.world.registry().emplace<MeshInstance>(entity, MeshInstance{.model = s.world.geometryPath()});
+    s.world.beginTick();
+    p.position = {7.5f, 0, 8.5f};
+    p.yaw = 90;
+    p.scale = glm::vec3(2);
+    map.placements.back() = p;
+    CHECK(syncPlacementEntity(s.world, p));
+    const auto& t = s.world.registry().get<Transform>(entity);
+    CHECK(t.position == p.position);
+    CHECK(s.world.interpolated(entity, 0.5) == p.position);
+    CHECK(t.yaw == doctest::Approx(glm::radians(90.0f)));
+    CHECK(t.scale == glm::vec3(2));
+    CHECK_FALSE(syncPlacementEntity(s.world, Placement{.id = "nobody"}));
+
+    // Which placements an undo touched.
+    MapData before = map, after = map;
+    after.placements.back().props["sprite"] = "x";
+    Placement added;
+    added.id = "new";
+    added.type = "marker";
+    after.placements.push_back(added);
+    before.placements.push_back(Placement{.id = "gone", .type = "marker"});
+    const auto changed = changedPlacementIds(before, after);
+    CHECK(changed.size() == 3);
+    CHECK(std::find(changed.begin(), changed.end(), "elder") != changed.end());
+    CHECK(std::find(changed.begin(), changed.end(), "new") != changed.end());
+    CHECK(std::find(changed.begin(), changed.end(), "gone") != changed.end());
+    CHECK(changedPlacementIds(map, map).empty());
+}
+
+TEST_CASE("handles mark zones, points, lights, colliders, triggers and unspawned placements") {
+    Scene s;
+    auto& map = s.world.authored();
+    map.zones.push_back(Zone{"plaza", "camera", {3, 3}, {5, 5}, -1, Json::object()});
+    map.points["mark"] = MapPoint{{9.5f, 0, 2.5f}, {0, 1}, 0};
+    LightSettings spot;
+    spot.type = LightType::Spot;
+    spot.position = {6, 3, 6};
+    map.lights.push_back(spot);
+    map.colliders.push_back({{10, 0, 7}, {11, 1, 8}});
+    Placement ghost{.id = "ghost", .type = "marker", .position = {2.5f, 0, 8.5f}};
+    map.placements.push_back(ghost);
+    const auto trigger = s.world.spawn("area", {1.5f, 0, 1.5f});
+    s.world.registry().emplace<Collider>(trigger, Collider{0.5f, 1, false});
+    HandleBatch batch;
+    HandleOptions options;
+    const auto spotIndex = static_cast<int>(map.lights.size()) - 1;
+    buildHandles(s.world, options, Selection::light(spotIndex), {}, 1, batch);
+    const auto icons = [&](HandleBatch::Icon::Shape shape) {
+        return std::count_if(batch.icons.begin(), batch.icons.end(), [&](const auto& i) { return i.shape == shape; });
+    };
+    CHECK(icons(HandleBatch::Icon::Shape::Flag) == static_cast<long>(map.points.size())); // the points
+    CHECK(icons(HandleBatch::Icon::Shape::Square) == 1);                                   // the zone
+    CHECK(icons(HandleBatch::Icon::Shape::Sun) == static_cast<long>(map.lights.size()));   // the lights
+    CHECK(icons(HandleBatch::Icon::Shape::Diamond) >= 1);                                  // the ghost placement
+    // Zone edges sit on the ground; the collider is a 12-edge box; the
+    // selected spot light draws its cone; the trigger a cylinder.
+    const auto onGround = std::count_if(batch.lines.begin(), batch.lines.end(), [&](const auto& l) {
+        return l.color == handleColors::ZoneColor && std::abs(l.a.y - 0.05f) < 0.01f;
+    });
+    CHECK(onGround >= 8);
+    CHECK(std::count_if(batch.lines.begin(), batch.lines.end(),
+                        [&](const auto& l) { return l.color == handleColors::ColliderColor; }) == 12);
+    CHECK(std::count_if(batch.lines.begin(), batch.lines.end(), [&](const auto& l) {
+              return glm::vec3(l.color) == glm::vec3(handleColors::Selected);
+          }) > 8);
+    CHECK(std::count_if(batch.lines.begin(), batch.lines.end(),
+                        [&](const auto& l) { return l.color == handleColors::TriggerColor; }) > 0);
+    // Labels name the point and the ghost.
+    CHECK(std::any_of(batch.labels.begin(), batch.labels.end(), [](const auto& l) { return l.text == "mark"; }));
+    CHECK(std::any_of(batch.labels.begin(), batch.labels.end(), [](const auto& l) { return l.text == "ghost (marker)"; }));
+    // An unselected light draws no reach; toggles drop whole kinds.
+    HandleBatch quiet;
+    buildHandles(s.world, options, {}, {}, 1, quiet);
+    CHECK(std::none_of(quiet.lines.begin(), quiet.lines.end(), [&](const auto& l) {
+        return l.color.r == handleColors::LightColor.r && l.color.g == handleColors::LightColor.g;
+    }));
+    options.zones = options.points = options.lights = options.colliders = options.triggers = options.placements = false;
+    HandleBatch none;
+    buildHandles(s.world, options, {}, {}, 1, none);
+    CHECK(none.lines.empty());
+    CHECK(none.icons.empty());
+}
+
+// --- Walkability: box blocking, block brush, fills ---------------------------
+
+TEST_CASE("planned routes go around static collider boxes instead of into them") {
+    Worlds w;
+    auto& world = w.field;
+    // The arena's open hall is rows 6 to 8 between x 1 and 10. A wall of boxes
+    // across rows 6 and 7 at x 4..5 leaves row 8 as the only way east.
+    auto& map = world.map();
+    map.colliders.push_back({{4, 0, 6}, {5, 1, 8}});
+    world.rebuildStatic();
+    const auto& blocked = world.boxBlockedCells();
+    CHECK(blocked.contains(cellKey({4, 6, 0})));
+    CHECK(blocked.contains(cellKey({4, 7, 0})));
+    CHECK_FALSE(blocked.contains(cellKey({4, 8, 0}))); // the gap
+    CHECK_FALSE(blocked.contains(cellKey({3, 6, 0})));
+    // A box too low to matter (a kerb) and one above head height block nothing.
+    map.colliders.push_back({{7, 0, 6}, {8, 0.3f, 9}});
+    map.colliders.push_back({{9, 2, 6}, {10, 3, 9}});
+    world.rebuildStatic();
+    CHECK_FALSE(world.boxBlockedCells().contains(cellKey({7, 7, 0})));
+    CHECK_FALSE(world.boxBlockedCells().contains(cellKey({9, 7, 0})));
+    // A box covering only a corner leaves the centre free.
+    map.colliders.push_back({{1, 0, 6}, {1.2f, 1, 6.2f}});
+    world.rebuildStatic();
+    CHECK_FALSE(world.boxBlockedCells().contains(cellKey({1, 6, 0})));
+
+    const auto walker = world.spawn("", {2.5f, 0, 6.5f});
+    world.registry().emplace<Mover>(walker);
+    world.registry().emplace<Collider>(walker, Collider{0.2f, 1.6f, true});
+    world.beginTick();
+    world.moveTo(walker, {6.5f, 0, 6.5f}, true);
+    bool arrived = false, refused = false;
+    for (int i = 0; i < 3000 && !arrived && !refused; ++i) {
+        world.beginTick();
+        world.tick(1.0 / 60);
+        for (const auto& event : world.takeEvents()) {
+            arrived |= event.kind == WorldEvent::Kind::Arrived;
+            refused |= event.kind == WorldEvent::Kind::Blocked;
+        }
+    }
+    CHECK(arrived);
+    CHECK_FALSE(refused);
+    // Into the wall: no route.
+    world.moveTo(walker, {4.5f, 0, 6.5f}, true);
+    refused = false;
+    for (int i = 0; i < 10 && !refused; ++i) {
+        world.beginTick();
+        world.tick(1.0 / 60);
+        for (const auto& event : world.takeEvents()) {
+            refused |= event.kind == WorldEvent::Kind::Blocked;
+        }
+    }
+    CHECK(refused);
+}
+
+TEST_CASE("the block brush paints quarter cells into merged boxes and erases holes") {
+    auto map = arena();
+    CHECK(map.colliders.empty());
+    CHECK(paintBlock(map, {2.1f, 3.1f}, 0, 1, true));
+    REQUIRE(map.colliders.size() == 1);
+    CHECK(map.colliders[0].min.x == doctest::Approx(2));
+    CHECK(map.colliders[0].max.x == doctest::Approx(2.25f));
+    CHECK(map.colliders[0].max.y == doctest::Approx(1));
+    CHECK_FALSE(paintBlock(map, {2.1f, 3.1f}, 0, 1, true)); // already covered
+    // A row of four squares becomes one box a cell long.
+    for (float x = 2.25f; x < 3; x += 0.25f) {
+        CHECK(paintBlock(map, {x + 0.1f, 3.1f}, 0, 1, true));
+    }
+    REQUIRE(map.colliders.size() == 1);
+    CHECK(map.colliders[0].min.x == doctest::Approx(2));
+    CHECK(map.colliders[0].max.x == doctest::Approx(3));
+    // A second row merges into a 1 x 0.5 slab.
+    for (float x = 2; x < 3; x += 0.25f) {
+        paintBlock(map, {x + 0.1f, 3.35f}, 0, 1, true);
+    }
+    REQUIRE(map.colliders.size() == 1);
+    CHECK(map.colliders[0].max.z == doctest::Approx(3.5f));
+    // Erasing the middle square of the first row cuts the slab into pieces
+    // that still cover everything else.
+    CHECK(paintBlock(map, {2.6f, 3.1f}, 0, 1, false));
+    float area = 0;
+    for (const auto& b : map.colliders) {
+        area += (b.max.x - b.min.x) * (b.max.z - b.min.z);
+        const bool coversHole = b.min.x < 2.74f && b.max.x > 2.51f && b.min.z < 3.24f && b.max.z > 3.01f;
+        CHECK_FALSE(coversHole);
+    }
+    CHECK(area == doctest::Approx(0.5f - 0.0625f));
+    CHECK(mergeBoxes({{{0, 0, 0}, {1, 1, 1}}, {{1, 0, 0}, {2, 1, 1}}, {{0, 0, 1}, {2, 1, 2}}}).size() == 1);
+    CHECK(mergeBoxes({{{0, 0, 0}, {1, 1, 1}}, {{1, 0, 0}, {2, 2, 1}}}).size() == 2); // different heights
+    // The map still loads with the painted boxes.
+    CHECK_NOTHROW(MapData::fromJson(map.toJson()));
+}
+
+TEST_CASE("a model's box follows the placement's position, yaw and scale") {
+    Model model;
+    model.min = {-1, 0, -0.5f};
+    model.max = {1, 2, 0.5f};
+    Placement p;
+    p.position = {5, 0, 5};
+    auto box = boxForModel(model, p);
+    CHECK(box.min == glm::vec3(4, 0, 4.5f));
+    CHECK(box.max == glm::vec3(6, 2, 5.5f));
+    p.yaw = 90;
+    box = boxForModel(model, p);
+    CHECK(box.min.x == doctest::Approx(4.5f));
+    CHECK(box.max.x == doctest::Approx(5.5f));
+    CHECK(box.min.z == doctest::Approx(4));
+    CHECK(box.max.z == doctest::Approx(6));
+    p.yaw = 0;
+    p.scale = glm::vec3(2);
+    box = boxForModel(model, p, 0.5f);
+    CHECK(box.min == glm::vec3(3.5f, 0, 4.5f));
+    CHECK(box.max == glm::vec3(6.5f, 4, 5.5f));
+    // A margin never shrinks a box away.
+    box = boxForModel(model, p, 100);
+    CHECK(box.max.z - box.min.z >= BlockStep - 1e-4f);
+}
+
+TEST_CASE("rectangle and flood fills paint many cells in one step") {
+    auto map = arena();
+    auto& grid = map.grid;
+    GridBrush brush;
+    brush.mode = GridBrush::Mode::Walkable;
+    brush.walkable = false;
+    // Inside the open hall, away from the arena's walls.
+    const int changed = fillRect(grid, brush, {2, 6, 0}, {4, 7, 0});
+    CHECK(changed == 6);
+    for (int z = 6; z <= 7; ++z) {
+        for (int x = 2; x <= 4; ++x) {
+            CHECK_FALSE(grid.at(x, z, 0).walkable);
+        }
+    }
+    CHECK(grid.at(5, 6, 0).walkable);
+    CHECK(grid.at(2, 8, 0).walkable);
+    // Flood the blocked rectangle back to walkable: only it changes.
+    brush.walkable = true;
+    CHECK(floodFill(grid, brush, {3, 6, 0}) == 6);
+    CHECK(grid.at(2, 7, 0).walkable);
+    // Flooding walkable ground with a tag reaches every connected walkable cell and nothing blocked.
+    brush.mode = GridBrush::Mode::AddTag;
+    brush.tag = "grass";
+    const int tagged = floodFill(grid, brush, {3, 6, 0});
+    CHECK(tagged > 6);
+    const auto mask = grid.tagMask({"grass"});
+    for (int z = 0; z < grid.depth(); ++z) {
+        for (int x = 0; x < grid.width(); ++x) {
+            const auto& cell = grid.at(x, z, 0);
+            if (!cell.walkable) {
+                CHECK((cell.tags & mask) == 0);
+            }
+        }
+    }
+    brush.mode = GridBrush::Mode::Ramp;
+    CHECK(floodFill(grid, brush, {3, 6, 0}) == 0);
+}
+
+TEST_CASE("Blender collision markers can import as exact boxes") {
+    auto map = arena();
+    Model model;
+    ModelMarker marker;
+    marker.name = "crate";
+    marker.min = {2.25f, 0, 2.25f};
+    marker.max = {2.75f, 1, 2.75f};
+    marker.hasBounds = true;
+    marker.properties = {{"collision", {{"box", true}}}};
+    model.markers.push_back(marker);
+    std::vector<std::string> problems;
+    CHECK(importMarkers(map, model, problems) == 1);
+    CHECK(problems.empty());
+    REQUIRE(map.colliders.size() == 1);
+    CHECK(map.colliders[0].min == marker.min);
+    CHECK(map.grid.at(2, 2, 0).walkable); // the cell stays walkable; the box blocks
+}
+
+// --- Walkability bake ---------------------------------------------------------
+
+#include "engine/editor/WalkBake.h"
+
+namespace {
+// A model built from quads: (x0, z0)-(x1, z1) at height y (flat), or tilted
+// so its far edge in +x is at y1. Boxes add four walls and a roof.
+struct ModelBuilder {
+    Model model;
+    ModelBuilder() {
+        model.nodes.push_back({});
+        model.restPose.push_back(glm::mat4(1));
+        model.parts.push_back({});
+    }
+    ModelPart& part(bool water = false) {
+        if (water) {
+            if (model.parts.size() < 2) {
+                model.parts.push_back({});
+                model.parts.back().material.kind = MaterialKind::Water;
+            }
+            return model.parts[1];
+        }
+        return model.parts[0];
+    }
+    void tri(ModelPart& p, glm::vec3 a, glm::vec3 b, glm::vec3 c) {
+        const auto base = static_cast<std::uint32_t>(p.vertices.size());
+        for (const auto& v : {a, b, c}) {
+            MeshVertex vertex;
+            vertex.position = v;
+            p.vertices.push_back(vertex);
+        }
+        p.indices.insert(p.indices.end(), {base, base + 1, base + 2});
+    }
+    void quad(glm::vec3 a, glm::vec3 b, glm::vec3 c, glm::vec3 d, bool water = false) {
+        auto& p = part(water);
+        tri(p, a, b, c);
+        tri(p, a, c, d);
+    }
+    void floor(float x0, float z0, float x1, float z1, float y, bool water = false) {
+        quad({x0, y, z0}, {x1, y, z0}, {x1, y, z1}, {x0, y, z1}, water);
+    }
+    // Rises from y0 at x0 to y1 at x1.
+    void rampX(float x0, float z0, float x1, float z1, float y0, float y1) {
+        quad({x0, y0, z0}, {x1, y1, z0}, {x1, y1, z1}, {x0, y0, z1});
+    }
+    void box(glm::vec3 lo, glm::vec3 hi) {
+        floor(lo.x, lo.z, hi.x, hi.z, hi.y); // roof
+        quad({lo.x, lo.y, lo.z}, {hi.x, lo.y, lo.z}, {hi.x, hi.y, lo.z}, {lo.x, hi.y, lo.z});
+        quad({lo.x, lo.y, hi.z}, {hi.x, lo.y, hi.z}, {hi.x, hi.y, hi.z}, {lo.x, hi.y, hi.z});
+        quad({lo.x, lo.y, lo.z}, {lo.x, lo.y, hi.z}, {lo.x, hi.y, hi.z}, {lo.x, hi.y, lo.z});
+        quad({hi.x, lo.y, lo.z}, {hi.x, lo.y, hi.z}, {hi.x, hi.y, hi.z}, {hi.x, hi.y, lo.z});
+    }
+};
+
+Grid flatGrid(int width, int depth) {
+    Json grid = {{"width", width}, {"depth", depth}, {"layers", Json::array({{{"name", "ground"}, {"height_fill", 0}, {"walk_fill", false}}})}};
+    return Grid::fromJson(grid);
+}
+} // namespace
+
+TEST_CASE("the walkability bake reads floors, houses, ramps, cliffs and water from geometry") {
+    ModelBuilder b;
+    b.floor(0, 0, 8, 6, 0);              // level ground over the whole 8x6 map
+    b.box({2, 0, 1}, {4, 3, 3});          // a house covering cells (2..3, 1..2): its roof is an island
+    b.box({5.5f, 0, 4}, {6, 1.5f, 5});    // a post covering half of cell (5, 4)
+    b.floor(6, 0, 8, 2, 1);              // a cliff top one unit up over cells (6..7, 0..1)...
+    b.rampX(4, 0, 6, 2, 0, 1);            // ...reached by a ramp over cells (4..5, 0..1)
+    b.rampX(0, 4, 1, 5, 0, 0.5f);         // a gentle ramp in cell (0, 4) rising towards +x
+    b.floor(0, 5, 2, 6, 0.2f, true);      // a pond over cells (0..1, 5)
+    const auto grid = flatGrid(8, 6);
+    BakeOptions options;
+    options.blockEdges = false; // the test's ramp, pond and cliff lie on the ring
+    const auto result = bakeWalkability(b.model, grid, options);
+    CHECK(result.width == 8);
+    CHECK(result.at(1, 1).walkable);
+    CHECK(result.at(1, 1).coverage == doctest::Approx(1));
+    CHECK(result.at(1, 1).height == doctest::Approx(0));
+    // The roof is level ground nothing leads up to: an island, blocked.
+    CHECK_FALSE(result.at(2, 1).walkable);
+    CHECK(result.at(2, 1).island);
+    CHECK_FALSE(result.at(3, 2).walkable);
+    CHECK(result.islands == 4);
+    // The post covers half the cell: walkable with boxes over the covered quarters.
+    CHECK(result.at(5, 4).walkable);
+    CHECK(result.at(5, 4).partial);
+    CHECK_FALSE(result.colliders.empty());
+    bool coversPost = false;
+    for (const auto& box : result.colliders) {
+        coversPost |= box.min.x >= 5.49f && box.max.x <= 6.01f && box.min.z >= 3.99f && box.max.z <= 5.01f;
+    }
+    CHECK(coversPost);
+    // The cliff top is level ground at height 1, reached by the ramp cells
+    // (each rising half a unit east) so it is not an island.
+    CHECK(result.at(6, 0).walkable);
+    CHECK(result.at(6, 0).height == doctest::Approx(1));
+    CHECK(result.at(4, 0).ramp == Ramp::East);
+    CHECK(result.at(4, 0).rise == doctest::Approx(0.5f));
+    CHECK(result.at(4, 0).height == doctest::Approx(0));
+    CHECK(result.at(5, 1).ramp == Ramp::East);
+    CHECK(result.at(5, 1).height == doctest::Approx(0.5f));
+    CHECK(result.at(3, 0).height == doctest::Approx(0));
+    // The ramp rises east by 0.5 from a low edge of 0.
+    CHECK(result.at(0, 4).walkable);
+    CHECK(result.at(0, 4).ramp == Ramp::East);
+    CHECK(result.at(0, 4).rise == doctest::Approx(0.5f));
+    CHECK(result.at(0, 4).height == doctest::Approx(0));
+    CHECK(result.at(1, 4).ramp == Ramp::None);
+    // Water is blocked and tagged.
+    CHECK(result.at(0, 5).water);
+    CHECK_FALSE(result.at(0, 5).walkable);
+    CHECK(result.walkable + result.blocked + result.partial + result.unsampled == 48);
+    CHECK(result.unsampled == 0);
+
+    // Applying writes the grid, the tag and the boxes; the map still loads.
+    MapData map;
+    map.id = "baked";
+    map.grid = grid;
+    const int changed = applyBake(map, result, options);
+    CHECK(changed > 30);
+    CHECK(map.grid.at(1, 1, 0).walkable);
+    CHECK_FALSE(map.grid.at(2, 1, 0).walkable);
+    CHECK(map.grid.at(6, 0, 0).height == doctest::Approx(1));
+    CHECK(map.grid.at(0, 4, 0).ramp == Ramp::East);
+    CHECK((map.grid.at(0, 5, 0).tags & map.grid.tagMask({"water"})) != 0);
+    CHECK_FALSE(map.colliders.empty());
+    CHECK_NOTHROW(MapData::fromJson(map.toJson()));
+    // Options: a region limits the write, keepBlocked never unblocks, no colliders.
+    MapData limited;
+    limited.id = "limited";
+    limited.grid = grid;
+    BakeOptions some;
+    some.blockEdges = false;
+    some.region = glm::ivec4(0, 0, 2, 2);
+    some.writeColliders = false;
+    const auto partialResult = bakeWalkability(b.model, grid, some);
+    applyBake(limited, partialResult, some);
+    CHECK(limited.grid.at(1, 1, 0).walkable);
+    CHECK_FALSE(limited.grid.at(4, 4, 0).walkable); // outside the region: untouched (the grid starts blocked)
+    CHECK(limited.colliders.empty());
+    BakeOptions keep;
+    keep.keepBlocked = true;
+    MapData kept;
+    kept.id = "kept";
+    kept.grid = grid;
+    applyBake(kept, result, keep);
+    CHECK_FALSE(kept.grid.at(1, 1, 0).walkable);
+}
+
+TEST_CASE("the bake of the vale town agrees with its hand-painted walkability") {
+    const auto gameRoot = std::filesystem::path(FENGINE_SAMPLES) / "vale";
+    const auto map = MapData::load(gameRoot / "maps/town/map.json");
+    AssetCache assets(gameRoot, FENGINE_LUALIB);
+    const auto model = assets.tryModel("maps/town/geometry.glb");
+    REQUIRE(model);
+    BakeOptions options;
+    const auto result = bakeWalkability(*model, map.grid, options);
+    int agree = 0, total = 0, sampled = 0;
+    for (int z = 0; z < map.grid.depth(); ++z) {
+        for (int x = 0; x < map.grid.width(); ++x) {
+            const auto& baked = result.at(x, z);
+            ++total;
+            if (!baked.hit) {
+                continue;
+            }
+            ++sampled;
+            agree += baked.walkable == map.grid.at(x, z, 0).walkable ? 1 : 0;
+        }
+    }
+    MESSAGE("vale town: " << agree << " of " << sampled << " sampled cells agree (" << total << " cells, "
+                          << result.partial << " partial, " << result.colliders.size() << " boxes)");
+    CHECK(sampled > total / 2);
+    CHECK(agree * 10 >= sampled * 9); // most of the way there; the brush does the rest
+}
+
+// --- Sprite sheet builder -----------------------------------------------------
+
+#include "engine/assets/SpriteSheetBuilder.h"
+
+TEST_CASE("the sprite sheet builder describes a uniform sheet the way fengine_assetc sheet does") {
+    const Json manifest = {{"atlas", "hero.png"},
+                           {"frame_width", 32},
+                           {"frame_height", 48},
+                           {"directions", 4},
+                           {"pixels_per_unit", 32},
+                           {"clips",
+                            {{"idle", {{"frames", {0}}, {"duration", 0.5}}},
+                             {"walk", {{"frames", {0, 1, 2, 1}}, {"row_offset", 4}, {"duration", 0.12}}},
+                             {"attack", {{"frames", {0, 1}}, {"column_offset", 3}, {"loop", false}}}}}};
+    const auto spec = sheetSpecFromJson(manifest);
+    CHECK(spec.clips.size() == 3);
+    CHECK(sheetColumns(spec, 160) == 5);
+    CHECK(sheetRows(spec, 384) == 8);
+    const auto json = buildSheetAnimation(spec, 160, 384);
+    CHECK(json.at("atlas") == "hero.png");
+    const auto& walk = json.at("clips").at("walk");
+    CHECK(walk.at("loop") == true);
+    CHECK(walk.at("directions").size() == 4);
+    CHECK(walk.at("directions")[1][2].at("rect") == Json({64, 5 * 48, 32, 48})); // row 1 + offset 4
+    CHECK(walk.at("directions")[0][0].at("duration") == doctest::Approx(0.12));
+    const auto& attack = json.at("clips").at("attack");
+    CHECK(attack.at("loop") == false);
+    CHECK(attack.at("directions")[0][1].at("rect") == Json({4 * 32, 0, 32, 48}));
+    const auto animation = SpriteAnimation::fromJson(json);
+    CHECK(animation.clips.at("idle").directions.size() == 4);
+    // Frames past the image, bad sizes and empty clips are refused.
+    CHECK_THROWS(static_cast<void>(buildSheetAnimation(spec, 96, 384)));
+    auto bad = spec;
+    bad.directions = 3;
+    CHECK_THROWS(static_cast<void>(buildSheetAnimation(bad, 160, 384)));
+    bad = spec;
+    bad.clips.clear();
+    CHECK_THROWS(static_cast<void>(buildSheetAnimation(bad, 160, 384)));
+}
+
+// --- Map files ------------------------------------------------------------------
+
+#include "engine/editor/MapFiles.h"
+
+TEST_CASE("map files: blank maps, copies, renames and deletions in a scratch game folder") {
+    const auto root = std::filesystem::temp_directory_path() / "fengine-mapfiles-test";
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root / "maps");
+    CHECK(validMapId("town_2"));
+    CHECK_FALSE(validMapId("Town"));
+    CHECK_FALSE(validMapId(""));
+    CHECK_FALSE(validMapId("a/b"));
+    CHECK_THROWS(static_cast<void>(makeBlankMap("Bad Id", "x", 4, 4)));
+    const auto blank = makeBlankMap("cellar", "The Cellar", 12, 9);
+    CHECK(blank.id == "cellar");
+    CHECK(blank.name == "The Cellar");
+    CHECK(blank.grid.width() == 12);
+    CHECK(blank.grid.depth() == 9);
+    CHECK(blank.grid.at(5, 5, 0).walkable);
+    REQUIRE(blank.points.contains("start"));
+    CHECK(blank.points.at("start").position.x == doctest::Approx(6));
+    CHECK_FALSE(mapExists(root, "cellar"));
+    writeMap(root, blank);
+    CHECK(mapExists(root, "cellar"));
+    const auto loaded = MapData::load(root / "maps/cellar/map.json");
+    CHECK(loaded.name == "The Cellar");
+    // Without geometry the map gets an empty scene the engine can load.
+    CHECK(loaded.geometry == "geometry.gltf");
+    const auto placeholder = Model::load(root / "maps/cellar/geometry.gltf");
+    CHECK(placeholder.parts.empty());
+    {
+        AssetCache assets(root, FENGINE_LUALIB);
+        World world("blank", loaded, assets, 1);
+        CHECK(world.geometryPath() == "maps/cellar/geometry.gltf");
+        CHECK(assets.tryModel(world.geometryPath()) != nullptr);
+    }
+    // Geometry comes along when given.
+    const auto glb = std::filesystem::path(FENGINE_TEST_GAME) / "maps/arena/geometry.glb";
+    writeMap(root, blank, glb);
+    CHECK(std::filesystem::exists(root / "maps/cellar/geometry.glb"));
+    CHECK_THROWS(writeMap(root, blank, std::filesystem::path(FENGINE_TEST_GAME) / "game.json"));
+    copyMap(root, "cellar", "cellar_b", "Cellar B");
+    CHECK(mapExists(root, "cellar_b"));
+    const auto copied = MapData::load(root / "maps/cellar_b/map.json");
+    CHECK(copied.id == "cellar_b");
+    CHECK(copied.name == "Cellar B");
+    CHECK(std::filesystem::exists(root / "maps/cellar_b/geometry.glb"));
+    CHECK_THROWS(copyMap(root, "cellar", "cellar_b"));
+    CHECK_THROWS(copyMap(root, "nothing", "x"));
+    renameMap(root, "cellar_b", "attic");
+    CHECK_FALSE(mapExists(root, "cellar_b"));
+    CHECK(MapData::load(root / "maps/attic/map.json").id == "attic");
+    CHECK_THROWS(renameMap(root, "attic", "cellar"));
+    deleteMap(root, "attic");
+    CHECK_FALSE(mapExists(root, "attic"));
+    CHECK_THROWS(deleteMap(root, "attic"));
+    std::filesystem::remove_all(root);
+}
+
+// --- Snapped draw cameras (the editor camera) -------------------------------------
+
+#include "engine/render/FrameMath.h"
+
+TEST_CASE("a snapped draw camera shows its new values at once instead of interpolating from the last tick") {
+    DrawCameras cameras;
+    int world = 0;
+    Camera a;
+    a.target = {0, 0, 0};
+    a.snap();
+    cameras.update(&world, "", a, 7);
+    cameras.endFrame();
+    Camera b = a;
+    b.target = {10, 0, 0};
+    // The same tick (the game is paused), so an interpolated camera would be
+    // blended against the previous values; a snapped one is simply there.
+    const auto& plain = cameras.update(&world, "", b, 7);
+    CHECK(plain.focus(0).x == doctest::Approx(0));
+    CHECK(plain.focus(1).x == doctest::Approx(10));
+    cameras.endFrame();
+    Camera c = a;
+    c.target = {20, 0, 0};
+    const auto& snapped = cameras.update(&world, "", c, 7, true);
+    CHECK(snapped.focus(0).x == doctest::Approx(20));
+    CHECK(snapped.focus(1).x == doctest::Approx(20));
+}

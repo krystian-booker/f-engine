@@ -145,3 +145,29 @@ target_compile_definitions(fengine_imgui PUBLIC "$<$<NOT:${FENGINE_DEV_ENABLED}>
 target_include_directories(fengine_imgui SYSTEM PUBLIC "${imgui_SOURCE_DIR}" "${imgui_SOURCE_DIR}/backends"
   "${imgui_SOURCE_DIR}/misc/cpp")
 target_link_libraries(fengine_imgui PUBLIC SDL3::SDL3)
+# The developer editor's 3D gizmo (ImGuizmo, MIT) and icon glyph names
+# (IconFontCppHeaders, zlib) with the Font Awesome 6 Free solid face (OFL):
+# development builds only, like the editor itself.
+if(FENGINE_DEV_ENABLED)
+  CPMAddPackage(NAME imguizmo
+    URL https://github.com/CedricGuillemet/ImGuizmo/archive/105e4fde45e4e74aae8973d98750820ef7aca7e2.tar.gz
+    URL_HASH SHA256=d625a9f3207f15b7a5b7706269747676f17b7e4df00f898ced9480e5063d493a
+    DOWNLOAD_ONLY YES)
+  CPMAddPackage(NAME iconfontcppheaders
+    URL https://github.com/juliettef/IconFontCppHeaders/archive/210b5a399a64270674560d633638952d1e8d804d.tar.gz
+    URL_HASH SHA256=aae5fd355521f62a0257064f40bab5676aee93c9fa9dd7fd53375d3594933b3f
+    DOWNLOAD_ONLY YES)
+  target_sources(fengine_imgui PRIVATE "${imguizmo_SOURCE_DIR}/src/ImGuizmo.cpp")
+  target_include_directories(fengine_imgui SYSTEM PUBLIC "${imguizmo_SOURCE_DIR}/src" "${iconfontcppheaders_SOURCE_DIR}")
+  set(FENGINE_EDITOR_FONT "${PROJECT_BINARY_DIR}/fonts/fa-solid-900.ttf")
+  if(NOT EXISTS "${FENGINE_EDITOR_FONT}")
+    file(DOWNLOAD https://github.com/FortAwesome/Font-Awesome/raw/6.7.2/webfonts/fa-solid-900.ttf
+      "${FENGINE_EDITOR_FONT}" EXPECTED_HASH SHA256=af19d135d3a935b3ebfbd80320716ffe1202052c5f68dc2c5f1abc57005ac605
+      STATUS editor_font_status)
+    list(GET editor_font_status 0 editor_font_code)
+    if(NOT editor_font_code EQUAL 0)
+      message(WARNING "Could not download the editor icon font (${editor_font_status}); the editor shows text labels")
+      file(REMOVE "${FENGINE_EDITOR_FONT}")
+    endif()
+  endif()
+endif()

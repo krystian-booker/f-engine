@@ -275,6 +275,20 @@ function field.map_zone(id)
   return zone_lookup[id]
 end
 
+-- What a map's free `props` may hold, for the editor's Map panel (games add
+-- keys with schema.extend("map_props", {...}); unknown keys are kept).
+require("fe.schema").define("map_props", {
+  music = { type = { asset = "audio" }, optional = true, doc = "Music id (data/audio.json) or file played on the map" },
+  battle_stage = { type = { map_id = true }, optional = true, doc = "Map used as the battle stage for fights here" },
+  camera = { type = { record = {
+    pitch = { type = "number", optional = true }, yaw = { type = "number", optional = true },
+    distance = { type = "number", optional = true, min = 0 }, fov = { type = "number", optional = true, min = 1, max = 170 },
+    min = { type = { list = "number" }, optional = true, doc = "Lower [x, z] bound of the camera target" },
+    max = { type = { list = "number" }, optional = true, doc = "Upper [x, z] bound of the camera target" },
+  } }, optional = true, doc = "The camera rig's defaults on this map" },
+  daynight = { type = "boolean", optional = true, doc = "Run the day/night cycle here" },
+}, { doc = "A map's props.", open = true })
+
 -- The modules of the header install their functions on this table.
 require("fe.field.placements").install(field)
 require("fe.field.followers").install(field)

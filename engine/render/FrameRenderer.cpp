@@ -167,6 +167,14 @@ void FrameRenderer::render(const std::vector<WorldDraw>& draws, const Canvas& ca
                 named.clearedFrame = frameCount_;
             }
             output = {named.buffer.get(), glm::ivec4(0, 0, size)};
+        } else if (draw.pixelRect) {
+            const auto& r = *draw.pixelRect;
+            const auto from = glm::clamp(glm::ivec2(r.x, r.y), glm::ivec2(0), viewport);
+            const auto to = glm::clamp(glm::ivec2(r.x + r.z, r.y + r.w), glm::ivec2(0), viewport);
+            if (to.x <= from.x || to.y <= from.y) {
+                continue;
+            }
+            output = {frame_.get(), glm::ivec4(from, to - from)};
         } else if (draw.rect) {
             const auto& r = *draw.rect;
             const auto from = glm::clamp(
@@ -188,7 +196,7 @@ void FrameRenderer::render(const std::vector<WorldDraw>& draws, const Canvas& ca
         auto& scene = scenes_.acquire({sceneSize.x, sceneSize.y}, [&] { return SceneTarget(sceneSize); });
         const float aspect = static_cast<float>(outSize.x) / static_cast<float>(outSize.y);
         const auto* camera =
-            draw.camera ? &drawCameras_.update(&world, draw.target, *draw.camera, tick) : nullptr;
+            draw.camera ? &drawCameras_.update(&world, draw.target, *draw.camera, tick, draw.snapCamera) : nullptr;
         const DrawOverride drawn(world, camera, draw.post);
         const SceneViews views(next);
         for (std::uint16_t i = 0; i < SceneViews::Count; ++i) {
@@ -197,6 +205,20 @@ void FrameRenderer::render(const std::vector<WorldDraw>& draws, const Canvas& ca
         worlds_.render(world, slot, alpha, time, aspect, views, scene, calls_);
         post_.render(world, screen, scene, output, alpha, time, take, calls_);
     }
+
+    for (const auto& [target, key] : keepRequests_) {
+        const auto* named = named_.find(target);
+        if (!named || next + 1 >= last) {
+            continue;
+        }
+        auto copy = colorTexture(named->size, BGFX_TEXTURE_BLIT_DST | LinearClamp);
+        const auto view = take();
+        bgfx::setViewName(view, "Kept target");
+        bgfx::blit(view, {.handle = copy.get()}, {.handle = named->color.get()});
+        bgfx::touch(view);
+        kept_[key] = std::move(copy);
+    }
+    keepRequests_.clear();
 
     if (!sceneCaptures_.empty()) {
         auto readback = std::make_unique<Readback>();
@@ -247,6 +269,11 @@ void FrameRenderer::render(const std::vector<WorldDraw>& draws, const Canvas& ca
     bgfx::setTexture(0, uniforms_.frame.get(), frameColor_.get(), PointClamp);
     bgfx::setTexture(1, freezeSampler_.get(), frozen ? freezeColor_.get() : frameColor_.get(), LinearClamp);
     fullscreen(view, present_.get(), BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A, calls_);
+}
+
+bgfx::TextureHandle FrameRenderer::keptTarget(std::string_view key) const {
+    const auto found = kept_.find(key);
+    return found == kept_.end() ? bgfx::TextureHandle BGFX_INVALID_HANDLE : found->second.get();
 }
 
 void FrameRenderer::finishFrame(std::uint32_t frame) {

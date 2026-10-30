@@ -18,7 +18,7 @@ std::tuple<float, float, bool> projectToCanvas(Engine& engine, const Camera& cam
 
 namespace {
 WorldDraw worldDraw(Engine& engine, const std::shared_ptr<World>& world, const sol::object& options) {
-    WorldDraw draw{world, {}, {}, {}, {}};
+    WorldDraw draw{.world = world};
     const auto spec = lua::options(options, "world:draw options");
     if (!spec) {
         return draw;
@@ -128,6 +128,8 @@ StepRules stepRules(LuaHost& host, World& world, const sol::object& value) {
     StepRules rules;
     const auto options = lua::options(value, "rules");
     if (!options) {
+        const auto& boxed = world.boxBlockedCells();
+        rules.blocked.insert(boxed.begin(), boxed.end());
         return rules;
     }
     const auto& t = *options;
@@ -223,6 +225,9 @@ StepRules stepRules(LuaHost& host, World& world, const sol::object& value) {
             return *number;
         };
     }
+    // Static boxes block the cells they stand on for every planned route.
+    const auto& boxed = world.boxBlockedCells();
+    rules.blocked.insert(boxed.begin(), boxed.end());
     return rules;
 }
 
@@ -675,6 +680,13 @@ void bindOverlays(TypeBinder<WorldRef>& type) {
             "fun(position: Vec3, settings: table, count?: integer)", "One-shot particle burst (up to 4096).");
 }
 
+// A placement as scripts read it (world:placements(), world:placement(id)).
+sol::table placementTable(sol::state_view lua, const Placement& p) {
+    return lua.create_table_with("id", p.id, "type", p.type, "position", lua::table(lua, p.position), "facing",
+                                 lua::tableXZ(lua, p.facing), "layer", p.layer, "yaw", p.yaw, "scale",
+                                 lua::table(lua, p.scale), "props", jsonToLua(lua, p.props));
+}
+
 void bindMapData(TypeBinder<WorldRef>& type) {
     type.readonly(
             "name", [](const WorldRef& w) { return w.get().name(); }, "string", "World name.")
@@ -704,16 +716,26 @@ void bindMapData(TypeBinder<WorldRef>& type) {
                 sol::state_view lua(s);
                 auto out = lua.create_table();
                 for (const auto& p : w.get().map().placements) {
-                    out.add(lua.create_table_with(
-                        "id", p.id, "type", p.type, "position", lua::table(lua, p.position), "facing",
-                        lua::tableXZ(lua, p.facing), "layer", p.layer, "props", jsonToLua(lua, p.props)));
+                    out.add(placementTable(lua, p));
                 }
                 return out;
             },
             "fun(): {id: string, type: string, position: Vec3, facing: {x: number, z: number}, layer: "
-            "integer, "
-            "props: table}[]",
+            "integer, yaw: number, scale: Vec3, props: table}[]",
             "Authored placements; scripts decide what to spawn for each type.")
+        .method(
+            "placement",
+            [](sol::this_state s, const WorldRef& w, const std::string& id) {
+                sol::state_view lua(s);
+                const auto& placements = w.get().map().placements;
+                const auto found = std::find_if(placements.begin(), placements.end(),
+                                                [&](const Placement& p) { return p.id == id; });
+                return found == placements.end() ? sol::object(lua, sol::lua_nil)
+                                                 : sol::object(placementTable(lua, *found));
+            },
+            "fun(id: string): {id: string, type: string, position: Vec3, facing: {x: number, z: number}, "
+            "layer: integer, yaw: number, scale: Vec3, props: table}|nil",
+            "The authored placement with that id, or nil (the live map: editor edits included).")
         .method(
             "zones",
             [](sol::this_state s, const WorldRef& w) {

@@ -1,0 +1,130 @@
+[
+ {
+  "frame": 60,
+  "expect": "(function() local w=fe.world.get('field'); local n=0; for x=0,19 do for z=0,15 do local c=w:cell({x=x,z=z,layer=0}); if c and not c.walkable then n=n+1 end end end; return n end)() == 120"
+ },
+ {
+  "frame": 62,
+  "mouse": [
+   1070,
+   29
+  ]
+ },
+ {
+  "frame": 66,
+  "click": "left"
+ },
+ {
+  "frame": 74,
+  "mouse": [
+   975,
+   234
+  ]
+ },
+ {
+  "frame": 78,
+  "click": "left"
+ },
+ {
+  "frame": 84,
+  "mouse": [
+   975,
+   280
+  ]
+ },
+ {
+  "frame": 88,
+  "click": "left"
+ },
+ {
+  "frame": 96,
+  "mouse": [
+   640,
+   384
+  ]
+ },
+ {
+  "frame": 100,
+  "click": "left"
+ },
+ {
+  "frame": 110,
+  "expect": "(function() local w=fe.world.get('field'); local n=0; for x=0,19 do for z=0,15 do local c=w:cell({x=x,z=z,layer=0}); if c and not c.walkable then n=n+1 end end end; return n end)() == 120 + 1"
+ },
+ {
+  "frame": 111,
+  "capture": "out/19_painted.png"
+ },
+ {
+  "frame": 114,
+  "key": "Z",
+  "super": true
+ },
+ {
+  "frame": 122,
+  "expect": "(function() local w=fe.world.get('field'); local n=0; for x=0,19 do for z=0,15 do local c=w:cell({x=x,z=z,layer=0}); if c and not c.walkable then n=n+1 end end end; return n end)() == 120"
+ },
+ {
+  "frame": 124,
+  "mouse": [
+   975,
+   280
+  ]
+ },
+ {
+  "frame": 128,
+  "click": "left"
+ },
+ {
+  "frame": 134,
+  "mouse": [
+   1047,
+   303
+  ]
+ },
+ {
+  "frame": 138,
+  "click": "left"
+ },
+ {
+  "frame": 146,
+  "mouse": [
+   1047,
+   395
+  ]
+ },
+ {
+  "frame": 150,
+  "click": "left"
+ },
+ {
+  "frame": 160,
+  "mouse": [
+   422,
+   552
+  ]
+ },
+ {
+  "frame": 164,
+  "click": "left"
+ },
+ {
+  "frame": 180,
+  "mouse": [
+   625,
+   552
+  ]
+ },
+ {
+  "frame": 184,
+  "click": "left"
+ },
+ {
+  "frame": 194,
+  "capture": "out/20_bake_preview.png"
+ },
+ {
+  "frame": 196,
+  "quit": true
+ }
+]

@@ -1,0 +1,9 @@
+[
+ { "frame": 60, "open_dialog": "assets"},
+ { "frame": 120, "cancel_dialog": true},
+ { "frame": 180, "expect_dialog_returned": 1},
+ { "frame": 182, "open_dialog": "geometry"},
+ { "frame": 220, "cancel_dialog": true},
+ { "frame": 280, "expect_dialog_returned": 2},
+ { "frame": 290, "quit": true}
+]

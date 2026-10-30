@@ -102,6 +102,31 @@ int paint(Grid& grid, const GridBrush& brush, GridPos centre, int radius);
 // Appends a flicker curve key half a second after the last one (scale 1).
 void addFlickerKey(LightSettings& light);
 
+// Fills every cell of the rectangle between two cells (inclusive, on the
+// brush's layer) with the brush; returns cells changed.
+int fillRect(Grid& grid, const GridBrush& brush, GridPos a, GridPos b);
+// Flood-fills the connected cells that share the start cell's walkability
+// (4-connected, on the start's layer) with the brush; returns cells changed.
+// Only the Walkable, Height and tag modes make sense here; Ramp is refused.
+int floodFill(Grid& grid, const GridBrush& brush, GridPos start);
+
+// Sub-cell blocking through collider boxes. The block brush paints quarter
+// cells (BlockStep units): each painted square becomes a box of the brush's
+// height standing on the grid, merged with its neighbours of the same
+// vertical span into as few boxes as possible, so one wall is one box.
+inline constexpr float BlockStep = 0.25f;
+// Joins boxes that share a vertical span and touch along one axis with the
+// same extent on the other, repeatedly, until no two can be joined.
+[[nodiscard]] std::vector<Box> mergeBoxes(std::vector<Box> boxes);
+// Paints or erases one quarter-cell square at a world xz position (snapped to
+// BlockStep) on `layer`: `add` stands a box of `height` on the grid surface
+// there; otherwise the boxes covering the square are cut around it. Returns
+// whether anything changed.
+bool paintBlock(MapData& map, glm::vec2 position, int layer, float height, bool add);
+// The box a model placed at a placement's position, yaw and scale covers,
+// shrunk by `margin` on each horizontal side (never below BlockStep wide).
+[[nodiscard]] Box boxForModel(const Model& model, const Placement& placement, float margin = 0);
+
 // Replaces one part of an environment's map JSON, named by a JSON pointer
 // ("/sky/backdrops", "/post/custom"), and reads the environment back; throws
 // with the loader's message when the result is invalid.

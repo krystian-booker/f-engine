@@ -1,8 +1,10 @@
 #include "engine/editor/Editor.h"
 #include "engine/editor/EditorWidgets.h"
+#include "engine/editor/SceneEdits.h"
 #include "engine/runtime/Engine.h"
 #include "engine/script/LuaHost.h"
 #include "engine/world/World.h"
+#include <IconsFontAwesome6.h>
 #include <glm/gtc/type_ptr.hpp>
 #include <imgui.h>
 #include <imgui_stdlib.h>
@@ -10,59 +12,165 @@
 namespace fe {
 using namespace editorui;
 
-void Editor::drawPlacements(World& w) {
+namespace {
+// Where a new object goes: the ground under the editor camera's focus.
+glm::vec3 dropPoint(const World& w, const Camera& camera, int layer) {
+    const auto& grid = w.authored().grid;
+    const auto focus = camera.focus();
+    const auto cell = snapToCell(grid, focus, layer);
+    return cellCentre(grid, cell);
+}
+} // namespace
+
+void Editor::addPlacement(World& w) {
     const auto& placements = w.authored().placements;
-    if (ImGui::Button("Add placement")) {
-        Placement p;
-        p.id = uniqueId("placement", placements);
-        p.type = defaultType("entities");
-        p.position = w.camera().target;
-        edit(w, [&](MapData& m) { m.placements.push_back(p); });
-        selectedPlacement_ = static_cast<int>(placements.size()) - 1;
-    }
-    ImGui::SameLine();
-    ImGui::Checkbox("Click map to move", &placing_);
-    ImGui::BeginChild("placements", ImVec2(0, 120), ImGuiChildFlags_Borders);
-    for (std::size_t i = 0; i < placements.size(); ++i) {
-        ImGui::PushID(static_cast<int>(i));
-        if (ImGui::Selectable((placements[i].id + " (" + placements[i].type + ")").c_str(),
-                              selectedPlacement_ == static_cast<int>(i))) {
-            selectedPlacement_ = static_cast<int>(i);
-        }
-        ImGui::PopID();
-    }
-    ImGui::EndChild();
-    if (!validIndex(selectedPlacement_, placements)) {
+    Placement p;
+    p.type = defaultType("entities");
+    p.id = uniquePlacementId(p.type.empty() ? "placement" : p.type, placements);
+    p.position = dropPoint(w, sceneCamera(w), layer_);
+    p.layer = layer_;
+    gesture_ = false;
+    edit(w, [&](MapData& m) { m.placements.push_back(p); });
+    gesture_ = false;
+    select(Selection::placement(p.id));
+    placementChanged(w, p.id);
+}
+
+void Editor::addZone(World& w) {
+    const auto& zones = w.authored().zones;
+    const auto t = dropPoint(w, sceneCamera(w), layer_);
+    auto type = defaultType("zones");
+    Zone zone{uniqueId("zone", zones), type.empty() ? "zone" : type, {t.x - 2, t.z - 2}, {t.x + 2, t.z + 2}, -1,
+              Json::object()};
+    gesture_ = false;
+    edit(w, [&](MapData& m) { m.zones.push_back(zone); });
+    gesture_ = false;
+    select(Selection::zone(zone.id));
+}
+
+void Editor::addPoint(World& w, const std::string& name) {
+    if (name.empty()) {
+        status_ = "Give the point a name first";
         return;
     }
-    const auto index = static_cast<std::size_t>(selectedPlacement_);
+    auto unique = name;
+    for (int n = 2; w.authored().points.contains(unique); ++n) {
+        unique = name + std::to_string(n);
+    }
+    const MapPoint point{dropPoint(w, sceneCamera(w), layer_), {0, 1}, layer_};
+    gesture_ = false;
+    edit(w, [&](MapData& m) { m.points[unique] = point; });
+    gesture_ = false;
+    select(Selection::point(unique));
+}
+
+void Editor::addLight(World& w) {
+    LightSettings light;
+    light.position = dropPoint(w, sceneCamera(w), layer_) + glm::vec3(0, 2, 0);
+    gesture_ = false;
+    edit(w, [&](MapData& m) { m.lights.push_back(light); });
+    gesture_ = false;
+    select(Selection::light(static_cast<int>(w.authored().lights.size()) - 1));
+}
+
+void Editor::addEmitter(World& w) {
+    const MapEmitter emitter{dropPoint(w, sceneCamera(w), layer_), EmitterSettings{}};
+    gesture_ = false;
+    edit(w, [&](MapData& m) { m.emitters.push_back(emitter); });
+    gesture_ = false;
+    select(Selection::emitter(static_cast<int>(w.authored().emitters.size()) - 1));
+}
+
+void Editor::addCollider(World& w) {
+    const auto t = dropPoint(w, sceneCamera(w), layer_);
+    const Box box{t - glm::vec3(0.5f, 0, 0.5f), t + glm::vec3(0.5f, 1, 0.5f)};
+    gesture_ = false;
+    edit(w, [&](MapData& m) { m.colliders.push_back(box); });
+    gesture_ = false;
+    select(Selection::collider(static_cast<int>(w.authored().colliders.size()) - 1));
+}
+
+void Editor::drawPlacementForm(World& w, std::size_t index) {
+    const auto& placements = w.authored().placements;
+    if (index >= placements.size()) {
+        return;
+    }
     auto p = placements[index];
-    bool changed = false;
-    if (placing_ && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-        if (const auto cell = hoveredCell(w)) {
-            p.position = {static_cast<float>(cell->x) + 0.5f,
-                          w.authored().grid.heightAt({cell->x + 0.5f, cell->z + 0.5f}, cell->layer),
-                          static_cast<float>(cell->z) + 0.5f};
-            p.layer = cell->layer;
-            changed = true;
+    const auto previousId = p.id;
+    bool changed = false, respawn = false;
+    const auto entity = placementEntity(w, p.id);
+    if (entity == entt::null) {
+        ImGui::TextColored(ImVec4(1, 0.8f, 0.4f, 1), ICON_FA_TRIANGLE_EXCLAMATION " Not spawned in the running game");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("No entity has this id: the type has no spawner, it was hidden by a page, or\n"
+                              "the game is not on this map. Save or Play from here to spawn it.");
         }
     }
-    changed |= ImGui::InputText("Id", &p.id);
+    if (ImGui::InputText("Id", &p.id)) {
+        changed = respawn = true;
+    }
     if (ImGui::BeginCombo("Type", p.type.c_str())) {
         for (const auto& type : schemas_.value("entities", Json::object()).items()) {
             if (ImGui::Selectable(type.key().c_str(), type.key() == p.type)) {
                 p.type = type.key();
-                changed = true;
+                changed = respawn = true;
+            }
+            if (const auto doc = type.value().find("doc"); doc != type.value().end() && doc->is_string() &&
+                                                           ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", doc->get<std::string>().c_str());
             }
         }
         ImGui::EndCombo();
     }
-    changed |= ImGui::InputText("Custom type", &p.type);
+    if (ImGui::TreeNode("Advanced")) {
+        if (ImGui::InputText("Custom type", &p.type)) {
+            changed = respawn = true;
+        }
+        ImGui::TreePop();
+    }
+    ImGui::SeparatorText("Transform");
     changed |= editVec3("Position", p.position);
     changed |= ImGui::DragFloat2("Facing", glm::value_ptr(p.facing), 0.05f, -1, 1);
     changed |= editLayer("Layer", p.layer, w.authored().grid);
+    changed |= ImGui::DragFloat("Yaw", &p.yaw, 1, -360, 360, "%.0f deg");
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Turns mesh placements (props); sprites face the camera");
+    }
+    float uniform = p.scale.x;
+    const bool wasUniform = p.scale.x == p.scale.y && p.scale.y == p.scale.z;
+    if (wasUniform) {
+        if (ImGui::DragFloat("Scale", &uniform, 0.01f, 0.01f, 100)) {
+            p.scale = glm::vec3(uniform);
+            changed = true;
+            respawn = entity == entt::null || !w.registry().all_of<MeshInstance>(entity);
+        }
+    } else if (ImGui::DragFloat3("Scale", glm::value_ptr(p.scale), 0.01f, 0.01f, 100)) {
+        changed = true;
+    }
     ImGui::SeparatorText("Props");
-    changed |= editProps(fieldsFor(p.type, {"entities"}), p.props);
+    if (editProps(fieldsFor(p.type, {"entities"}), p.props)) {
+        changed = respawn = true;
+    }
+    if (const auto modelPath = p.props.find("model"); modelPath != p.props.end() && modelPath->is_string()) {
+        if (ImGui::Button(ICON_FA_CUBE " Add collider box from the model")) {
+            if (const auto model = engine_.assets().tryModel(modelPath->get<std::string>())) {
+                const auto box = boxForModel(*model, p, 0.05f);
+                gesture_ = false;
+                edit(w, [&](MapData& m) {
+                    m.colliders.push_back(box);
+                    m.colliders = mergeBoxes(std::move(m.colliders));
+                });
+                gesture_ = false;
+                status_ = "Added a collider box around " + p.id + "; routes now go around it";
+            } else {
+                status_ = "Model not found: " + modelPath->get<std::string>();
+            }
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Sub-cell blocking: bodies are stopped by the box and planned routes avoid\n"
+                              "the cells its centre covers, so the cell itself can stay walkable.");
+        }
+    }
     const bool duplicate = std::any_of(placements.begin(), placements.end(), [&](const Placement& other) {
         return &other != &placements[index] && other.id == p.id;
     });
@@ -74,46 +182,73 @@ void Editor::drawPlacements(World& w) {
                 m.placements[index] = p;
             }
         });
+        if (p.id != previousId) {
+            select(Selection::placement(p.id));
+            placementChanged(w, previousId); // the old id's entity goes
+        }
+        if (respawn) {
+            placementChanged(w, p.id);
+        } else {
+            syncPlacementEntity(w, p);
+        }
     }
-    if (ImGui::Button("Delete placement")) {
-        edit(w, [&](MapData& m) {
-            if (index < m.placements.size()) {
-                m.placements.erase(m.placements.begin() + static_cast<std::ptrdiff_t>(index));
+    if (entity != entt::null) {
+        if (const auto inspect = devtool("inspect_entity"); inspect != sol::lua_nil && (p.props.contains("pages") || p.props.contains("script"))) {
+            const auto result = engine_.lua().invoke(inspect, p.id, w.name());
+            if (result.valid() && result.get_type() == sol::type::string) {
+                const auto info = Json::parse(result.get<std::string>(), nullptr, false);
+                if (info.is_object()) {
+                    ImGui::SeparatorText("Event pages (live)");
+                    for (const auto& page : jsonArray(info, "pages")) {
+                        const int index = static_cast<int>(jsonNumber(page, "index", 0));
+                        const bool active = jsonBool(page, "active", false);
+                        ImGui::PushID(index);
+                        if (active) {
+                            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 1, 0.6f, 1));
+                        }
+                        ImGui::Text("%s#%d %s: %s", active ? ICON_FA_CIRCLE_CHECK " " : "   ", index,
+                                    jsonString(page, "trigger", "action").c_str(), jsonString(page, "script", "(none)").c_str());
+                        if (active) {
+                            ImGui::PopStyleColor();
+                        }
+                        if (const auto error = page.find("error"); error != page.end() && error->is_string()) {
+                            ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "   %s", error->get<std::string>().c_str());
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton(ICON_FA_PLAY " Run")) {
+                            if (const auto run = devtool("run_page"); run != sol::lua_nil) {
+                                if (succeeded(engine_.lua().invoke(run, p.id, index))) {
+                                    paused_ = false; // the page needs ticks to play out
+                                    status_ = "Running page " + std::to_string(index) + " of " + p.id;
+                                }
+                            }
+                        }
+                        ImGui::PopID();
+                    }
+                    if (const auto running = info.find("running"); running != info.end() && running->is_object()) {
+                        ImGui::Text(ICON_FA_GEARS " Running: %s", jsonString(*running, "name", "").c_str());
+                    }
+                    if (!jsonString(info, "routine", "").empty()) {
+                        ImGui::TextDisabled("Routine: %s", jsonString(info, "routine", "").c_str());
+                    }
+                }
             }
-        });
-        selectedPlacement_ = -1;
+        }
+        if (ImGui::CollapsingHeader("Live entity")) {
+            ImGui::PushID("entity");
+            drawEntity(w, entity);
+            ImGui::PopID();
+        }
     }
 }
 
-void Editor::drawZones(World& w) {
+void Editor::drawZoneForm(World& w, std::size_t index) {
     const auto& zones = w.authored().zones;
-    if (ImGui::Button("Add zone")) {
-        const auto t = w.camera().target;
-        auto type = defaultType("zones");
-        Zone zone{uniqueId("zone", zones),
-                  type.empty() ? "zone" : type,
-                  {t.x - 2, t.z - 2},
-                  {t.x + 2, t.z + 2},
-                  -1,
-                  Json::object()};
-        edit(w, [&](MapData& m) { m.zones.push_back(zone); });
-        selectedZone_ = static_cast<int>(zones.size()) - 1;
-    }
-    for (std::size_t i = 0; i < zones.size(); ++i) {
-        ImGui::PushID(static_cast<int>(i));
-        if (ImGui::Selectable((zones[i].id + " (" + zones[i].type + ")").c_str(),
-                              selectedZone_ == static_cast<int>(i))) {
-            selectedZone_ = static_cast<int>(i);
-        }
-        ImGui::PopID();
-    }
-    if (!validIndex(selectedZone_, zones)) {
-        w.overlays().erase("editor:zone");
-        zoneOverlayKey_.clear();
+    if (index >= zones.size()) {
         return;
     }
-    const auto index = static_cast<std::size_t>(selectedZone_);
     auto z = zones[index];
+    const auto previousId = z.id;
     bool changed = ImGui::InputText("Zone id", &z.id);
     if (ImGui::BeginCombo("Zone type", z.type.c_str())) {
         for (const auto& type : schemas_.value("zones", Json::object()).items()) {
@@ -124,7 +259,10 @@ void Editor::drawZones(World& w) {
         }
         ImGui::EndCombo();
     }
-    changed |= ImGui::InputText("Custom zone type", &z.type);
+    if (ImGui::TreeNode("Advanced")) {
+        changed |= ImGui::InputText("Custom zone type", &z.type);
+        ImGui::TreePop();
+    }
     changed |= ImGui::DragFloat2("Min", glm::value_ptr(z.min), 0.1f);
     changed |= ImGui::DragFloat2("Max", glm::value_ptr(z.max), 0.1f);
     changed |= editLayer("Zone layer (-1 all)", z.layer, w.authored().grid, -1);
@@ -139,44 +277,85 @@ void Editor::drawZones(World& w) {
                 m.zones[index] = z;
             }
         });
-    }
-    const auto key =
-        w.name() + "/" + z.id + "/" + Json{z.min.x, z.min.y, z.max.x, z.max.y, z.layer, layer_}.dump();
-    if (key != zoneOverlayKey_ || !w.overlays().contains("editor:zone")) {
-        zoneOverlayKey_ = key;
-        w.overlays()["editor:zone"] =
-            OverlayLayer{zoneCells(z, w.authored().grid, layer_), {1, 0.85f, 0.2f, 0.3f}, 1, 92, true, true};
-    }
-    if (ImGui::Button("Delete zone")) {
-        edit(w, [&](MapData& m) {
-            if (index < m.zones.size()) {
-                m.zones.erase(m.zones.begin() + static_cast<std::ptrdiff_t>(index));
-            }
-        });
-        selectedZone_ = -1;
+        if (z.id != previousId) {
+            select(Selection::zone(z.id));
+        }
     }
 }
 
-void Editor::drawLights(World& w) {
-    const auto& lights = w.authored().lights;
-    if (ImGui::Button("Add light")) {
-        LightSettings light;
-        light.position = w.camera().target + glm::vec3(0, 2, 0);
-        edit(w, [&](MapData& m) { m.lights.push_back(light); });
-        selectedLight_ = static_cast<int>(lights.size()) - 1;
-    }
-    for (std::size_t i = 0; i < lights.size(); ++i) {
-        ImGui::PushID(static_cast<int>(i));
-        if (ImGui::Selectable(("Light " + std::to_string(i)).c_str(),
-                              selectedLight_ == static_cast<int>(i))) {
-            selectedLight_ = static_cast<int>(i);
+void Editor::updateZoneOverlay(World& w) {
+    if (selection_.kind != Selection::Kind::Zone) {
+        if (w.overlays().erase("editor:zone") > 0) {
+            zoneOverlayKey_.clear();
         }
-        ImGui::PopID();
-    }
-    if (!validIndex(selectedLight_, lights)) {
         return;
     }
-    const auto index = static_cast<std::size_t>(selectedLight_);
+    const auto* z = findZone(w.authored(), selection_.id);
+    if (!z) {
+        w.overlays().erase("editor:zone");
+        zoneOverlayKey_.clear();
+        return;
+    }
+    const auto key = w.name() + "/" + z->id + "/" + Json{z->min.x, z->min.y, z->max.x, z->max.y, z->layer, layer_}.dump();
+    if (key != zoneOverlayKey_ || !w.overlays().contains("editor:zone")) {
+        zoneOverlayKey_ = key;
+        w.overlays()["editor:zone"] =
+            OverlayLayer{zoneCells(*z, w.authored().grid, layer_), {1, 0.85f, 0.2f, 0.3f}, 1, 92, true, true};
+    }
+}
+
+void Editor::drawPointForm(World& w, const std::string& name) {
+    const auto& points = w.authored().points;
+    const auto found = points.find(name);
+    if (found == points.end()) {
+        return;
+    }
+    auto point = found->second;
+    bool changed = editVec3("Point position", point.position);
+    changed |= ImGui::DragFloat2("Point facing", glm::value_ptr(point.facing), 0.05f, -1, 1);
+    changed |= editLayer("Point layer", point.layer, w.authored().grid);
+    if (changed) {
+        edit(w, [&](MapData& m) { m.points[name] = point; });
+    }
+    static std::string rename;
+    if (ImGui::InputText("Rename", &rename, ImGuiInputTextFlags_EnterReturnsTrue) && !rename.empty() &&
+        !points.contains(rename)) {
+        const auto moved = point;
+        const auto newName = rename;
+        gesture_ = false;
+        edit(w, [&](MapData& m) {
+            m.points.erase(name);
+            m.points[newName] = moved;
+        });
+        gesture_ = false;
+        select(Selection::point(newName));
+        rename.clear();
+        return;
+    }
+    const auto playFrom = devtool("play_from");
+    ImGui::BeginDisabled(playFrom == sol::lua_nil);
+    if (ImGui::Button(ICON_FA_PLAY " Play from here")) {
+        // The call-out may unload or replace `w`; the caller holds it alive
+        // for the rest of this frame and nothing below reads the map.
+        const auto map = w.authored().id;
+        if (succeeded(engine_.lua().invoke(playFrom, map, name))) {
+            setMode(Mode::Play);
+            status_ = "Playing from " + name;
+        }
+        ImGui::EndDisabled();
+        return;
+    }
+    ImGui::EndDisabled();
+    if (playFrom == sol::lua_nil && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("Define fe.devtools.play_from(map, point) to enable");
+    }
+}
+
+void Editor::drawLightForm(World& w, std::size_t index) {
+    const auto& lights = w.authored().lights;
+    if (index >= lights.size()) {
+        return;
+    }
     auto l = lights[index];
     bool spot = l.type == LightType::Spot;
     bool changed = false;
@@ -226,39 +405,17 @@ void Editor::drawLights(World& w) {
             });
         }
     }
-    if (ImGui::Button("Delete light")) {
-        edit(w, [&](MapData& m) {
-            if (index < m.lights.size()) {
-                m.lights.erase(m.lights.begin() + static_cast<std::ptrdiff_t>(index));
-            }
-        });
-        selectedLight_ = -1;
-    }
 }
 
-void Editor::drawEmitters(World& w) {
+void Editor::drawEmitterForm(World& w, std::size_t index) {
     const auto& emitters = w.authored().emitters;
-    if (ImGui::Button("Add emitter")) {
-        const MapEmitter emitter{w.camera().target, EmitterSettings{}};
-        edit(w, [&](MapData& m) { m.emitters.push_back(emitter); });
-        selectedEmitter_ = static_cast<int>(emitters.size()) - 1;
-    }
-    for (std::size_t i = 0; i < emitters.size(); ++i) {
-        ImGui::PushID(static_cast<int>(i));
-        const auto label = "Emitter " + std::to_string(i) + " " + emitters[i].settings.sprite;
-        if (ImGui::Selectable(label.c_str(), selectedEmitter_ == static_cast<int>(i))) {
-            selectedEmitter_ = static_cast<int>(i);
-        }
-        ImGui::PopID();
-    }
-    if (!validIndex(selectedEmitter_, emitters)) {
+    if (index >= emitters.size()) {
         return;
     }
-    const auto index = static_cast<std::size_t>(selectedEmitter_);
     auto e = emitters[index];
     auto& s = e.settings;
     bool changed = editVec3("Emitter position", e.position);
-    changed |= ImGui::InputText("Sprite", &s.sprite);
+    changed |= assetPicker("Sprite", s.sprite, AssetKind::Sprite, true);
     changed |= ImGui::DragFloat("Rate", &s.rate, 0.5f, 0, 1000);
     changed |= ImGui::DragInt("Burst", &s.burst, 1, 0, 10000);
     changed |= ImGui::DragFloat("Lifetime", &s.lifetime, 0.05f, 0.01f, 60);
@@ -293,37 +450,15 @@ void Editor::drawEmitters(World& w) {
             });
         }
     }
-    if (ImGui::Button("Delete emitter")) {
-        edit(w, [&](MapData& m) {
-            if (index < m.emitters.size()) {
-                m.emitters.erase(m.emitters.begin() + static_cast<std::ptrdiff_t>(index));
-            }
-        });
-        selectedEmitter_ = -1;
-    }
 }
 
-void Editor::drawColliders(World& w) {
+void Editor::drawColliderForm(World& w, std::size_t index) {
     const auto& colliders = w.authored().colliders;
-    if (ImGui::Button("Add collider")) {
-        const auto t = w.camera().target;
-        const Box box{t - glm::vec3(0.5f, 0, 0.5f), t + glm::vec3(0.5f, 1, 0.5f)};
-        edit(w, [&](MapData& m) { m.colliders.push_back(box); });
-        selectedCollider_ = static_cast<int>(colliders.size()) - 1;
-    }
-    for (std::size_t i = 0; i < colliders.size(); ++i) {
-        ImGui::PushID(static_cast<int>(i));
-        if (ImGui::Selectable(("Collider " + std::to_string(i)).c_str(),
-                              selectedCollider_ == static_cast<int>(i))) {
-            selectedCollider_ = static_cast<int>(i);
-        }
-        ImGui::PopID();
-    }
-    if (!validIndex(selectedCollider_, colliders)) {
+    if (index >= colliders.size()) {
         return;
     }
-    const auto index = static_cast<std::size_t>(selectedCollider_);
     auto box = colliders[index];
+    ImGui::TextDisabled("A solid box bodies cannot enter; routes go around the cells it covers");
     bool changed = editVec3("Box min", box.min);
     changed |= editVec3("Box max", box.max);
     if (changed) {
@@ -334,24 +469,36 @@ void Editor::drawColliders(World& w) {
             }
         });
     }
-    if (ImGui::Button("Delete collider")) {
-        edit(w, [&](MapData& m) {
-            if (index < m.colliders.size()) {
-                m.colliders.erase(m.colliders.begin() + static_cast<std::ptrdiff_t>(index));
-            }
-        });
-        selectedCollider_ = -1;
-    }
 }
 
 void Editor::drawEnvironment(World& w) {
     ImGui::TextDisabled("Edits replace the live environment (scripted changes too)");
     auto env = w.authored().environment;
-    // Lists of records are edited as JSON and read back like the map file.
+    // Lists of records are edited as forms from a spec and read back like the map file.
+    static const Json backdropSpec = {
+        {"type", "list"},
+        {"of",
+         {{"type", "record"},
+          {"fields",
+           {{"image", {{"type", "asset"}, {"asset", "image"}, {"doc", "A card behind the scene"}}},
+            {"distance", {{"type", "number"}, {"optional", true}, {"default", 60}}},
+            {"height", {{"type", "number"}, {"optional", true}, {"default", 20}}},
+            {"width", {{"type", "number"}, {"optional", true}, {"default", 80}}},
+            {"yaw", {{"type", "number"}, {"optional", true}, {"default", 0}, {"doc", "Degrees around the camera"}}},
+            {"elevation", {{"type", "number"}, {"optional", true}, {"default", 0}}},
+            {"parallax", {{"type", "number"}, {"optional", true}, {"default", 0.2}, {"doc", "0 fixed, 1 moves with the world"}}},
+            {"tint", {{"type", "list"}, {"of", {{"type", "number"}}}, {"optional", true}, {"doc", "[r, g, b, a]"}}}}}}}};
+    static const Json customSpec = {
+        {"type", "list"},
+        {"of",
+         {{"type", "record"},
+          {"fields",
+           {{"shader", {{"type", "string"}, {"default", "custom"}, {"doc", "shaders/fs_<name>.sc (a-z, 0-9, _ and -)"}}},
+            {"params", {{"type", "list"}, {"of", {{"type", "number"}}}, {"optional", true}, {"doc", "Up to 16 numbers (u_params)"}}}}}}}};
     auto editSection = [&](const char* label, const char* pointer) {
         auto value = env.toJson().at(Json::json_pointer(pointer));
-        ImGui::TextUnformatted(label);
-        if (!editJson((std::string("##") + pointer).c_str(), value, 90)) {
+        const Json& spec = std::string_view(pointer) == "/sky/backdrops" ? backdropSpec : customSpec;
+        if (!editValue(label, spec, value)) {
             return false;
         }
         try {
@@ -395,7 +542,7 @@ void Editor::drawEnvironment(World& w) {
     changed |= editColor("Sky top", env.sky.top);
     changed |= editColor("Sky horizon", env.sky.horizon);
     changed |= editColor("Sky bottom", env.sky.bottom);
-    changed |= ImGui::InputText("Panorama", &env.sky.panorama);
+    changed |= assetPicker("Panorama", env.sky.panorama, AssetKind::Image, true);
     changed |= ImGui::SliderFloat("Clouds", &env.sky.cloudCover, 0, 1);
     changed |= ImGui::DragFloat("Cloud speed", &env.sky.cloudSpeed, 0.001f, 0, 1);
     changed |= editColor("Cloud colour", env.sky.cloudColor);
@@ -405,7 +552,7 @@ void Editor::drawEnvironment(World& w) {
     changed |= ImGui::SliderFloat("Weather intensity", &env.weather.intensity, 0, 2);
     changed |= editVec3("Wind", env.weather.wind);
     changed |= editColor("Weather colour", env.weather.color);
-    changed |= ImGui::InputText("Weather sprite", &env.weather.sprite);
+    changed |= assetPicker("Weather sprite", env.weather.sprite, AssetKind::Sprite, true);
     ImGui::SeparatorText("Post");
     auto& p = env.post;
     changed |= ImGui::Checkbox("Bloom", &p.bloom);
@@ -437,10 +584,10 @@ void Editor::drawEnvironment(World& w) {
     changed |= editChoice("Tonemap", p.tonemap, {"aces", "none"});
     changed |= ImGui::SliderFloat("Vignette strength", &p.vignetteStrength, 0, 2);
     changed |= ImGui::DragFloat("Pixel scale", &p.pixelScale, 0.05f, 1, 8, "%.2f");
-    changed |= ImGui::InputText("LUT", &p.lut);
-    changed |= ImGui::InputText("LUT blend target", &p.lutBlendTarget);
+    changed |= assetPicker("LUT", p.lut, AssetKind::Lut, true);
+    changed |= assetPicker("LUT blend target", p.lutBlendTarget, AssetKind::Lut, true);
     changed |= ImGui::SliderFloat("LUT blend", &p.lutBlend, 0, 1);
-    changed |= editSection("Custom passes [{shader, params}]", "/post/custom");
+    changed |= editSection("Custom passes", "/post/custom");
     if (!changed) {
         return;
     }

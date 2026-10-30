@@ -1,0 +1,55 @@
+[
+ {
+  "frame": 60,
+  "mouse": [
+   465,
+   502
+  ]
+ },
+ {
+  "frame": 64,
+  "click": "left"
+ },
+ {
+  "frame": 72,
+  "mouse": [
+   299,
+   584
+  ]
+ },
+ {
+  "frame": 76,
+  "click": "left"
+ },
+ {
+  "frame": 86,
+  "expect_selection": "elder"
+ },
+ {
+  "frame": 87,
+  "capture": "out/27_scripts_select_row.png"
+ },
+ {
+  "frame": 90,
+  "mouse": [
+   1181,
+   673
+  ]
+ },
+ {
+  "frame": 94,
+  "click": "left"
+ },
+ {
+  "frame": 104,
+  "expect_status": "Running page 1 of elder"
+ },
+ {
+  "frame": 105,
+  "capture": "out/28_run_page_from_scripts.png"
+ },
+ {
+  "frame": 110,
+  "quit": true
+ }
+]

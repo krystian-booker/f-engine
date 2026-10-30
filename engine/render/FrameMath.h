@@ -320,11 +320,11 @@ inline glm::ivec2 sceneSizeFor(glm::ivec2 outSize, float pixelScale) {
 class DrawCameras {
 public:
     const Camera& update(const void* world, const std::string& target, const Camera& next,
-                         std::uint64_t tick) {
+                         std::uint64_t tick, bool snap = false) {
         const Key key{world, target, ordinals_[{world, target}]++};
         auto [found, added] = states_.try_emplace(key);
         auto& state = found->second;
-        if (added) {
+        if (added || snap) {
             state.camera = next;
             state.camera.snap();
         } else {

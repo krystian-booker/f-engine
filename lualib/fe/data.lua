@@ -111,14 +111,50 @@ function data.validate(name, records, schema_name)
   local copy = tablex.deep_copy(records)
   local _, by_id, errors, refs = check_records(name, copy, schema_name, name)
   for _, ref in ipairs(refs) do
-    local target = ref.table == name and { by_id = by_id } or tables[ref.table]
-    if not target then
-      errors[#errors + 1] = ref.path .. ": table '" .. ref.table .. "' is not loaded"
-    elseif not target.by_id[ref.id] then
-      errors[#errors + 1] = ref.path .. ": unknown " .. ref.table .. " '" .. ref.id .. "'"
+    if ref.table then
+      local target = ref.table == name and { by_id = by_id } or tables[ref.table]
+      if not target then
+        errors[#errors + 1] = ref.path .. ": table '" .. ref.table .. "' is not loaded"
+      elseif not target.by_id[ref.id] then
+        errors[#errors + 1] = ref.path .. ": unknown " .. ref.table .. " '" .. ref.id .. "'"
+      end
+    else
+      local problem = data.reference_problem(ref)
+      if problem then errors[#errors + 1] = ref.path .. ": " .. problem end
     end
   end
   return #errors == 0, errors
+end
+
+--- Why a file-like reference from a schema ({asset=}, {module=}, {map=},
+--- {point=}) points at nothing, or nil when it exists. Audio ids resolve
+--- through fe.sound's catalog when it is loaded.
+---@param ref {asset?: string, module?: string, map?: boolean, point?: string, id: string}
+---@return string?
+function data.reference_problem(ref)
+  local id = ref.id
+  if id == "" then return "empty" end
+  if ref.asset then
+    if ref.asset == "audio" and not id:find("[/.]") then
+      local ok, sound = pcall(require, "fe.sound")
+      if ok and sound.has and not sound.has(id) then return "unknown audio id '" .. id .. "'" end
+      return nil
+    end
+    if not fe.fs.exists(id) then return ref.asset .. " file not found: " .. id end
+  elseif ref.module then
+    local file = id:gsub("%.", "/")
+    if not (fe.fs.exists(file .. ".lua") or fe.fs.exists(file .. "/init.lua") or
+            fe.fs.exists("@fe/" .. file:gsub("^fe/", "") .. ".lua")) then
+      -- Function paths ("ai.slime.think") name a function inside a module.
+      local parent = file:match("^(.*)/[^/]+$")
+      if not (parent and (fe.fs.exists(parent .. ".lua") or fe.fs.exists(parent .. "/init.lua"))) then
+        return "module not found: " .. id
+      end
+    end
+  elseif ref.map then
+    if not fe.fs.exists("maps/" .. id .. "/map.json") then return "map not found: " .. id end
+  end
+  return nil
 end
 
 --- Check every {ref = "table"} field across loaded tables.
@@ -127,8 +163,13 @@ function data.check_references()
   local problems = {}
   for _, t in pairs(tables) do
     for _, ref in ipairs(t.refs) do
-      local target = tables[ref.table]
-      if not target then
+      -- File-like references (assets, modules, maps) are checked when the
+      -- editor saves and by `fengine_headless --check`, not at start-up: a
+      -- missing portrait should not stop a game from loading.
+      local target = ref.table and tables[ref.table]
+      if not ref.table then
+        -- nothing
+      elseif not target then
         problems[#problems + 1] = ref.path .. ": table '" .. ref.table .. "' is not loaded"
       elseif not target.by_id[ref.id] then
         problems[#problems + 1] = ref.path .. ": unknown " .. ref.table .. " '" .. ref.id .. "'"

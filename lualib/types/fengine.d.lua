@@ -653,6 +653,7 @@ fe.screen.get = nil
 ---@field layer integer (read-only) Grid layer.
 ---@field facing {x: number, z: number} (read-only) Facing direction on the ground plane; a copy. Turn the entity with face.
 ---@field yaw number Rotation of mesh entities about the vertical axis in degrees.
+---@field scale Vec3 Scale of mesh entities (set a number for a uniform scale or a vector).
 local Entity = {}
 
 --- False once destroyed (or its world unloaded); a handle never comes to name a later entity.
@@ -842,8 +843,12 @@ World.props = nil
 World.points = nil
 
 --- Authored placements; scripts decide what to spawn for each type.
----@type fun(self: World): {id: string, type: string, position: Vec3, facing: {x: number, z: number}, layer: integer, props: table}[]
+---@type fun(self: World): {id: string, type: string, position: Vec3, facing: {x: number, z: number}, layer: integer, yaw: number, scale: Vec3, props: table}[]
 World.placements = nil
+
+--- The authored placement with that id, or nil (the live map: editor edits included).
+---@type fun(self: World, id: string): {id: string, type: string, position: Vec3, facing: {x: number, z: number}, layer: integer, yaw: number, scale: Vec3, props: table}|nil
+World.placement = nil
 
 --- Authored zones (camera regions, trigger areas, anything a game defines).
 ---@type fun(self: World): {id: string, type: string, min: {x: number, z: number}, max: {x: number, z: number}, layer: integer, props: table}[]

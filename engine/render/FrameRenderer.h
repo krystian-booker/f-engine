@@ -4,6 +4,7 @@
 #include "engine/render/PostPass.h"
 #include "engine/render/WorldRenderer.h"
 #include "engine/runtime/Engine.h"
+#include <map>
 #include <memory>
 
 namespace fe {
@@ -34,6 +35,14 @@ public:
     // After bgfx::frame(): writes the scene captures whose read-back finished.
     void finishFrame(std::uint32_t frame);
     [[nodiscard]] std::uint32_t drawCalls() const { return calls_; }
+    // GPU copies of images, sprite sheets and models (the editor's thumbnails).
+    [[nodiscard]] GpuAssets& gpu() { return gpu_; }
+    // Keeps a copy of the named render target `target` drawn this frame under
+    // `key`, so later frames can show it without drawing it again (the
+    // editor's model thumbnails: one hidden world draw per model, once).
+    void keepTarget(const std::string& target, const std::string& key) { keepRequests_.emplace_back(target, key); }
+    [[nodiscard]] bgfx::TextureHandle keptTarget(std::string_view key) const;
+    void forgetKeptTargets() { kept_.clear(); }
     // Per-draw parameters (u_params) of an entity's game sprite or mesh
     // shader; see WorldRenderer::setShaderParams. What a script's
     // `entity:shader_params{...}` should reach.
@@ -71,6 +80,8 @@ private:
     glm::ivec2 frameSize_{0};
     FramePool<std::pair<int, int>, SceneTarget> scenes_;
     FramePool<std::string, NamedTarget> named_;
+    std::vector<std::pair<std::string, std::string>> keepRequests_;
+    std::map<std::string, Texture, std::less<>> kept_;
     FreezeFrame freeze_;
     std::vector<std::filesystem::path> sceneCaptures_;
     std::vector<std::unique_ptr<Readback>> readbacks_;
