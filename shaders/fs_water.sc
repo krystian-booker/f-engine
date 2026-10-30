@@ -3,8 +3,7 @@ $input v_texcoord0, v_color0, v_worldPos, v_normal, v_viewDir, v_tangent
 SAMPLER2D(s_sceneDepth, 1);
 #include "lighting.sh"
 SAMPLER2D(s_sceneColor, 6);
-// Only [0] (colour times tint) is read; declared [3] because every part binds
-// the engine's u_material (fs_world.sc) and bgfx wants one size per name.
+// colour; alpha cutoff, has normal map, unlit, normal scale; emissive rgb, blend output (as fs_world.sc)
 uniform vec4 u_material[3];
 // time, wave scale, wave speed, fresnel; deep colour, depth falloff;
 // sky horizon, specular; near, far, depth tint enabled, orthographic camera (0/1);
@@ -75,7 +74,8 @@ void main() {
     }
     float sun = max(0.0, dot(normal, -u_sunDirection.xyz)) * shadowVisibility(v_worldPos);
     vec3 light = u_ambient.rgb + u_sunColor.rgb * sun + pointLights(v_worldPos, normal, v_worldPos);
-    vec3 color = base * light;
+    vec3 color = mix(base * light, base, u_material[1].z);
+    color += u_material[2].rgb;
     float coverage = clamp(alpha + fresnel * 0.3, 0.0, 1.0);
     if (copied) {
         // Composite over the refracted scene here; where the scene behind is

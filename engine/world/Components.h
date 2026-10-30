@@ -7,6 +7,8 @@
 #include <glm/glm.hpp>
 #include <optional>
 #include <string>
+#include <type_traits>
+#include <variant>
 #include <vector>
 
 namespace fe {
@@ -105,35 +107,12 @@ struct Waypoint {
     StepKind kind = StepKind::Walk;
 };
 
-// What a mover is doing. A followed route may pass through a jump or a
-// climb: the motion is Jump or Climb while the arc or the ladder lasts and
-// goes back to the route (or ends with `arrived`) afterwards. Launch is a
-// ballistic flight under gravity, never part of a route.
+// What a mover is doing (the alternative of Mover::state). A followed route
+// may pass through a jump or a climb: the motion is Jump or Climb while the
+// arc or the ladder lasts and goes back to the route (or ends with `arrived`)
+// afterwards. Launch is a ballistic flight under gravity, never part of a
+// route.
 enum class Motion : std::uint8_t { None, Route, Jump, Climb, Launch };
-
-// A jump in flight: a parabola from `from` to `to` over `duration` seconds,
-// landing on layer `layer`.
-struct JumpArc {
-    glm::vec3 from{0}, to{0};
-    float height = 1, duration = 0.5f, time = 0;
-    int fromLayer = 0, layer = 0;
-};
-
-// A ladder climb: straight segments through `points` at their speeds, from
-// `start` (on `fromLayer`) to the last point (on `layer`).
-struct LadderClimb {
-    std::vector<std::pair<glm::vec3, float>> points;
-    glm::vec3 start{0};
-    glm::vec2 facing{0, -1};
-    int fromLayer = 0, layer = 0;
-};
-
-// A ballistic flight (MovementSystem::launch): `velocity` in units/second,
-// falling under MovementTuning::gravity, from `fromLayer`.
-struct Ballistic {
-    glm::vec3 velocity{0};
-    int fromLayer = 0;
-};
 
 struct Mover {
     // Settings
@@ -154,17 +133,75 @@ struct Mover {
     std::uint32_t blockedTags = 0, requiredTags = 0;
     glm::vec2 drive{0}; // direct steering for this tick (units/second)
 
-    // State, owned by MovementSystem
-    Motion motion = Motion::None;
-    bool onRoute = false; // the jump or climb is a step of `waypoints`: `arrived` follows it
-    std::vector<Waypoint> waypoints;
-    double stuckTime = 0;
-    JumpArc arc;
-    LadderClimb climb;
-    Ballistic flight;
-    bool moved = false; // displaced by its own walking, jumping or climbing this tick
+    // State, owned by MovementSystem. A mover is in exactly one motion at a
+    // time, the alternative `state` holds, so it can never be on a route and
+    // in a jump, or in a jump and on a ladder, at once.
+    struct Idle {};
+    // Walking a route: the waypoints still ahead, the next one first.
+    struct Route {
+        std::vector<Waypoint> waypoints;
+        double stuckTime = 0; // seconds spent in ticks that covered too little of their step
+    };
+    // A jump in flight: a parabola from `from` to `to` over `duration`
+    // seconds, landing on layer `layer`. `route` is the followed route this
+    // jump is a step of, resumed on landing (an `arrived` when it is
+    // finished); a standalone jump has none.
+    struct Jump {
+        glm::vec3 from{0}, to{0};
+        float height = 1, duration = 0.5f, time = 0;
+        int fromLayer = 0, layer = 0;
+        std::optional<Route> route;
+    };
+    // A ladder climb: straight segments through `points` at their speeds,
+    // from `start` (on `fromLayer`) to the last point (on `layer`). `route`
+    // as for Jump.
+    struct Climb {
+        std::vector<std::pair<glm::vec3, float>> points;
+        glm::vec3 start{0};
+        glm::vec2 facing{0, -1};
+        int fromLayer = 0, layer = 0;
+        std::optional<Route> route;
+    };
+    // A ballistic flight (MovementSystem::launch): `velocity` in
+    // units/second, falling under MovementTuning::gravity, from `fromLayer`.
+    struct Launch {
+        glm::vec3 velocity{0};
+        int fromLayer = 0;
+    };
+    using State = std::variant<Idle, Route, Jump, Climb, Launch>; // in Motion's order
+    State state;
+    bool moved = false;     // displaced by its own walking, jumping or climbing this tick
     GridPos cell{0, 0, -1}; // last cell reported with cell_enter (layer -1 = none yet)
+
+    // The motion in progress, by kind.
+    [[nodiscard]] Motion motion() const { return static_cast<Motion>(state.index()); }
+    [[nodiscard]] bool idle() const { return std::holds_alternative<Idle>(state); }
+    // Off its feet: in a jump, a climb or a launch. Steering waits until it
+    // lands and platforms do not carry it.
+    [[nodiscard]] bool airborne() const {
+        return !std::holds_alternative<Idle>(state) && !std::holds_alternative<Route>(state);
+    }
+    // The motion's data when it is a T (Mover::Route, Mover::Jump...), else null.
+    template<class T> [[nodiscard]] T* as() { return std::get_if<T>(&state); }
+    template<class T> [[nodiscard]] const T* as() const { return std::get_if<T>(&state); }
+    // The route being followed: directly, or through one of its jumps or
+    // climbs. Null when there is none.
+    [[nodiscard]] const Route* route() const {
+        if (const auto* walking = as<Route>()) {
+            return walking;
+        }
+        if (const auto* jumping = as<Jump>()) {
+            return jumping->route ? &*jumping->route : nullptr;
+        }
+        if (const auto* climbing = as<Climb>()) {
+            return climbing->route ? &*climbing->route : nullptr;
+        }
+        return nullptr;
+    }
 };
+static_assert(std::is_same_v<std::variant_alternative_t<1, Mover::State>, Mover::Route> &&
+                  std::is_same_v<std::variant_alternative_t<4, Mover::State>, Mover::Launch>,
+              "Mover::State's alternatives follow Motion's order (None, Route, Jump, Climb, Launch)");
 
 // A moving surface (rafts, lifts). Its top is the entity's position; the
 // footprint is `size` (x by z) centred on it. Movers and colliders standing on

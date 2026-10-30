@@ -46,10 +46,12 @@ local tactical_settings = {
       state = 0.3,         -- a state added to a foe or removed from an ally
       disable = 0.6,       -- extra for a state that prevents action
       revive = 1,          -- reviving an ally
+      counter = 0.5,       -- a likely counter-attack (reactions.forecast) counts this share of a hit against it
       --- Most action previews (`effects.resolve` in preview mode) one plan
-      --- may run; past it the best plan found so far is used. Previews are
-      --- memoised per (skill, target, height bucket, side attacked from)
-      --- and only destinations within a skill's range of a target are tried.
+      --- may run: one per (skill, target) some destination can shoot, so
+      --- the cap only matters with many skills and targets; (skill, target)
+      --- pairs past it are not considered. Destinations are scored without
+      --- previews, by their height, facing and counter chance.
       max_previews = 400,
     },
   },

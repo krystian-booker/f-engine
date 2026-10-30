@@ -279,11 +279,29 @@ glm::vec2 canvasToNdc(Engine& engine, float x, float y) {
 // Overlays are drawn every frame, so their size is bounded.
 constexpr std::size_t MaxOverlays = 256;
 constexpr std::size_t MaxOverlayCells = 65536;
-std::vector<GridPos> overlayCells(const sol::object& value, const char* what) {
-    if (lua::length(lua::tableArg(value, what)) > MaxOverlayCells) {
-        throw std::runtime_error(std::string(what) + ": at most 65536 cells");
+
+// What world:overlay and world:overlay_path share: the entry named `name` in
+// `entries` (a map of layers or paths, `plural` in messages), made or
+// replaced with the validated `cells` and the colour of `options` (kept when
+// the options have none). Throws when `entries` is full and `name` is new, or
+// the cells are too many.
+template<class Entry>
+Entry& overlayEntry(std::map<std::string, Entry>& entries, const std::string& name, const sol::object& cells,
+                    const std::optional<sol::table>& options, const char* what, const char* plural) {
+    const std::string cellsWhat = std::string(what) + " cells";
+    if (lua::length(lua::tableArg(cells, cellsWhat.c_str())) > MaxOverlayCells) {
+        throw std::runtime_error(cellsWhat + ": at most 65536 cells");
     }
-    return lua::cells(value, what);
+    auto list = lua::cells(cells, cellsWhat.c_str());
+    if (!entries.contains(name) && entries.size() >= MaxOverlays) {
+        throw std::runtime_error("A world shows at most 256 " + std::string(plural) + "; clear some first");
+    }
+    auto& entry = entries[name];
+    entry.cells = std::move(list);
+    if (options) {
+        entry.color = lua::color(lua::field(*options, "color"), entry.color);
+    }
+    return entry;
 }
 
 float aspect(Engine& engine) {
@@ -574,15 +592,8 @@ void bindOverlays(TypeBinder<WorldRef>& type) {
             "overlay",
             [](const WorldRef& w, const std::string& name, sol::object cells, sol::object settings) {
                 const auto options = lua::options(settings, "overlay options");
-                auto list = overlayCells(cells, "overlay cells");
-                auto& overlays = w.get().overlays();
-                if (!overlays.contains(name) && overlays.size() >= MaxOverlays) {
-                    throw std::runtime_error("A world shows at most 256 overlays; clear some first");
-                }
-                auto& layer = overlays[name];
-                layer.cells = std::move(list);
+                auto& layer = overlayEntry(w.get().overlays(), name, cells, options, "overlay", "overlays");
                 if (options) {
-                    layer.color = lua::color(lua::field(*options, "color"), layer.color);
                     layer.pulse = lua::get(*options, "pulse", layer.pulse);
                     layer.order = lua::get(*options, "order", layer.order);
                     layer.border = lua::get(*options, "border", layer.border);
@@ -609,16 +620,7 @@ void bindOverlays(TypeBinder<WorldRef>& type) {
             "overlay_path",
             [](const WorldRef& w, const std::string& name, sol::object cells, sol::object settings) {
                 const auto options = lua::options(settings, "overlay_path options");
-                auto list = overlayCells(cells, "overlay_path cells");
-                auto& paths = w.get().overlayPaths();
-                if (!paths.contains(name) && paths.size() >= MaxOverlays) {
-                    throw std::runtime_error("A world shows at most 256 overlay paths; clear some first");
-                }
-                auto& path = paths[name];
-                path.cells = std::move(list);
-                if (options) {
-                    path.color = lua::color(lua::field(*options, "color"), path.color);
-                }
+                overlayEntry(w.get().overlayPaths(), name, cells, options, "overlay_path", "overlay paths");
             },
             "fun(name: string, cells: Cell[], options?: {color?: Color})",
             "Draw a path arrow through cells (at most 65536, in at most 256 paths per world); the colour is "
@@ -789,11 +791,9 @@ void bindMapData(TypeBinder<WorldRef>& type) {
             "0.4, 0.2, 0.5) and lasts at least `jump_minimum_seconds` (0.01-10, 0.3); `landing_search` "
             "(0-16, 1) is how far around a blocked landing the nearest free spot is looked for; `gravity` "
             "(0.1-1000, 20 units/second^2) pulls down bodies in flight after entity:launch.")
-        .method(
-            "time", [](const WorldRef& w) { return w.get().time(); }, "fun(): number",
-            "Simulated seconds of this world (advanced by its ticks at its time_scale, not while paused). "
-            "A method rather than a property like `paused` and `time_scale`: a Lua value cannot be both "
-            "(`w:time()` would call a number), so the spelling stays for compatibility.")
+        .readonly(
+            "time", [](const WorldRef& w) { return w.get().time(); }, "number",
+            "Simulated seconds of this world (advanced by its ticks at its time_scale, not while paused).")
         .property(
             "paused", [](const WorldRef& w) { return w.get().paused; },
             [](const WorldRef& w, sol::object paused) { w.get().paused = lua::as<bool>(paused, "paused"); },

@@ -47,6 +47,9 @@ When you change a binding, refresh the API files with `python3 tools/ci/check_ap
 
 On macOS the windowed replays need an awake display: while it sleeps, Metal presents no frames and the replays stall until CTest's timeout. Run them under `caffeinate -du` (for example `caffeinate -du ctest --test-dir build -L windowed`) on an unattended machine.
 
+
+Setting `FENGINE_HDR_FORMAT=rgb10a2` makes a `--hdr` run skip the scRGB swap chain, so the RGB10A2 (HDR10) fallback can be exercised on a GPU that would otherwise take RGBA16F; `--capture` decodes either format back to sRGB.
+
 ## Replays
 
 A replay is a JSON array of commands, each with a `tick`, or an object `{"seed": n, "commands": [...]}`. Logic advances exactly 1/60 s per tick, so a replay is deterministic for its seed (`--seed` overrides it; the default is 1).

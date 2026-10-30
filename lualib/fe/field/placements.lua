@@ -237,8 +237,52 @@ placements.fields = {
   }, "An item found by searching a spot, once." },
 }
 
+--- Attach a placement's event pages (`props.pages`, or a single page from
+--- `props.script` and `props.trigger`) to its entity; `defaults` describe
+--- the entity without an active page (see fe.event.attach).
+---@param entity Entity
+---@param placement table
+---@param defaults table
+function placements.apply_pages(entity, placement, defaults)
+  local props = placement.props
+  local pages = props.pages
+  if not pages and props.script then
+    pages = { { script = props.script, trigger = props.trigger or "action" } }
+  end
+  if pages then
+    event.attach(entity, pages, defaults)
+  end
+end
+
+--- Spawn a world's placements by type (`field.types`) into the field's
+--- entity list (`field.entities()`, cleared in place first), skipping ones
+--- that are following the party; a spawner that raises is reported and
+--- skipped.
+---@param world World
+function placements.spawn(world)
+  local f = field()
+  local entities = f.entities()
+  for key in pairs(entities) do entities[key] = nil end
+  local following = require("fe.follower")
+  for _, p in ipairs(world:placements()) do
+    local spawner = f.types[p.type]
+    if spawner and not following.has(p.id) then
+      local ok, entity = pcall(spawner, world, p)
+      if not ok then
+        fe.log.error("Placement '" .. p.id .. "' (" .. p.type .. "): " .. tostring(entity))
+      elseif entity then
+        entities[#entities + 1] = entity
+      end
+    elseif not spawner and p.type ~= "marker" then
+      fe.log.warn("No field type '" .. p.type .. "' for placement " .. p.id)
+    end
+  end
+end
+
 --- Register every built-in type with `field.define` (fe.field does this
---- when it loads; a type the game defined already is not replaced).
+--- when it loads; a type the game defined already is not replaced) and
+--- give `field` the `spawn_placements` and `apply_pages` functions it does
+--- not have yet (or had from this module).
 ---@param field table the fe.field module
 function placements.install(field)
   for name, spec in pairs(placements.fields) do
@@ -247,10 +291,18 @@ function placements.install(field)
       placements.installed[name] = placements[name]
     end
   end
+  local functions = { spawn_placements = placements.spawn, apply_pages = placements.apply_pages }
+  for name, fn in pairs(functions) do
+    if field[name] == nil or field[name] == placements.installed[name] then
+      field[name] = fn
+      placements.installed[name] = fn
+    end
+  end
 end
 
---- The spawners this module installed, by type (so a reload replaces its
---- own registrations and leaves a game's alone).
+--- The spawners this module installed, by type, and its functions on
+--- fe.field, by name (so a reload replaces its own registrations and
+--- leaves a game's alone).
 placements.installed = {}
 
 --- Register the fresh spawners after a hot reload of this file.

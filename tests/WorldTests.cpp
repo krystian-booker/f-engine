@@ -1351,7 +1351,8 @@ TEST_CASE("a climb interrupted part-way steps off at the nearer end, on that end
         for (int i = 0; i < 1200; ++i) {
             s.step();
             const auto& mover = s.world.registry().get<Mover>(e);
-            if (mover.motion == Motion::Climb && s.world.registry().get<Transform>(e).position.y >= height) {
+            if (mover.motion() == Motion::Climb &&
+                s.world.registry().get<Transform>(e).position.y >= height) {
                 return true;
             }
         }
@@ -1365,7 +1366,7 @@ TEST_CASE("a climb interrupted part-way steps off at the nearer end, on that end
     const auto& t = s.world.registry().get<Transform>(e);
     // A target outside the grid is refused before the climb is touched.
     CHECK_THROWS(s.world.moveTo(e, {40, 0, 40}, true));
-    CHECK(s.world.registry().get<Mover>(e).motion == Motion::Climb);
+    CHECK(s.world.registry().get<Mover>(e).motion() == Motion::Climb);
     s.world.moveTo(e, centre(0, 0, 4), true, 1);
     CHECK(t.layer == 1);
     CHECK(t.position.y == doctest::Approx(4));
@@ -1750,7 +1751,7 @@ TEST_CASE("mover tags are a passability class: boats keep to water and walkers o
     StepRules rules;
     rules.diagonal = true;
     s.world.moveTo(walker, centre(0, 1), true, std::nullopt, &rules);
-    CHECK(legs.motion == Motion::Route); // planned straight across; standing still obeys the class
+    CHECK(legs.motion() == Motion::Route); // planned straight across; standing still obeys the class
     CHECK(s.world.takeEvents().empty());
 }
 
@@ -1927,10 +1928,10 @@ TEST_CASE("a launch during a ladder climb is refused") {
     bool climbing = false;
     for (int i = 0; i < 300 && !climbing; ++i) {
         s.step();
-        climbing = s.world.registry().get<Mover>(e).motion == Motion::Climb &&
+        climbing = s.world.registry().get<Mover>(e).motion() == Motion::Climb &&
                    s.world.registry().get<Transform>(e).position.y > 1;
     }
     REQUIRE(climbing);
     CHECK_THROWS_AS(s.world.launch(e, {0, 1, 0}), std::runtime_error);
-    CHECK(s.world.registry().get<Mover>(e).motion == Motion::Climb);
+    CHECK(s.world.registry().get<Mover>(e).motion() == Motion::Climb);
 }

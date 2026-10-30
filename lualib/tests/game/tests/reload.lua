@@ -18,7 +18,8 @@ local ui = require("fe.ui")
 local kits = {
   "signal.lua", "task.lua", "scene.lua", "state.lua", "save.lua", "game.lua", "i18n.lua", "input.lua", "config.lua",
   "schema.lua", "data.lua", "event.lua", "camera.lua", "dialogue.lua", "cutscene.lua", "field.lua",
-  "field/placements.lua", "field/followers.lua", "follower.lua", "daynight.lua", "quest.lua", "story.lua",
+  "field/placements.lua", "field/followers.lua", "field/warp.lua", "field/interaction.lua", "field/hooks.lua",
+  "follower.lua", "daynight.lua", "quest.lua", "story.lua",
   "worldmap.lua", "sound.lua", "timeline.lua", "devtools.lua", "ui/theme.lua", "ui/init.lua", "ui/screens/menu.lua",
   "ui/screens/backlog.lua", "ui/screens/config.lua", "ui/screens/save.lua", "ui/screens/shop.lua", "vehicle.lua",
 }

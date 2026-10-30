@@ -26,7 +26,7 @@ struct MovementTuning {
 // solid entities, changes layers through Grid::traverseLink and climbs
 // ladders through Grid::ladderStep, the rules path finding uses.
 //
-// A mover is in one motion at a time (Mover::motion): none, a route, a jump,
+// A mover is in one motion at a time (Mover::state): idle, a route, a jump,
 // a climb or a launch. Every command (moveTo, follow, stop, jump, launch,
 // place) first ends a jump, launch or climb in progress: a jump lands at once
 // at the ground under the body (or, over a void, at the nearer end of its
@@ -122,10 +122,17 @@ private:
     [[nodiscard]] std::optional<glm::vec3> landingFor(entt::entity entity, glm::vec3 target, int layer) const;
 
     bool stepTowards(entt::entity entity, glm::vec2 delta);
-    bool startJump(entt::entity entity, glm::vec3 target, float height, float duration, int layer);
-    // Starts climbing the ladder that joins the mover's cell to `to`, ending at
-    // `end`; false when no ladder joins them.
-    bool startClimb(entt::entity entity, GridPos to, glm::vec3 end);
+    // The jump arc from where the body is to `target` (landing on `layer`),
+    // or nothing when no landing there is free.
+    [[nodiscard]] std::optional<Mover::Jump> jumpTo(entt::entity entity, glm::vec3 target, float height,
+                                                    float duration, int layer) const;
+    // The climb of the ladder that joins the mover's cell to `to`, ending at
+    // `end`, or nothing when no ladder joins them.
+    [[nodiscard]] std::optional<Mover::Climb> climbTo(entt::entity entity, GridPos to, glm::vec3 end) const;
+    // Enters the jump or climb, carrying `route` (the followed route it is a
+    // step of, if any) to resume afterwards, and emits jump_start/climb_start.
+    void begin(entt::entity entity, Mover::Jump jump, std::optional<Mover::Route> route);
+    void begin(entt::entity entity, Mover::Climb climb, std::optional<Mover::Route> route);
     // Ends the jump, launch or climb in progress, if any (see the class comment).
     void settle(entt::entity entity);
     void finishJump(entt::entity entity, bool interrupted);
@@ -136,9 +143,10 @@ private:
     // The highest standable surface at or below `height` at `position`, else
     // the lowest layer's surface (the floor, which is never fallen through).
     [[nodiscard]] Surface groundUnder(glm::vec2 position, const Body& body, float height) const;
-    // What follows a finished jump or climb: the rest of the route, `arrived`, or nothing.
-    void resume(entt::entity entity);
-    static void reset(Mover& mover);
+    // What follows a finished jump or climb: the rest of `route`, `arrived`
+    // when it has none left, or nothing without a route.
+    void resume(entt::entity entity, std::optional<Mover::Route> route);
+    static void reset(Mover& mover) { mover.state = Mover::Idle{}; }
     void advanceJump(entt::entity entity, float dt);
     void advanceLaunch(entt::entity entity, float dt);
     void advanceClimb(entt::entity entity, float dt);

@@ -889,9 +889,14 @@ return {
     local ai = require("fe.battle.tactical.ai")
     local grid = require("fe.battle.tactical.grid")
     local weights = tactical.settings.ai
-    local previews, ranges = 0, 0
-    local expected, range_cells = ai.expected, grid.range_cells
+    local previews, ranges, resolves, positional = 0, 0, 0, 0
+    local effects = require("fe.effects")
+    local rules = require("fe.battle.tactical.rules")
+    local expected, range_cells, resolve, info = ai.expected, grid.range_cells, effects.resolve, rules.positional_info
     ai.expected = function(...) previews = previews + 1 return expected(...) end
+    effects.resolve = function(...) resolves = resolves + 1 return resolve(...) end
+    rules.positional_info = function(...) positional = positional + 1 return info(...) end
+    local classes = 3 * 13 -- attack sides x half-cell height buckets within +-3
     grid.range_cells = function(...) ranges = ranges + 1 return range_cells(...) end
     local plan = tactical.plan(b, slime)
     t.ok(plan.action ~= nil and plan.action.targets[1].side == "party", "a reachable target is attacked")
@@ -900,11 +905,31 @@ return {
     local cells = tactical.reachable(b, slime)
     t.ok(ranges < #cells, "destinations out of every target's range are never range-tested: "
       .. ranges .. " of " .. #cells)
-    -- Memoised: a previewed (skill, target, height, side) is not forecast again
-    -- from another destination; with two foes and four sides that is at most 8
-    -- previews per skill, far fewer than destinations x targets.
-    t.ok(previews <= 8 * #tablex.filter(slime:skills(), function(s) return not s.passive end) + 8,
-      "previews are shared between destinations: " .. previews)
+    -- One preview per (skill, target), whatever the number of destinations:
+    -- each destination is scored by a positional factor instead.
+    local skills = #tablex.filter(slime:skills(), function(s) return not s.passive and s.scope ~= "field" end) + 1
+    local targets = #b:opponents(slime)
+    t.ok(previews <= skills * targets, "at most one preview per skill and target: " .. previews
+      .. " for " .. skills .. " x " .. targets)
+    t.eq(resolves, previews, "every effect resolution of the plan is one of those previews: none per destination")
+    t.ok(positional <= classes * previews, "the positional rules run at most once per class, not per destination: "
+      .. positional .. " for " .. previews .. " previews")
+    local positional_before = positional
+    t.eq(ai.positional(b, slime, data.get("skills", "might"), hero, { damaging = false }), 1,
+      "a skill that hurts no foe has no positional factor")
+    -- More reachable destinations change nothing about the preview count:
+    -- no effect is ever resolved per destination.
+    local before = previews
+    slime:buff({ stat = "move", add = 4 }, 3)
+    local wider = tactical.reachable(b, slime)
+    t.ok(#wider > #cells, "the buffed unit reaches more cells: " .. #wider .. " > " .. #cells)
+    previews, resolves, positional = 0, 0, 0
+    tactical.plan(b, slime)
+    t.eq(previews, before, "the preview count does not grow with the destinations")
+    t.eq(resolves, before, "nor does the number of effect resolutions")
+    t.ok(positional <= classes * previews and positional <= positional_before + classes,
+      "the rules still run once per class with twice the destinations: " .. positional)
+    slime:clear_buffs()
     -- Out of budget: the best plan so far is used.
     local saved = weights.max_previews
     weights.max_previews = 1
@@ -922,7 +947,7 @@ return {
     t.eq(previews, 0, "no destination is within range of a target")
     t.eq(far.action, nil)
     t.ok(far.move ~= nil and #far.move > 0, "so the unit closes in")
-    ai.expected, grid.range_cells = expected, range_cells
+    ai.expected, grid.range_cells, effects.resolve, rules.positional_info = expected, range_cells, resolve, info
     teardown()
   end,
 

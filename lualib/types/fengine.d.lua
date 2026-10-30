@@ -806,6 +806,7 @@ Camera.ray = nil
 ---@field name string (read-only) World name.
 ---@field map_id string (read-only) Map folder id.
 ---@field map_name string (read-only) Display name.
+---@field time number (read-only) Simulated seconds of this world (advanced by its ticks at its time_scale, not while paused).
 ---@field paused boolean When true the world stops simulating (movers, animation, particles, events) but still renders and accepts changes.
 ---@field time_scale number Multiplies the tick length for this world, 0 to 10 (0 = frozen, slow motion and hit-stop below 1, 1 = normal, fast-forward above 1). Larger steps would let movers pass through walls.
 local World = {}
@@ -845,10 +846,6 @@ World.movement_tuning = nil
 --- Tune this world's movers; omitted fields keep their value. `arrive_distance` (0.001-1, default 0.05): a waypoint counts as reached within it, stopping short is a block; `snap_distance` (0-1, 0.02): a waypoint this close is reached even when the tick's step is shorter; `stuck_share` (0-1, 0.1) and `stuck_seconds` (0.05-60, 1): a route whose ticks cover less than that share of their step for that long is `blocked`; a route jump's apex is `jump_arc_base` + `jump_arc_per_unit` x horizontal length + `jump_arc_per_rise` x |height difference| (each 0-16; 0.4, 0.2, 0.5) and lasts at least `jump_minimum_seconds` (0.01-10, 0.3); `landing_search` (0-16, 1) is how far around a blocked landing the nearest free spot is looked for; `gravity` (0.1-1000, 20 units/second^2) pulls down bodies in flight after entity:launch.
 ---@type fun(self: World, changes: {arrive_distance?: number, snap_distance?: number, stuck_share?: number, stuck_seconds?: number, jump_arc_base?: number, jump_arc_per_unit?: number, jump_arc_per_rise?: number, jump_minimum_seconds?: number, landing_search?: number, gravity?: number})
 World.set_movement_tuning = nil
-
---- Simulated seconds of this world (advanced by its ticks at its time_scale, not while paused). A method rather than a property like `paused` and `time_scale`: a Lua value cannot be both (`w:time()` would call a number), so the spelling stays for compatibility.
----@type fun(self: World): number
-World.time = nil
 
 --- Create an entity with the given components. Without a `y` in `position` (or with keep_height) it stands on the grid; `yaw` is in degrees.
 ---@type fun(self: World, spec: {id?: string, position: Vec3, layer?: integer, facing?: {x: number, z: number}, yaw?: number, scale?: number|Vec3, tags?: string[], sprite?: table, mesh?: table, light?: table, emitter?: table, collider?: table, mover?: table, platform?: table, audio?: table, props?: table, keep_height?: boolean}): Entity

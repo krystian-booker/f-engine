@@ -128,9 +128,9 @@ return {
       local job = task.detached("sampler", function()
         if bind then task.bind(w) end
         while true do
-          local c0, w0, g0 = task.clock(), w:time(), task.time()
+          local c0, w0, g0 = task.clock(), w.time, task.time()
           for _ = 1, 60 do task.frame() end
-          out[#out + 1] = { clock = task.clock() - c0, world = w:time() - w0, game = task.time() - g0 }
+          out[#out + 1] = { clock = task.clock() - c0, world = w.time - w0, game = task.time() - g0 }
         end
       end)
       return out, job

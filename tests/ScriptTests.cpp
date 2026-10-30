@@ -636,8 +636,8 @@ local log = {}
 return {
   log = log,
   init = function() fe.world.load('main', 'arena') end,
-  update = function() log[#log + 1] = 'update ' .. fe.world.get('main'):time() end,
-  post_update = function(dt) log[#log + 1] = 'post ' .. fe.world.get('main'):time() end,
+  update = function() log[#log + 1] = 'update ' .. fe.world.get('main').time end,
+  post_update = function(dt) log[#log + 1] = 'post ' .. fe.world.get('main').time end,
 })");
     Engine engine(engineOptions(game.root));
     REQUIRE(engine.start());

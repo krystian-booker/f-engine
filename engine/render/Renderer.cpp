@@ -9,7 +9,9 @@
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <string_view>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 #include <stdexcept>
@@ -191,7 +193,11 @@ Renderer::Renderer(Window& window, const std::filesystem::path& root, const Outp
         throw std::runtime_error("bgfx could not start any rendering backend");
     }
     if (wantHdr) {
-        if (backBufferSupported(bgfx::TextureFormat::RGBA16F)) {
+        // FENGINE_HDR_FORMAT=rgb10a2 skips the scRGB swap chain, so the HDR10
+        // fallback can be exercised on a GPU that would take RGBA16F.
+        const char* forced = std::getenv("FENGINE_HDR_FORMAT");
+        const bool skipScRgb = forced != nullptr && std::string_view(forced) == "rgb10a2";
+        if (!skipScRgb && backBufferSupported(bgfx::TextureFormat::RGBA16F)) {
             output_.encoding = OutputEncoding::ScRgb;
         } else if (backBufferSupported(bgfx::TextureFormat::RGB10A2)) {
             output_.encoding = OutputEncoding::Hdr10;
