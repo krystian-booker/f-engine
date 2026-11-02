@@ -44,12 +44,29 @@
 ---     voice). `mouth = {paths}` on a line animates the portrait with those
 ---     frames while talking (lip-flap).
 ---   * Auto-advance (`dialogue.auto` or the `auto_advance` setting) moves on
----     `style.auto_delay` seconds after a line is complete.
+---     `style.auto_delay` seconds after a line is complete. `auto_delay` may
+---     be a function `fn(line) -> seconds`, asked once per line (line has
+---     speaker, text, voice...); `dialogue.reading_time(text, options)` is a
+---     reading-time estimate for one, e.g.
+---     `style.auto_delay = function(l) return l.voice and 0.35 or dialogue.reading_time(l.text) end`.
 ---   * Holding `style.fast_forward_input` (default "skip") shows lines at
 ---     once and advances after `style.fast_forward_delay`, cutting
 ---     voice-over short.
 ---   * In a skipping task (a skipped cutscene, see fe.cutscene) `say` only
 ---     records the line in the backlog; `choice` ends the skip and asks.
+---
+--- Choices: options wrap at `style.choice_max_width` and the panel grows
+--- to fit them (rows take the height of the tallest option), so long
+--- full-sentence options and a large text scale are never cut off.
+--- `choice(options, {details = {...}, bars = {...}})` shows a preview panel
+--- for the focused option before the player confirms: `details[i]` is its
+--- text and `bars[i]` one bar `{value, max, label?, color?}` or a list of
+--- them. `dialogue.choice_layout(options)` is the geometry it uses.
+---
+--- The backlog keeps the last `dialogue.backlog_size` lines;
+--- `dialogue.log_line(speaker, text)` adds one without showing it (barks).
+--- `dialogue.line_shown` fires for every line shown (fe.bark cuts
+--- incidental barks with it).
 local config = require("fe.config")
 local scene = require("fe.scene")
 local signal = require("fe.signal")
@@ -76,6 +93,8 @@ local dialogue = {
     portrait_dim = 0.45,       -- alpha of the portrait that is not speaking
     bubble_width = 120,        -- widest speech bubble
     bubble_color = 0x282030ff, -- speech bubble ink
+    choice_max_width = 220,    -- choice options wrap at this panel width
+    details_width = 150,       -- the choice preview panel's width
   },
   auto = false,
   --- Emitted (speaker, text, line) when a line is shown.
@@ -155,10 +174,34 @@ function dialogue.auto_advancing()
   return dialogue.auto or config.get("auto_advance") == true
 end
 
+--- Seconds a reader needs for `text` (markup tags are not counted):
+--- `options.min` (default 1.5) or characters / `options.cps` (default 15)
+--- plus `options.extra` (default 0.35), whichever is longer.
+---@param text string
+---@param options? {cps?: number, min?: number, extra?: number}
+---@return number
+function dialogue.reading_time(text, options)
+  options = options or {}
+  local plain = tostring(text or ""):gsub("{[^}]*}", "")
+  local count = utf8.len(plain) or #plain
+  return math.max(options.min or 1.5, count / (options.cps or 15) + (options.extra or 0.35))
+end
+
+--- The auto-advance delay of a line: `style.auto_delay`, or its result
+--- when it is a function of the line.
+---@param line table
+---@return number
+function dialogue.auto_delay(line)
+  local delay = dialogue.style.auto_delay
+  if type(delay) == "function" then delay = delay(line) end
+  return tonumber(delay) or 1.5
+end
+
 function Box:show(line)
   self:stop_voice()
   self.line = line
   self.done = false
+  self.auto_delay = dialogue.auto_delay(line)
   local sides = dialogue.portraits(self)
   self.pages = fe.text.paginate(line.text, { font = ui.theme.font, size = ui.text_size(),
     width = text_width(line, dialogue.style, dialogue.style.two_portraits and sides or nil) }, dialogue.style.lines)
@@ -244,7 +287,7 @@ function Box:update(dt)
   end
   local advance = fe.input.pressed("confirm") or fe.input.pressed("cancel")
     or (fast and self.finished and self.idle >= dialogue.style.fast_forward_delay)
-    or (dialogue.auto_advancing() and self.finished and self.idle >= dialogue.style.auto_delay)
+    or (dialogue.auto_advancing() and self.finished and self.idle >= (self.auto_delay or dialogue.auto_delay(self.line)))
   if advance then
     if not self.finished then
       self.visible = self.units.count
@@ -371,10 +414,21 @@ function dialogue.acquire()
   return live.box
 end
 
-local function remember(speaker, text)
+local function remember(speaker, text, extra)
   local log = dialogue.backlog
-  log[#log + 1] = { speaker = speaker, text = text }
+  local entry = { speaker = speaker, text = text }
+  for key, value in pairs(extra or {}) do entry[key] = value end
+  log[#log + 1] = entry
   while #log > dialogue.backlog_size do table.remove(log, 1) end
+end
+
+--- Add a line to the backlog without showing it (barks, captions); `extra`
+--- fields are copied onto the entry (`kind = "bark"`).
+---@param speaker string|nil
+---@param text string
+---@param extra? table
+function dialogue.log_line(speaker, text, extra)
+  remember(speaker, text, extra)
 end
 
 --- Show a line and wait until the player dismisses it. The box stays open
@@ -407,25 +461,135 @@ function dialogue.say(speaker, text, options)
   if options.close then dialogue.close_box(b) end
 end
 
+--- Where a choice goes and how big it is, for `options` at the current
+--- text scale: {x, y, width, height, rows, row_height, wrap} with `wrap`
+--- the width option text wraps at. Options wrap at
+--- `style.choice_max_width`; when they do not fit above (or below) the
+--- message box the panel widens to the canvas and then covers the box, and
+--- only a list taller than the whole canvas scrolls. Every row is as tall
+--- as the tallest option.
+---@param options string[]
+---@param title? string the choice's title (adds a heading row)
+---@return table
+function dialogue.choice_layout(options, title)
+  local style = dialogue.style
+  local _, by, _, bh = box_rect(style)
+  local cw, ch = fe.canvas.size()
+  local widest = math.max(60, cw - style.margin * 2)
+  local heading = title and ui.row_height(14) or 0
+  local row = ui.row_height()
+  local single = select(2, ui.measure("Ag"))
+  local function measure(max_width)
+    local width = 40
+    for _, option in ipairs(options) do width = math.max(width, ui.measure(option) + 30) end
+    width = math.min(width, max_width)
+    local wrap = width - 30
+    local tallest = 0
+    for _, option in ipairs(options) do
+      local _, h = ui.measure(option, { width = wrap })
+      tallest = math.max(tallest, h)
+    end
+    -- A row holds its text plus the gap a single-line row has around it.
+    local row_height = math.max(row, math.ceil(tallest + (row - single)))
+    return width, wrap, row_height
+  end
+  local function height_of(n, row_height) return n * row_height + ui.theme.padding * 2 + heading end
+  local room = (style.position == "top" and ch - (by + bh + 4) or by - 4) - style.margin
+  local width, wrap, row_height = measure(math.min(style.choice_max_width or widest, widest))
+  local beside = true
+  if height_of(#options, row_height) > room then
+    -- Wider first, then over the message box: the panel grows rather than
+    -- cutting the options short.
+    width, wrap, row_height = measure(widest)
+    if height_of(#options, row_height) > room then
+      beside = false
+      room = ch - style.margin * 2
+    end
+  end
+  local rows = #options
+  while rows > 1 and height_of(rows, row_height) > room do rows = rows - 1 end
+  local height = height_of(rows, row_height)
+  local y
+  if beside then
+    y = style.position == "top" and by + bh + 4 or by - height - 4
+  else
+    y = style.position == "top" and style.margin or math.max(style.margin, ch - style.margin - height)
+  end
+  return { x = cw - width - style.margin, y = y, width = width, height = height, rows = rows,
+    row_height = row_height, wrap = wrap }
+end
+
+-- One bar of a choice preview: {value, max, label?, color?}.
+local function draw_bar(bar, x, y, w)
+  local label = bar.label and (bar.label .. " ") or ""
+  local text = label .. tostring(bar.value) .. (bar.max and ("/" .. tostring(bar.max)) or "")
+  local _, th = ui.measure(text, { width = w })
+  ui.text(text, x, y, { width = w })
+  ui.gauge(x, y + th + 1, w, 4, bar.value or 0, bar.max or 1, bar.color)
+  return th + 8
+end
+
+--- Draw the preview panel of a choice's focused option (`details` text and
+--- `bars`); replace to restyle. `layout` is the choice's layout.
+---@param detail string?
+---@param bars table?
+---@param layout table
+function dialogue.draw_details(detail, bars, layout)
+  if not detail and not bars then return end
+  local style = dialogue.style
+  local w = math.min(style.details_width, layout.x - style.margin * 2)
+  if w < 40 then return end
+  local inner = w - ui.theme.padding * 2
+  if bars and bars.value ~= nil then bars = { bars } end
+  local h = ui.theme.padding * 2
+  if detail then h = h + select(2, ui.measure(detail, { width = inner })) + 4 end
+  for _, bar in ipairs(bars or {}) do
+    local label = (bar.label and (bar.label .. " ") or "") .. tostring(bar.value) .. (bar.max and ("/" .. bar.max) or "")
+    h = h + select(2, ui.measure(label, { width = inner })) + 8
+  end
+  local x = layout.x - w - style.margin
+  local y = math.max(style.margin, layout.y + layout.height - h)
+  ui.window(x, y, w, h)
+  local ty = y + ui.theme.padding
+  if detail then
+    ui.text(detail, x + ui.theme.padding, ty, { width = inner })
+    ty = ty + select(2, ui.measure(detail, { width = inner })) + 4
+  end
+  for _, bar in ipairs(bars or {}) do
+    ty = ty + draw_bar(bar, x + ui.theme.padding, ty, inner)
+  end
+end
+
 --- Ask a question; returns the chosen index. `cancel` picks that index when
 --- the player presses Cancel (defaults to the last option; false disables).
+--- `details` and `bars` (one entry per option) fill a preview panel for
+--- the focused option (see the header).
 ---@param options string[]
----@param settings? {cancel?: integer|false, title?: string}
+---@param settings? {cancel?: integer|false, title?: string, details?: string[], bars?: table[]}
 function dialogue.choice(options, settings)
   settings = settings or {}
   task.end_skip()
   local cancel = settings.cancel
   if cancel == nil then cancel = #options end
-  local _, by, _, bh = box_rect(dialogue.style)
-  local cw = fe.canvas.size()
-  local width = 40
-  for _, option in ipairs(options) do width = math.max(width, ui.measure(option) + 30) end
-  local height = #options * ui.row_height() + ui.theme.padding * 2
-  local y = dialogue.style.position == "top" and by + bh + 4 or by - height - 4
-  local index = ui.choose(options, {
-    x = cw - width - dialogue.style.margin, y = y, width = width, rows = #options,
-    cancel = cancel or nil, title = settings.title, blocks_update = false,
-  })
+  local layout = dialogue.choice_layout(options, settings.title)
+  local function render(item, x, y, w, selected)
+    local color = item.enabled == false and ui.theme.disabled or (selected and ui.theme.highlight or ui.theme.text)
+    ui.text(item.label, x, y, { color = color, width = layout.wrap })
+  end
+  local menu_options = {
+    x = layout.x, y = layout.y, width = layout.width, rows = layout.rows, row_height = layout.row_height,
+    render = render, cancel = cancel or nil, title = settings.title, blocks_update = false,
+  }
+  local details, bars = settings.details, settings.bars
+  if not details and not bars then
+    return ui.choose(options, menu_options) or cancel
+  end
+  local view = { name = "choice_details", blocks_update = false, focused = 1, layout = layout }
+  menu_options.on_change = function(_, index) view.focused = index end
+  function view.draw()
+    dialogue.draw_details(details and details[view.focused], bars and bars[view.focused], layout)
+  end
+  local index = ui.with_view(view, ui.choose, options, menu_options)
   return index or cancel
 end
 

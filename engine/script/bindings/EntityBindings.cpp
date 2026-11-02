@@ -13,7 +13,8 @@ constexpr float MaxSpeed = 1000.0f;
 constexpr std::pair<const char*, SpriteMode> SpriteModes[] = {{"upright", SpriteMode::Upright},
                                                               {"flat", SpriteMode::Flat},
                                                               {"facing", SpriteMode::Facing},
-                                                              {"decal", SpriteMode::Decal}};
+                                                              {"decal", SpriteMode::Decal},
+                                                              {"standing", SpriteMode::Standing}};
 
 const char* spriteModeName(SpriteMode mode) {
     switch (mode) {
@@ -23,6 +24,8 @@ const char* spriteModeName(SpriteMode mode) {
         return "facing";
     case SpriteMode::Decal:
         return "decal";
+    case SpriteMode::Standing:
+        return "standing";
     case SpriteMode::Upright:
         break;
     }

@@ -17,6 +17,10 @@
 --- if quest.stage_done("crystal") then quest.advance("crystal") end
 --- quest.complete("crystal")
 --- ```
+--- A stage or objective may carry `"marker": {"map": "town", "point": "gate"}`
+--- (where fe.field.waypoint points the player) and `"hint"` (text or an
+--- i18n key fe.hint shows when the player seems stuck); `quest.objectives`
+--- returns both.
 --- Every change emits `quest.changed(quest_id, what, detail)` and
 --- `fe.state.changed("quest", quest_id, what)`, so event pages refresh.
 --- Quest, stage and objective ids are checked: an unknown one raises.
@@ -38,6 +42,11 @@ local quest = {
   changed = signal.new(),
 }
 
+local marker_schema = { type = { record = {
+  map = { type = { map_id = true }, doc = "Map the marker is on" },
+  point = { type = { point = "map" }, doc = "Point of that map" },
+} }, optional = true, doc = "Where the objective takes place (fe.field.waypoint)" }
+
 schema.define("quest", {
   id = "string",
   name = "string",
@@ -48,10 +57,14 @@ schema.define("quest", {
   stages = { type = { list = { record = {
     id = "string",
     text = "string",
+    marker = marker_schema,
+    hint = { type = "string", optional = true, doc = "Hint shown when the player seems stuck (fe.hint)" },
     objectives = { type = { list = { record = {
       id = "string",
       text = "string",
       count = { type = "integer", min = 1, default = 1 },
+      marker = marker_schema,
+      hint = { type = "string", optional = true, doc = "Hint shown when the player seems stuck (fe.hint)" },
     } } }, default = {} },
   } } }, default = {} },
   rewards = { type = "table", optional = true },
@@ -126,7 +139,8 @@ local function objective_def(id, objective_id)
   return nil
 end
 
---- Objectives of the current stage: {id, text, count, progress, done}.
+--- Objectives of the current stage: {id, text, count, progress, done,
+--- marker?, hint?}.
 function quest.objectives(id)
   local q = record.quests[id]
   local stage = quest.stage(id)
@@ -134,7 +148,7 @@ function quest.objectives(id)
   for _, objective in ipairs(stage and stage.objectives or {}) do
     local progress = progress_of(q, objective.id)
     out[#out + 1] = { id = objective.id, text = objective.text, count = objective.count, progress = progress,
-      done = progress >= objective.count }
+      done = progress >= objective.count, marker = objective.marker, hint = objective.hint }
   end
   return out
 end

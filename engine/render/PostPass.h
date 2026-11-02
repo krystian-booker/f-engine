@@ -52,6 +52,8 @@ private:
     Program bloomDown_, bloomUp_, dofPrefilter_, dofGather_, ssao_, ssaoBlur_, post_, fxaa_;
     Uniform bloomUniform_, dofUniform_, ssaoUniform_;
     Uniform source_, half_, near_, far_, ao_, distortion_, input_;
+    Uniform protectedSprites_{bgfx::createUniform("s_protectedSprites", bgfx::UniformType::Sampler)};
+    Uniform protection_{bgfx::createUniform("u_spriteProtection", bgfx::UniformType::Vec4)};
     CustomShaders& custom_;
     FramePool<std::pair<int, int>, Targets> targets_;
     FramePool<std::pair<int, int>, std::array<Framebuffer, 2>> chains_;

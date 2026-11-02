@@ -3,9 +3,60 @@
     "id": "relics",
     "name": "Lost Relics",
     "stages": [
-      {"id": "search", "text": "Search the ruins.",
-       "objectives": [{"id": "shards", "text": "Collect shards", "count": 3}, {"id": "key", "text": "Find the key"}]},
-      {"id": "return", "text": "Return to the elder."}
+      {
+        "id": "search",
+        "text": "Search the ruins.",
+        "objectives": [
+          {
+            "id": "shards",
+            "text": "Collect shards",
+            "count": 3
+          },
+          {
+            "id": "key",
+            "text": "Find the key"
+          }
+        ]
+      },
+      {
+        "id": "return",
+        "text": "Return to the elder."
+      }
+    ]
+  },
+  {
+    "id": "beacon",
+    "name": "Light the Beacon",
+    "kind": "main",
+    "stages": [
+      {
+        "id": "walk",
+        "text": "Walk the trail.",
+        "marker": {
+          "map": "trail",
+          "point": "goal"
+        },
+        "hint": "Head east along the trail.",
+        "objectives": [
+          {
+            "id": "annex",
+            "text": "Open the annex door",
+            "marker": {
+              "map": "annex",
+              "point": "door"
+            },
+            "hint": "The annex lies past the east end."
+          },
+          {
+            "id": "note",
+            "text": "Read the note"
+          }
+        ]
+      },
+      {
+        "id": "done",
+        "text": "Rest."
+      }
     ]
   }
 ]

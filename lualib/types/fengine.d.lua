@@ -612,6 +612,14 @@ fe.audio.bus_effect = nil
 ---@type fun(bus: string, settings: {lowpass?: number, reverb?: number, room?: number, damping?: number, fade?: number})
 fe.audio.set_bus_effect = nil
 
+--- The master bus compression (see fe.audio.set_dynamics).
+---@type fun(): {night: boolean, threshold: number, ratio: number, makeup: number}
+fe.audio.dynamics = nil
+
+--- Night listening: `night = true` compresses the master bus (above `threshold` dBFS, -60..0, the level rises 1/`ratio` as fast, 1..20; `makeup` dB, 0..24, is added back), so speech stays clear while peaks come down; the limiter still follows. Omitted fields keep their value.
+---@type fun(settings: {night?: boolean, threshold?: number, ratio?: number, makeup?: number})
+fe.audio.set_dynamics = nil
+
 --- Lower a bus by `amount` (0-1) while the `key` bus ('voice') is audible, gliding down over `attack` (0.08) and back over `release` (0.5) seconds. Amount 0 turns ducking off.
 ---@type fun(bus: string, amount: number, options?: {key?: string, attack?: number, release?: number})
 fe.audio.duck = nil

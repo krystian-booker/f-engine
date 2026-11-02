@@ -130,7 +130,7 @@ bool Frustum::visible(glm::vec3 min, glm::vec3 max) const {
 
 SceneViews::SceneViews(std::uint16_t first)
     : sky(static_cast<std::uint16_t>(first + ShadowCascadeCount + LightShadowTiles)), opaque(sky + 1),
-      overlay(sky + 2), transparent(sky + 3), distortion(sky + 4) {
+      overlay(sky + 2), transparent(sky + 3), distortion(sky + 4), spriteMask(sky + 5) {
     for (std::uint16_t c = 0; c < ShadowCascadeCount; ++c) {
         shadow[c] = static_cast<std::uint16_t>(first + c);
     }
@@ -162,6 +162,17 @@ bgfx::FrameBufferHandle SceneTarget::distortionTarget() {
         distortionBuffer = Framebuffer(bgfx::createFrameBuffer(1, attachments, false));
     }
     return distortionBuffer.get();
+}
+
+bgfx::FrameBufferHandle SceneTarget::spriteMaskTarget() {
+    if (!spriteMaskBuffer.valid()) {
+        spriteMask = Texture(bgfx::createTexture2D(static_cast<std::uint16_t>(size.x),
+            static_cast<std::uint16_t>(size.y), false, 1, bgfx::TextureFormat::RGBA8,
+            BGFX_TEXTURE_RT | PointClamp));
+        const bgfx::TextureHandle attachments[] = {spriteMask.get(), depth.get()};
+        spriteMaskBuffer = Framebuffer(bgfx::createFrameBuffer(2, attachments, false));
+    }
+    return spriteMaskBuffer.get();
 }
 
 void SceneTarget::copyOpaque(std::uint16_t view) const {

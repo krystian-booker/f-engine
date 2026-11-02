@@ -107,6 +107,9 @@ void SpriteBatch::draw(std::uint16_t view, const std::vector<int>& quads, bgfx::
         // passes its shadow variant; the engine's `program` otherwise.
         bgfx::ProgramHandle chosen = program;
         switch (pass) {
+        case Pass::Mask:
+            state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_DEPTH_TEST_LEQUAL;
+            break;
         case Pass::Shadow:
             if (bgfx::isValid(m.shadowProgram)) {
                 chosen = m.shadowProgram;

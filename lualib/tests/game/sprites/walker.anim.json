@@ -1,0 +1,106 @@
+{
+ "atlas": "walker.png",
+ "pixels_per_unit": 32,
+ "pivot": [
+  0.5,
+  1.0
+ ],
+ "clips": {
+  "idle": {
+   "loop": true,
+   "directions": [
+    [
+     {
+      "rect": [
+       0,
+       0,
+       16,
+       16
+      ],
+      "duration": 0.2
+     }
+    ]
+   ]
+  },
+  "walk": {
+   "loop": true,
+   "directions": [
+    [
+     {
+      "rect": [
+       0,
+       0,
+       16,
+       16
+      ],
+      "duration": 0.2
+     }
+    ]
+   ]
+  },
+  "crouch_walk": {
+   "loop": true,
+   "directions": [
+    [
+     {
+      "rect": [
+       0,
+       0,
+       16,
+       16
+      ],
+      "duration": 0.2
+     }
+    ]
+   ]
+  },
+  "crouch_idle": {
+   "loop": true,
+   "directions": [
+    [
+     {
+      "rect": [
+       0,
+       0,
+       16,
+       16
+      ],
+      "duration": 0.2
+     }
+    ]
+   ]
+  },
+  "climb": {
+   "loop": true,
+   "directions": [
+    [
+     {
+      "rect": [
+       0,
+       0,
+       16,
+       16
+      ],
+      "duration": 0.2
+     }
+    ]
+   ]
+  },
+  "push": {
+   "loop": true,
+   "directions": [
+    [
+     {
+      "rect": [
+       0,
+       0,
+       16,
+       16
+      ],
+      "duration": 0.2
+     }
+    ]
+   ]
+  }
+ }
+}

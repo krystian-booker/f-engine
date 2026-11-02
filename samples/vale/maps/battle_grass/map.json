@@ -229,6 +229,7 @@
       "lut_blend": 0.0,
       "lut_blend_target": "",
       "pixel_scale": 1,
+      "protect_sprites": false,
       "ssao": false,
       "ssao_bias": 0.029999999329447746,
       "ssao_radius": 0.6000000238418579,

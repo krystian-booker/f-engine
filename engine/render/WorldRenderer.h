@@ -97,7 +97,7 @@ private:
     const Uniforms& uniforms_;
     CustomShaders& custom_;
     int pixelsPerUnit_;
-    Program world_, worldInstanced_, sprite_, water_, shadow_, shadowInstanced_, sky_, overlay_, distort_;
+    Program world_, worldInstanced_, sprite_, water_, shadow_, shadowInstanced_, sky_, overlay_, distort_, spriteMask_;
     Uniform distortUniform_;
     ShadowAtlas atlas_;
     std::vector<std::unique_ptr<SceneLighting>> lightingSlots_;

@@ -32,7 +32,7 @@ function ai.options(battle, battler)
   end
   for _, skill in ipairs(skills) do
     if skill and battle:usable(battler, skill) then
-      local candidates = battle:targets_for(battler, skill.target)
+      local candidates = battle:targets_for(battler, skill.target, skill)
       if #candidates > 0 then
         if skill.target:find("^all") or skill.target == "everyone" then
           out[#out + 1] = { skill = skill, targets = candidates }

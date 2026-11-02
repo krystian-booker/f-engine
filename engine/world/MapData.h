@@ -90,6 +90,7 @@ struct CustomPost {
 };
 
 struct PostSettings {
+    bool protectSprites = false; // preserve opaque actor pixels through optical post effects
     bool bloom = true, depthOfField = true, vignette = true, colorGrade = true;
     float bloomStrength = 0.3f, bloomThreshold = 0.85f;
     float bloomKnee = 0.5f;       // soft threshold width, fraction of the threshold

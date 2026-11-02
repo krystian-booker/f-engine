@@ -83,11 +83,11 @@ struct Uniforms {
 
 // The bgfx views one world's scene uses, in execution order (PostPass takes its own).
 struct SceneViews {
-    static constexpr std::uint16_t Count = ShadowCascadeCount + LightShadowTiles + 5;
+    static constexpr std::uint16_t Count = ShadowCascadeCount + LightShadowTiles + 6;
     explicit SceneViews(std::uint16_t first);
     std::array<std::uint16_t, ShadowCascadeCount> shadow{};
     std::array<std::uint16_t, LightShadowTiles> lightShadow{};
-    std::uint16_t sky, opaque, overlay, transparent, distortion;
+    std::uint16_t sky, opaque, overlay, transparent, distortion, spriteMask;
 };
 
 // Off-screen targets of one scene resolution, reused by every world drawn at
@@ -102,10 +102,13 @@ struct SceneTarget {
     // first use. Their shader tests against the scene depth texture, so walls
     // hide distortion behind them.
     bgfx::FrameBufferHandle distortionTarget();
+    bgfx::FrameBufferHandle spriteMaskTarget();
     glm::ivec2 size;
     Texture color, depth;
     Texture colorCopy, depthCopy; // the opaque scene, before transparent draws
     Texture distortion;           // RG16F screen offsets, valid when `distorted`
+    Texture spriteMask;
+    Framebuffer spriteMaskBuffer;
     Framebuffer scene, distortionBuffer;
     bool distorted = false; // the world drew distortion this frame
 };

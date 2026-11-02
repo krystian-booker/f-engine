@@ -16,6 +16,12 @@
 --- override pitch, yaw, distance, fov, min and max while the followed entity
 --- is inside (their props are described for the editor with fe.schema.zone).
 ---
+--- Orthographic views: `orthographic` (boolean) and `ortho_height` (world
+--- units shown vertically; 0 derives it from distance and fov) come from
+--- the rig options, the map's `camera` props or a camera zone like the
+--- other values; `ortho_height` blends like distance and follows the zoom.
+--- A rig that none of them sets leaves the camera's projection alone.
+---
 --- `pan_to` and `path` hold the camera until `release()` or until the task
 --- that started them (its owner, see `Task:owner`) ends, so a cancelled
 --- cutscene never leaves the camera stuck.
@@ -37,6 +43,8 @@ schema.zone("camera", {
   yaw = { type = "number", optional = true, doc = "Degrees around the target" },
   distance = { type = "number", optional = true, min = 0 },
   fov = { type = "number", optional = true, min = 1, max = 170 },
+  orthographic = { type = "boolean", optional = true, doc = "Parallel projection while inside" },
+  ortho_height = { type = "number", optional = true, min = 0, doc = "World units shown vertically when orthographic" },
   min = { type = { list = "number" }, optional = true, doc = "Lower [x, z] bound of the camera target" },
   max = { type = { list = "number" }, optional = true, doc = "Upper [x, z] bound of the camera target" },
 }, "Overrides the camera while the followed entity is inside.")
@@ -60,6 +68,13 @@ function Rig:init(world, options)
   for key, value in pairs(camera.defaults) do
     self.base[key] = options[key] or props[key] or value
   end
+  -- Projection: only managed when the options or the map say something.
+  local function pick(key)
+    if options[key] ~= nil then return options[key] end
+    return props[key]
+  end
+  self.base.orthographic = pick("orthographic")
+  self.base.ortho_height = pick("ortho_height")
   self.bounds = { min = vec_of(options.min or props.min), max = vec_of(options.max or props.max) }
   self.wraps = world:wraps() -- a toroidal map has no edges to clamp to
   self.zone_type = options.zone_type or "camera"
@@ -93,16 +108,20 @@ function Rig:focus_point()
   return self.point or self.cam.target
 end
 
+local angles = { "pitch", "yaw", "distance", "fov", "ortho_height" }
+
 function Rig:goal()
   local point = self:focus_point()
-  local goal = { pitch = self.base.pitch, yaw = self.base.yaw, distance = self.base.distance, fov = self.base.fov }
+  local goal = { pitch = self.base.pitch, yaw = self.base.yaw, distance = self.base.distance, fov = self.base.fov,
+    orthographic = self.base.orthographic, ortho_height = self.base.ortho_height }
   local min, max = self.bounds.min, self.bounds.max
   for _, zone in ipairs(self.world:zones_at(point)) do
     if zone.type == self.zone_type then
       local p = zone.props
-      for key in pairs(goal) do
+      for _, key in ipairs(angles) do
         if p[key] then goal[key] = p[key] end
       end
+      if p.orthographic ~= nil then goal.orthographic = p.orthographic end
       min, max = vec_of(p.min) or min, vec_of(p.max) or max
     end
   end
@@ -117,6 +136,7 @@ function Rig:goal()
   end
   goal.yaw = goal.yaw + self.yaw_offset
   goal.distance = goal.distance * self.zoom
+  if goal.ortho_height and goal.ortho_height > 0 then goal.ortho_height = goal.ortho_height * self.zoom end
   if self.top_down then
     goal.pitch = 89
   end
@@ -132,6 +152,29 @@ function Rig:snap()
     self.cam[key] = value
   end
   self.cam:snap()
+end
+
+-- The projection part of a goal: orthographic switches at once; a height
+-- blends from the one in effect (0 means "derived": set it outright).
+function Rig:apply_projection(goal, dt)
+  if goal.orthographic ~= nil and self.cam.orthographic ~= goal.orthographic then
+    self.cam.orthographic = goal.orthographic
+  end
+  local height = goal.ortho_height
+  if height == nil then return end
+  if height <= 0 then
+    self.current.ortho_height = nil
+    if self.cam.ortho_height ~= 0 and not self.derived then
+      self.cam.ortho_height = 0
+      self.derived = true
+    end
+    return
+  end
+  self.derived = false
+  local current = self.current.ortho_height or self.cam.ortho_height
+  current = tween.approach(current, height, self.base.smoothing * 0.6, dt)
+  self.current.ortho_height = current
+  self.cam.ortho_height = current
 end
 
 local function angle_delta(from, to)
@@ -167,6 +210,7 @@ function Rig:update(dt)
   self.current.yaw = approach_angle(self.current.yaw, goal.yaw, rate, dt)
   self.cam.pitch, self.cam.distance, self.cam.fov, self.cam.yaw =
     self.current.pitch, self.current.distance, self.current.fov, self.current.yaw
+  self:apply_projection(goal, dt)
   self:apply_shake(dt)
 end
 
@@ -230,13 +274,13 @@ end
 --- task. Yaw turns the short way round.
 ---@param target table
 ---@param duration number
----@param options? {pitch?: number, yaw?: number, distance?: number, fov?: number, ease?: string}
+---@param options? {pitch?: number, yaw?: number, distance?: number, fov?: number, ortho_height?: number, ease?: string}
 function Rig:pan_to(target, duration, options)
   options = options or {}
   hold(self)
   local from = { target = self.cam.target, pitch = self.cam.pitch, yaw = self.cam.yaw,
-    distance = self.cam.distance, fov = self.cam.fov }
-  local to = { pitch = options.pitch, distance = options.distance, fov = options.fov,
+    distance = self.cam.distance, fov = self.cam.fov, ortho_height = self.cam.ortho_height }
+  local to = { pitch = options.pitch, distance = options.distance, fov = options.fov, ortho_height = options.ortho_height,
     yaw = options.yaw and from.yaw + angle_delta(from.yaw, options.yaw) }
   local to_target = { x = target.x, y = (target.y or 0) + self.base.height, z = target.z }
   local d = self.world:wrap_delta(from.target, to_target) -- the short way round on a wrapping map
@@ -246,7 +290,7 @@ function Rig:pan_to(target, duration, options)
       y = tween.lerp(from.target.y, to_target.y, t),
       z = from.target.z + d.z * tween.lerp(0, 1, t),
     }
-    for _, key in ipairs({ "pitch", "yaw", "distance", "fov" }) do
+    for _, key in ipairs(angles) do
       if to[key] then
         self.cam[key] = tween.lerp(from[key], to[key], t)
         self.current[key] = self.cam[key]

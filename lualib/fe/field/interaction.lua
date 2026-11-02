@@ -8,11 +8,18 @@
 --- and the built-in "talk" verb; replace any of them on fe.field, or this
 --- whole module with your own `fe/field/interaction.lua`.
 ---
+--- Movement speed: `field.running()` says whether Run is on (held, or
+--- toggled by each press when the `run_toggle` setting is on) and
+--- `field.move_speed(running)` gives the speed: `settings.run_speed` or
+--- `settings.walk_speed`, capped by the lowest value in `field.speed_caps`
+--- (a table keyed by whoever holds the cap: crouch zones put theirs there).
+---
 --- Touch triggers only fire while `field.can_trigger()` (no locks, no
 --- blocking event). A touch that happened under a lock fires once the lock
 --- lifts if the player still stands on the entity (within
 --- `settings.touch_range`); touches on the tick a map starts never do, so
 --- arriving on a door does not warp back.
+local config = require("fe.config")
 local event = require("fe.event")
 local tablex = require("fe.tablex")
 local task = require("fe.task")
@@ -25,9 +32,9 @@ local function field()
   return require("fe.field")
 end
 
--- Kept across hot reload: whether the map's first tick has passed and the
--- touches suppressed under a lock.
-local live = { settled = false, pending_touches = {} }
+-- Kept across hot reload: whether the map's first tick has passed, the
+-- touches suppressed under a lock and whether toggled running is on.
+local live = { settled = false, pending_touches = {}, run_on = false }
 
 --- A map started: forget the previous map's touches (fe.field calls this
 --- from `field.start`).
@@ -272,18 +279,42 @@ function interaction.run_command()
   return nil
 end
 
+--- Whether the player runs: Run held, or with the `run_toggle` setting
+--- on, toggled by each press of Run (read while the player has control).
+---@return boolean
+function interaction.running()
+  if config.get("run_toggle") then
+    if fe.input.pressed("run") then live.run_on = not live.run_on end
+    return live.run_on
+  end
+  live.run_on = false
+  return fe.input.held("run")
+end
+
+--- The player's speed: `settings.run_speed` when running, else
+--- `settings.walk_speed`, capped by the lowest of `field.speed_caps`.
+---@param running boolean
+---@return number
+function interaction.move_speed(running)
+  local f = field()
+  local speed = running and f.settings.run_speed or f.settings.walk_speed
+  for _, cap in pairs(f.speed_caps) do speed = math.min(speed, cap) end
+  return speed
+end
+
 --- Player input while `field.can_control()`: movement relative to the
 --- camera, verbs (each registered input action) and the menu.
 function interaction.control()
   local f = field()
   local player = f.player
+  local running = f.running()
   local mx, my = fe.input.axis("move_x"), fe.input.axis("move_y")
   local length = math.sqrt(mx * mx + my * my)
   if length > 1 then mx, my = mx / length, my / length end
   if length > 0.05 then
     local yaw = math.rad(f.rig:yaw())
     local c, s = math.cos(yaw), math.sin(yaw)
-    local speed = fe.input.held("run") and f.settings.run_speed or f.settings.walk_speed
+    local speed = f.move_speed(running)
     player:drive({ x = (c * mx + s * my) * speed, z = (-s * mx + c * my) * speed })
   end
   local tried = {}
@@ -308,7 +339,8 @@ function interaction.install(field)
   local functions = { verb = interaction.verb, remove_verb = interaction.remove_verb,
     command = interaction.command, verbs_for = interaction.verbs_for, target = interaction.target,
     choose_verb = interaction.choose_verb, interact = interaction.interact, touch = interaction.touch,
-    retouch = interaction.retouch, run_command = interaction.run_command, control = interaction.control }
+    retouch = interaction.retouch, run_command = interaction.run_command, control = interaction.control,
+    running = interaction.running, move_speed = interaction.move_speed }
   for name, fn in pairs(functions) do
     if field[name] == nil or field[name] == installed[name] then
       field[name] = fn

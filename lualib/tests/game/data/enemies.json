@@ -18,5 +18,10 @@
    "spirit": 4, "speed": 7, "accuracy": 0, "evasion": 0, "critical": 0}, "skills": ["attack"], "rewards": {"exp": 10}},
   {"id": "warlock", "name": "Warlock", "actions": "tests.support.battle_actions.alternate", "stats": {"max_hp": 500,
    "attack": 4, "defense": 4, "magic": 4, "spirit": 4, "speed": 7, "accuracy": 0, "evasion": 0, "critical": 0},
-   "skills": ["attack"], "rewards": {"exp": 10}}
+   "skills": ["attack"], "rewards": {"exp": 10}},
+  {"id": "clamp", "name": "Clamp", "turns": false, "stats": {"max_hp": 60, "attack": 4, "defense": 4, "magic": 4,
+   "spirit": 4, "speed": 40, "accuracy": 0, "evasion": 0, "critical": 0}, "skills": ["attack"], "rewards": {"exp": 1}},
+  {"id": "seer", "name": "Seer", "plan": "tests.support.intent_plans.plan", "ai": "tests.support.intent_plans.execute",
+   "stats": {"max_hp": 300, "attack": 1, "defense": 4, "magic": 4, "spirit": 4, "speed": 10, "accuracy": 0,
+   "evasion": 0, "critical": 0}, "skills": ["attack"], "rewards": {"exp": 1}}
 ]

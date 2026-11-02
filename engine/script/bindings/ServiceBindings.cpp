@@ -631,6 +631,30 @@ void bindAudio(Engine& engine) {
             "Change a bus's effects; omitted fields keep their value. `lowpass` is a cutoff in Hz (0 = off), "
             "`reverb` the wet mix 0-1, `room` and `damping` 0-1. Changes glide over `fade` seconds.")
         .fn(
+            "dynamics",
+            [&audio](sol::this_state state) {
+                lua::atMostArguments(state, 0, "fe.audio.dynamics() only reads; use fe.audio.set_dynamics");
+                const auto d = audio.dynamics();
+                return sol::state_view(state).create_table_with("night", d.compress, "threshold", d.threshold,
+                                                                "ratio", d.ratio, "makeup", d.makeup);
+            },
+            "fun(): {night: boolean, threshold: number, ratio: number, makeup: number}",
+            "The master bus compression (see fe.audio.set_dynamics).")
+        .fn(
+            "set_dynamics",
+            [&audio](sol::table t) {
+                Dynamics d = audio.dynamics();
+                d.compress = lua::get(t, "night", d.compress);
+                d.threshold = lua::within(lua::get(t, "threshold", d.threshold), -60.0f, 0.0f, "threshold");
+                d.ratio = lua::within(lua::get(t, "ratio", d.ratio), 1.0f, 20.0f, "ratio");
+                d.makeup = lua::within(lua::get(t, "makeup", d.makeup), 0.0f, 24.0f, "makeup");
+                audio.setDynamics(d);
+            },
+            "fun(settings: {night?: boolean, threshold?: number, ratio?: number, makeup?: number})",
+            "Night listening: `night = true` compresses the master bus (above `threshold` dBFS, -60..0, the "
+            "level rises 1/`ratio` as fast, 1..20; `makeup` dB, 0..24, is added back), so speech stays clear "
+            "while peaks come down; the limiter still follows. Omitted fields keep their value.")
+        .fn(
             "duck",
             [&audio](const std::string& bus, float amount, sol::object settings) {
                 Ducking ducking;

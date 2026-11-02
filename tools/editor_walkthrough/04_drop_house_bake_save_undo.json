@@ -1,7 +1,7 @@
 [
  {
   "frame": 60,
-  "expect": "(function() local w=fe.world.get('field'); local n=0; for x=0,19 do for z=0,15 do local c=w:cell({x=x,z=z,layer=0}); if c and not c.walkable then n=n+1 end end end; return n end)() == 109"
+  "expect": "(function() local w=fe.world.get('field'); local n=0; for x=0,19 do for z=0,15 do local c=w:cell({x=x,z=z,layer=0}); if c and not c.walkable then n=n+1 end end end; return n end)() == 106"
  },
  {
   "frame": 60,
@@ -36,7 +36,7 @@
  },
  {
   "frame": 110,
-  "expect": "(function() local w=fe.world.get('field'); local n=0; for x=0,19 do for z=0,15 do local c=w:cell({x=x,z=z,layer=0}); if c and not c.walkable then n=n+1 end end end; return n end)() > 109"
+  "expect": "(function() local w=fe.world.get('field'); local n=0; for x=0,19 do for z=0,15 do local c=w:cell({x=x,z=z,layer=0}); if c and not c.walkable then n=n+1 end end end; return n end)() > 106"
  },
  {
   "frame": 110,
@@ -70,7 +70,7 @@
  },
  {
   "frame": 136,
-  "expect": "(function() local w=fe.world.get('field'); local n=0; for x=0,19 do for z=0,15 do local c=w:cell({x=x,z=z,layer=0}); if c and not c.walkable then n=n+1 end end end; return n end)() == 109"
+  "expect": "(function() local w=fe.world.get('field'); local n=0; for x=0,19 do for z=0,15 do local c=w:cell({x=x,z=z,layer=0}); if c and not c.walkable then n=n+1 end end end; return n end)() == 106"
  },
  {
   "frame": 138,

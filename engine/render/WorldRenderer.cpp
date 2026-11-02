@@ -89,7 +89,8 @@ void WorldRenderer::reload(const std::filesystem::path& shaderRoot) {
                       Program(loadProgram(shaderRoot, "vs_shadow_instanced", "fs_shadow")),
                       Program(loadProgram(shaderRoot, "vs_sky", "fs_sky")),
                       Program(loadProgram(shaderRoot, "vs_world", "fs_overlay")),
-                      Program(loadProgram(shaderRoot, "vs_sprite", "fs_distort"))};
+                      Program(loadProgram(shaderRoot, "vs_sprite", "fs_distort")),
+                      Program(loadProgram(shaderRoot, "vs_sprite", "fs_sprite_mask"))};
     world_ = std::move(next[0]);
     worldInstanced_ = std::move(next[1]);
     sprite_ = std::move(next[2]);
@@ -99,6 +100,7 @@ void WorldRenderer::reload(const std::filesystem::path& shaderRoot) {
     sky_ = std::move(next[6]);
     overlay_ = std::move(next[7]);
     distort_ = std::move(next[8]);
+    spriteMask_ = std::move(next[9]);
 }
 
 void WorldRenderer::render(World& world, std::size_t slot, double alpha, double time, float aspect,
@@ -184,6 +186,24 @@ void WorldRenderer::render(World& world, std::size_t slot, double alpha, double 
     drawOverlays(world);
     drawTransparent();
     drawDistortion();
+    if (world.environment().post.protectSprites) {
+        bgfx::setViewFrameBuffer(views.spriteMask, target.spriteMaskTarget());
+        bgfx::setViewRect(views.spriteMask, 0, 0, static_cast<std::uint16_t>(target.size.x),
+                          static_cast<std::uint16_t>(target.size.y));
+        bgfx::setViewTransform(views.spriteMask, glm::value_ptr(view), glm::value_ptr(projection));
+        bgfx::setViewClear(views.spriteMask, BGFX_CLEAR_COLOR, 0);
+        bgfx::setViewName(views.spriteMask, "Protected sprite coverage");
+        bgfx::touch(views.spriteMask);
+        quadList_.clear();
+        const auto& quads = sprites_.quads();
+        for (std::size_t i = 0; i < quads.size(); ++i) {
+            if (quads[i].visible && !quads[i].silhouette && !blended(quads[i].blend)) {
+                quadList_.push_back(static_cast<int>(i));
+            }
+        }
+        const SpriteBatch::Context context{uniforms_, lighting_, gpu_.white(), gpu_.flatNormal(), info_};
+        sprites_.draw(views.spriteMask, quadList_, spriteMask_.get(), SpriteBatch::Pass::Mask, context, calls);
+    }
 }
 
 void WorldRenderer::setupViews(World& world, const SceneViews& views, const SceneTarget& target,

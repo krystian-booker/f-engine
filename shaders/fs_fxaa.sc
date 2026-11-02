@@ -1,6 +1,8 @@
 $input v_texcoord0
 #include <bgfx_shader.sh>
 SAMPLER2D(s_input, 0);
+SAMPLER2D(s_protectedSprites, 1);
+uniform vec4 u_spriteProtection;
 uniform vec4 u_info; // 1/width, 1/height, time, texture origin bottom-left (0/1)
 
 float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
@@ -13,6 +15,10 @@ void main() {
     vec2 t = u_info.xy;
     vec2 uv = v_texcoord0;
     vec4 centre = texture2D(s_input, uv);
+    if (u_spriteProtection.x * texture2D(s_protectedSprites, uv).r > 0.5) {
+        gl_FragColor = centre;
+        return;
+    }
     float nw = luma(texture2D(s_input, uv + vec2(-t.x, -t.y)).rgb);
     float ne = luma(texture2D(s_input, uv + vec2(t.x, -t.y)).rgb);
     float sw = luma(texture2D(s_input, uv + vec2(-t.x, t.y)).rgb);

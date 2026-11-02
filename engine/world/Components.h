@@ -2,7 +2,9 @@
 #include "engine/core/Json.h"
 #include "engine/nav/Query.h"
 #include "engine/world/MapData.h"
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 #include <optional>
@@ -45,7 +47,16 @@ struct Transform {
 
 // Y-axis billboard, lying flat at the feet's height, full billboard, or
 // projected onto the grid surface of its layer (following ramps).
-enum class SpriteMode { Upright, Flat, Facing, Decal };
+enum class SpriteMode { Upright, Flat, Facing, Decal, Standing };
+
+/// The up axis of a `Standing` sprite: vertical like `Upright`, stretched by
+/// 1 / cos(camera pitch) so its texels are as tall on screen as they are
+/// wide (pixel art keeps every row at any pitch) while the quad stays upright
+/// for depth sorting and the feet stay planted.
+inline glm::vec3 standingUp(glm::vec3 cameraForward) {
+    const float horizontal = std::sqrt(std::max(0.04f, 1.0f - cameraForward.y * cameraForward.y));
+    return glm::vec3(0, 1.0f / horizontal, 0);
+}
 
 struct Sprite {
     std::string animation; // path of a .anim.json file

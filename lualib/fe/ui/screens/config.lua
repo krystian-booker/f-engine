@@ -4,7 +4,11 @@
 --- (returns nothing) and writes the settings file once, when it closes.
 ---
 --- Display rows: fullscreen, vsync, window size (when the monitor lists
---- fullscreen modes) and monitor (when there are several). Languages
+--- fullscreen modes) and monitor (when there are several). After them come
+--- Run (hold or toggle, the `run_toggle` setting) and a row for every
+--- setting a game added with `fe.config.define(key, default, apply, row)`:
+--- a boolean toggles, `row.choices` cycle, `row.format(value)` labels the
+--- value. Languages
 --- are those `fe.config.languages()` finds, named by the `fe.language.<code>`
 --- strings (the code itself when there is none).
 local config = require("fe.config")
@@ -19,7 +23,7 @@ local screen = {
   rebindable = { "confirm", "cancel", "menu", "info", "page_left", "page_right", "run", "skip", "up", "down", "left",
     "right" },
   --- Text sizes offered.
-  text_scales = { 1, 1.25, 1.5 },
+  text_scales = { 1, 1.25, 1.5, 2 },
 }
 
 --- The file's values, for `__reload`.
@@ -39,6 +43,7 @@ i18n.defaults({ fe = {
     high_contrast = "High contrast", language = "Language", fullscreen = "Fullscreen", window_size = "Window size",
     vsync = "VSync", monitor = "Monitor", on = "On", off = "Off", key = "Key: {action}", reset = "Reset controls",
     press = "Press a key or button for {action}",
+    run_toggle = "Run", run_hold = "Hold", run_toggles = "Toggle",
   },
   action = {
     up = "Up", down = "Down", left = "Left", right = "Right", confirm = "Confirm", cancel = "Cancel", menu = "Menu",
@@ -102,6 +107,30 @@ local function display_rows(list)
   end
 end
 
+-- Rows for `run_toggle` and the settings games added with config.define.
+local function defined_rows(list)
+  local t = ui.t
+  list[#list + 1] = { label = t("fe.settings.run_toggle"),
+    right = config.values.run_toggle and t("fe.settings.run_toggles") or t("fe.settings.run_hold"),
+    key = "run_toggle", toggle = true }
+  for _, entry in ipairs(config.defined) do
+    local row = entry.row
+    if row then
+      local value = config.values[entry.key]
+      local right
+      if row.format then
+        right = row.format(value)
+      elseif type(value) == "boolean" then
+        right = on_off(value)
+      else
+        right = tostring(value)
+      end
+      list[#list + 1] = { label = t(row.label), right = right, key = entry.key,
+        toggle = row.choices == nil and type(value) == "boolean" or nil, choices = row.choices }
+    end
+  end
+end
+
 local function entries()
   local v = config.values
   local t = ui.t
@@ -122,6 +151,7 @@ local function entries()
       choices = config.languages() },
   }
   display_rows(list)
+  defined_rows(list)
   for _, action in ipairs(screen.rebindable) do
     list[#list + 1] = { label = t("fe.settings.key", { action = action_name(action) }), right = ui.prompt(action),
       rebind = action }
@@ -142,7 +172,7 @@ local function change(item, step)
       if key ~= "fullscreen" then display[key] = value end
     end
     config.set("display", display)
-  elseif item.key then
+  elseif item.key and item.step then
     config.set(item.key, tablex.clamp(config.values[item.key] + step * item.step, 0, item.max or 1))
   end
 end

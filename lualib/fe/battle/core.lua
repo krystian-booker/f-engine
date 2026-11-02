@@ -36,6 +36,16 @@
 ---   * skip_turn(battle, b) -> true in any layer makes the battler's next
 ---     turn upkeep-only (Battle:skips_turn; every scheduler honours it; the
 ---     ambush/pre-emptive opening uses it)
+---   * targetable(battle, user, target, source) -> false vetoes a target in
+---     any layer (Battle:targetable; `source` is the skill or item record,
+---     nil when unknown): menus and AI never offer it (Battle:targets_for),
+---     and an action resolving against it drops it and falls back like a
+---     fallen target (Battle:retarget). Not asked for `self` skills. Use it
+---     for untargetable parts or "only this skill may target that"
+---   * forced_action(battle, b) -> action|nil is asked specific to general
+---     before the player controller or AI (Battle:forced_action); the first
+---     action returned is taken instead of asking (a forced Guard). It can be
+---     asked more than once for one turn, so it must not change state
 ---   * single-answer hooks use the most specific layer defining them:
 ---     player_controller(battle, b) -> action (default: presenter:command),
 ---     escape_chance(battle, b) -> 0..1,
@@ -406,20 +416,33 @@ function Battle:living()
   return tablex.filter(self.battlers, function(b) return b:alive() end)
 end
 
---- Candidate targets for a skill target kind.
-function Battle:targets_for(user, kind)
+--- Whether `user` may target `target` with `source` (a skill or item
+--- record, or nil): no rule layer's `targetable` hook answers false.
+function Battle:targetable(user, target, source)
+  for _, layer in ipairs(self.rule_layers) do
+    if layer.targetable and layer.targetable(self, user, target, source) == false then return false end
+  end
+  return true
+end
+
+--- Candidate targets for a skill target kind, without the ones a
+--- `targetable` hook vetoes for `source` (the skill or item record).
+function Battle:targets_for(user, kind, source)
+  local pool
   if kind == "enemy" or kind == "all_enemies" or kind == "random_enemy" then
-    return self:opponents(user)
+    pool = self:opponents(user)
   elseif kind == "ally" or kind == "all_allies" then
-    return self:allies(user)
+    pool = self:allies(user)
   elseif kind == "dead_ally" then
-    return tablex.filter(self:allies(user, true), function(b) return not b:alive() end)
+    pool = tablex.filter(self:allies(user, true), function(b) return not b:alive() end)
   elseif kind == "self" then
     return { user }
   elseif kind == "any" or kind == "everyone" then
-    return self:living()
+    pool = self:living()
+  else
+    return {}
   end
-  return {}
+  return tablex.filter(pool, function(b) return self:targetable(user, b, source) end)
 end
 
 --- Whether `battler` may use `skill` now: it can pay the cost and no rule
@@ -447,16 +470,33 @@ end
 --- resolves, keeping the target kind: every living opponent or ally for
 --- the `all_*` and `everyone` kinds, the user for `self`, else one random
 --- candidate (the only case that draws from the battle's random stream).
-function Battle:retarget(user, kind)
+--- Vetoed targets (Battle:targetable for `source`) are never picked.
+function Battle:retarget(user, kind, source)
   if kind == "self" then return { user } end
-  local pool = self:targets_for(user, kind)
+  local pool = self:targets_for(user, kind, source)
   if #pool == 0 then return {} end
   if kind == "all_enemies" or kind == "all_allies" or kind == "everyone" then return pool end
   return { pool[self.random:int(1, #pool)] }
 end
 
---- Ask the battler's controller for an action (player input or AI).
+--- The action a rule layer's `forced_action(battle, b)` hook imposes on
+--- the battler now (most specific layer first), or nil.
+function Battle:forced_action(battler)
+  for i = #self.rule_layers, 1, -1 do
+    local fn = self.rule_layers[i].forced_action
+    local action = fn and fn(self, battler)
+    if action then
+      action.user = action.user or battler
+      return action
+    end
+  end
+end
+
+--- Ask the battler's controller for an action: a forced action
+--- (Battle:forced_action) first, else player input or AI.
 function Battle:decide(battler)
+  local forced = self:forced_action(battler)
+  if forced then return forced end
   if battler:is_party() and not battler.auto then
     local controller = self:rule("player_controller")
     if controller then return controller(self, battler) end
@@ -504,7 +544,7 @@ end
 local function resolve_random(self, action, source)
   local results, hit = {}, {}
   for _ = 1, action.hits or source.hits do
-    local pool = self:opponents(action.user)
+    local pool = self:targets_for(action.user, "random_enemy", source)
     if #pool == 0 then break end
     local target = pool[self.random:int(1, #pool)]
     if not tablex.contains(hit, target) then hit[#hit + 1] = target end
@@ -586,15 +626,16 @@ function Battle:perform(action)
     end
   else
     if source.target == "random_enemy" then
-      action.targets = self:opponents(user)
+      action.targets = self:targets_for(user, "random_enemy", source)
       self:present("action", action)
       results = resolve_random(self, action, source)
     else
       local targets = tablex.filter(action.targets or {}, function(t)
-        return t:alive() or source.target == "dead_ally"
+        return (t:alive() or source.target == "dead_ally")
+          and (source.target == "self" or self:targetable(user, t, source))
       end)
       if #targets == 0 and source.target ~= "dead_ally" then
-        targets = self:retarget(user, source.target)
+        targets = self:retarget(user, source.target, source)
       end
       action.targets = targets
       self:present("action", action)

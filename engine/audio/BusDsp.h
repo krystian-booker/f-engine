@@ -45,6 +45,15 @@ public:
     // over LimiterRelease; what still passes is soft-clipped towards full
     // scale, so a loud mix never hard-clips the device.
     void setLimiter(bool on) { limiter_ = on; }
+    // Downward compression before the limiter (see Dynamics): a peak envelope
+    // (fast attack, slow release) drives the gain reduction.
+    void setCompressor(const Dynamics& d) {
+        compressorThreshold_ = d.threshold;
+        compressorRatio_ = std::max(1.0f, d.ratio);
+        compressorMakeup_ = d.makeup;
+        compressor_ = d.compress;
+    }
+    [[nodiscard]] float compressorGain() const { return compressorGain_.load(); }
     [[nodiscard]] bool limiter() const { return limiter_.load(); }
     [[nodiscard]] float limiterGain() const { return limiterGain_.load(); }
 
@@ -66,6 +75,13 @@ public:
         const float down = depth / attackFrames_.load(), up = depth / releaseFrames_.load();
         const bool limiter = limiter_.load();
         float limit = limit_;
+        const bool compress = compressor_.load();
+        const float threshold = compressorThreshold_.load(), ratio = compressorRatio_.load();
+        const float makeup = std::pow(10.0f, compressorMakeup_.load() / 20.0f);
+        float envelope = envelope_;
+        const float envAttack = 1.0f - std::exp(-1.0f / (CompressorAttack * rate_));
+        const float envRelease = 1.0f - std::exp(-1.0f / (CompressorRelease * rate_));
+        float reduction = 1.0f;
         const float limiterRecover = 1.0f / (LimiterRelease * rate_);
         const float limiterAttack = 1.0f / (LimiterAttack * rate_);
 
@@ -109,6 +125,15 @@ public:
                 gain = gain > target ? std::max(target, gain - down) : std::min(target, gain + up);
                 l *= gain;
                 r *= gain;
+                if (compress) {
+                    const float level = std::max(std::abs(l), std::abs(r));
+                    envelope += (level - envelope) * (level > envelope ? envAttack : envRelease);
+                    const float db = 20.0f * std::log10(std::max(envelope, 1e-6f));
+                    const float over = db - threshold;
+                    reduction = over > 0 ? std::pow(10.0f, -(over - over / ratio) / 20.0f) : 1.0f;
+                    l *= reduction * makeup;
+                    r *= reduction * makeup;
+                }
                 if (limiter) {
                     const float peak = std::max(std::abs(l), std::abs(r));
                     const float wanted = peak > LimiterCeiling ? LimiterCeiling / peak : 1.0f;
@@ -125,11 +150,17 @@ public:
         gain_ = gain;
         limit_ = limiter ? limit : 1.0f;
         limiterGain_ = limit_;
+        envelope_ = compress ? envelope : 0.0f;
+        compressorGain_ = compress ? reduction * makeup : 1.0f;
     }
 
 private:
     static constexpr float MaxCutoff = 20000, MinCutoff = 20, SilenceThreshold = 1e-4f, HoldSeconds = 0.05f;
     static constexpr float LimiterCeiling = 0.95f, LimiterAttack = 0.001f, LimiterRelease = 0.2f;
+    static constexpr float CompressorAttack = 0.005f, CompressorRelease = 0.25f;
+    std::atomic<bool> compressor_{false};
+    std::atomic<float> compressorThreshold_{-24}, compressorRatio_{3}, compressorMakeup_{6}, compressorGain_{1};
+    float envelope_ = 0;
     static constexpr std::uint32_t Chunk = 32;
     static constexpr double MinGlide = 0.005;
 

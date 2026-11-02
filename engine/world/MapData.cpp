@@ -346,6 +346,7 @@ Environment Environment::fromJson(const Json& j) {
     auto& p = env.post;
     read(post, "bloom", p.bloom);
     read(post, "depth_of_field", p.depthOfField);
+    read(post, "protect_sprites", p.protectSprites);
     read(post, "vignette", p.vignette);
     read(post, "color_grade", p.colorGrade);
     read(post, "bloom_strength", p.bloomStrength);
@@ -477,6 +478,7 @@ Json Environment::toJson() const {
             {"post",
              {{"bloom", post.bloom},
               {"depth_of_field", post.depthOfField},
+              {"protect_sprites", post.protectSprites},
               {"vignette", post.vignette},
               {"color_grade", post.colorGrade},
               {"bloom_strength", post.bloomStrength},

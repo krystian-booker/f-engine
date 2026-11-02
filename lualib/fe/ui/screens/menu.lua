@@ -5,8 +5,8 @@
 --- (`run = "items_page"`), looked up on this module when the page is
 --- chosen, so replacing `menu.items_page` changes the Items page; the
 --- built-in pages are `menu.items_page`, `skills_page`, `equip_page`,
---- `status_page`, `formation_page`, `quests_page`, `log_page`,
---- `config_page` and `save_page`. It is called in the menu's task; if it
+--- `status_page`, `formation_page`, `quests_page`, `journal_page`,
+--- `log_page`, `config_page` and `save_page`. It is called in the menu's task; if it
 --- raises, the error is reported and the menu returns. While the menu is
 --- open the field world is paused (`fe.game.pause`), so sprites, particles
 --- and field scripts stand still.
@@ -24,6 +24,16 @@
 --- menu.formation_page()                            -- open one page directly (in a task)
 --- menu.equip_page = function() ... end             -- replace a built-in page body
 --- ```
+--- Journal: `menu.journal_page` shows fe.codex's tabs (Objectives from
+--- fe.quest's active quests, then Evidence, People and any other tab the
+--- entries use; Page left/right or Left/Right switch tabs) with the
+--- focused entry's text and image. It is not in the default list:
+--- `menu.use_journal()` puts it in place of the Quests page (or appends it).
+---
+--- Saving: `menu.allow_save()` decides whether the Save page is enabled; it
+--- may return `false, reason` (text or an i18n key), shown while the page
+--- is selected. The default asks fe.field.anchors (`no_save` zones).
+---
 --- Hot reload: the file's pages are merged into `menu.pages` by id (a
 --- game's own pages keep their place and functions) and `menu.dim`, the
 --- colour drawn over the field, is adopted unless the game changed it.
@@ -38,7 +48,8 @@ local task = require("fe.task")
 local ui = require("fe.ui")
 
 local menu = {
-  allow_save = function() return true end,
+  --- Whether the Save page is enabled; may return false and a reason.
+  allow_save = function() return require("fe.field.anchors").can_save() end,
   --- Colour drawn over the field while the menu is open.
   dim = 0x050a1888,
 }
@@ -310,6 +321,115 @@ function menu.quests_page()
     cancel = true, on_change = function(item) hovered = item end })
 end
 
+-- The rows of one journal tab: active quests (objectives) or unlocked
+-- codex entries, each with its detail text and image.
+local function journal_rows(tab)
+  local codex = require("fe.codex")
+  local rows = {}
+  if tab == "objectives" then
+    local quest = require("fe.quest")
+    for _, q in ipairs(quest.list("active")) do
+      local stage = quest.stage(q.def.id)
+      local detail = t(stage and stage.text or q.def.description or "")
+      for _, objective in ipairs(quest.objectives(q.def.id)) do
+        local mark = objective.done and "{color:good}" or "{color:muted}"
+        local count = objective.count > 1 and string.format(" %d/%d", objective.progress, objective.count) or ""
+        detail = detail .. "\n" .. mark .. t(objective.text) .. count .. "{color:reset}"
+      end
+      rows[#rows + 1] = { label = t(q.def.name), value = q, title = t(q.def.name), detail = detail }
+    end
+    if #rows == 0 then rows[1] = { label = t("fe.journal.no_objectives"), enabled = false } end
+    return rows
+  end
+  for _, entry in ipairs(codex.unlocked(tab)) do
+    rows[#rows + 1] = { label = t(entry.title_key), value = entry, title = t(entry.title_key), detail = t(entry.text_key),
+      image = entry.image }
+  end
+  if #rows == 0 then rows[1] = { label = t("fe.journal.empty"), enabled = false } end
+  return rows
+end
+
+--- The Journal: fe.codex's tabs with the focused entry's detail (see the
+--- header). `tab` opens on that tab. Waits until closed.
+---@param tab? string
+function menu.journal_page(tab)
+  local codex = require("fe.codex")
+  local tabs = codex.tabs()
+  local current = math.max(1, tablex.index_of(tabs, tab) or 1)
+  local view = { name = "journal", blocks_update = true }
+  local list = ui.List({ rows = 10, on_cancel = function() ui.close(view) end })
+  local function show_tab(index)
+    current = index
+    view.tab = tabs[current]
+    list.index, list.offset = 1, 0
+    list:set_items(journal_rows(view.tab))
+  end
+  show_tab(current)
+  view.list = list
+  view.show_tab = show_tab
+  function view:update()
+    local step = (fe.input.pressed("page_right") and 1 or 0) - (fe.input.pressed("page_left") and 1 or 0)
+    if step == 0 then step = require("fe.input").navigate("left", "right") end
+    if step ~= 0 and #tabs > 1 then
+      ui.sound("move")
+      show_tab((current - 1 + step) % #tabs + 1)
+    end
+    list:update()
+  end
+  function view:draw()
+    local cw, ch = fe.canvas.size()
+    ui.window(8, 8, cw - 16, ch - 16)
+    local x = 16
+    for i, name in ipairs(tabs) do
+      local label = codex.tab_name(name)
+      ui.text(label, x, 14, { color = i == current and ui.theme.highlight or ui.theme.muted })
+      x = x + ui.measure(label) + 12
+    end
+    local top = 14 + ui.row_height() + 4
+    local list_w = math.floor((cw - 32) * 0.4)
+    list:draw(26, top, list_w - 10)
+    local item = list:selected()
+    local dx, dw = 16 + list_w + 8, cw - 16 - list_w - 32
+    if item and item.enabled ~= false then
+      local y = top
+      ui.text(item.title or item.label, dx, y, { color = ui.theme.heading, width = dw })
+      y = y + select(2, ui.measure(item.title or item.label, { width = dw })) + 4
+      if item.image then
+        local ok, iw, ih = pcall(fe.app.image_size, item.image)
+        if ok and iw > 0 then
+          local scale = math.min(1, dw / iw, (ch - y - 60) / ih)
+          if scale > 0 then
+            fe.canvas.image(item.image, dx, y, { w = math.floor(iw * scale), h = math.floor(ih * scale) })
+            y = y + math.floor(ih * scale) + 4
+          end
+        end
+      end
+      if item.detail then ui.text(item.detail, dx, y, { width = dw }) end
+    end
+    ui.text(ui.prompts({ { "page_left", t("fe.menu.previous") }, { "page_right", t("fe.menu.next") },
+      { "cancel", t("fe.menu.back") } }), 16, ch - 24, { color = ui.theme.muted })
+  end
+  menu.journal_view = view
+  ui.run_screen(view)
+  menu.journal_view = nil
+end
+
+--- Put the Journal page in the menu: in place of the Quests page when it
+--- is there, else at the end. Returns the page.
+---@return table
+function menu.use_journal()
+  local page = menu.page("journal")
+  if page then return page end
+  page = { id = "journal", label = "fe.menu.journal", run = "journal_page" }
+  local quests = menu.page("quests")
+  if quests then
+    menu.pages[tablex.index_of(menu.pages, quests)] = page
+  else
+    menu.pages[#menu.pages + 1] = page
+  end
+  return page
+end
+
 function menu.log_page()
   require("fe.ui.screens.backlog").open()
 end
@@ -388,7 +508,10 @@ end
 
 local function page_entries()
   return tablex.map(menu.pages, function(page)
-    return { label = t(page.label), value = page, enabled = not page.enabled or page.enabled() }
+    local enabled, reason = true, nil
+    if page.enabled then enabled, reason = page.enabled() end
+    return { label = t(page.label), value = page, enabled = enabled ~= false and enabled ~= nil,
+      reason = (not enabled) and reason and t(reason) or nil }
   end)
 end
 
@@ -403,6 +526,7 @@ function menu.open()
   local list = ui.List({ items = page_entries(), rows = #menu.pages,
     on_confirm = function(item) view.chosen = item.value end,
     on_cancel = function() ui.close(view) end })
+  view.list = list
   local function run_pages()
     while true do
       task.wait_until(function() return view.chosen ~= nil end)
@@ -444,6 +568,13 @@ function menu.open()
     local playtime = math.floor(game.playtime())
     ui.text(string.format("%d:%02d", playtime // 3600, (playtime // 60) % 60), 14, ch - 21,
       { width = 138, align = "right", color = ui.theme.muted })
+    local selected = list:selected()
+    if selected and selected.reason and not self.chosen then
+      local w = math.min(cw - 172, 240)
+      local _, th = ui.measure(selected.reason, { width = w - 12 })
+      ui.window(164, ch - 14 - th, w, th + 8)
+      ui.text(selected.reason, 170, ch - 10 - th, { width = w - 12 })
+    end
   end
   task.ensure(function() task.race({ function() ui.run_screen(view) end, run_pages }) end, function()
     resume()

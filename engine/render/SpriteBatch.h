@@ -50,6 +50,7 @@ public:
         Opaque,      // depth tested and written, alpha cutout
         Transparent, // each quad's blend mode, depth tested, not written
         Silhouette,  // the outline colour where something nearer was drawn
+        Mask,        // visible opaque sprite coverage, sharing the scene depth
     };
 
     void clear();

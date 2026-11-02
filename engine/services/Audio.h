@@ -65,6 +65,17 @@ struct BusEffect {
     double fade = 0; // seconds to glide from the previous settings
 };
 
+// Master dynamic-range compression ("night" listening): above `threshold`
+// (dBFS) the level rises only 1/`ratio` as fast, then `makeup` dB is added
+// back, so quiet speech stays audible while peaks (impacts, sub-bass) come
+// down. Off by default.
+struct Dynamics {
+    bool compress = false;
+    float threshold = -24; // dBFS
+    float ratio = 3;       // input dB over threshold per output dB
+    float makeup = 6;      // dB
+};
+
 // Sidechain ducking: a bus's gain drops by `amount` while the key bus is
 // audible and recovers after it falls silent.
 struct Ducking {
@@ -102,6 +113,10 @@ public:
     virtual void setBusEffect(const std::string& bus, const BusEffect& effect) = 0;
     [[nodiscard]] virtual BusEffect busEffect(const std::string& bus) const = 0;
     virtual void setDucking(const std::string& bus, const Ducking& ducking) = 0;
+    // Master bus compression (see Dynamics); implementations that cannot
+    // apply it just remember it.
+    virtual void setDynamics(const Dynamics& dynamics) { dynamics_ = dynamics; }
+    [[nodiscard]] virtual Dynamics dynamics() const { return dynamics_; }
     // Pauses everything playing now; sounds started while paused play (menu
     // sounds). Separate from the runtime's suspension on focus loss.
     virtual void pauseSounds(bool paused) = 0;
@@ -110,6 +125,9 @@ public:
     virtual void setListeners(std::map<std::string, Listener> listeners) = 0;
     virtual void update(double dt) = 0;
     virtual void reload(const std::filesystem::path& file) = 0;
+
+protected:
+    Dynamics dynamics_;
 };
 
 class NullAudio : public Audio {

@@ -13,8 +13,8 @@ local ui = require("fe.ui")
 
 local commands = {}
 
-local function choose_targets(presenter, battle, user, kind)
-  local candidates = battle:targets_for(user, kind)
+local function choose_targets(presenter, battle, user, kind, source)
+  local candidates = battle:targets_for(user, kind, source)
   if #candidates == 0 then return nil end
   if kind:find("^all") or kind == "everyone" or kind == "self" then
     presenter.targeting = candidates
@@ -90,6 +90,8 @@ local function choose_command(sideview, presenter, user, battle)
   local menu
   menu = ui.Menu({ items = entries, x = 8, y = ch - 98, width = 92, rows = 6,
     on_confirm = function(item) ui.close(menu, item.value) end })
+  -- Sit on the bottom edge whatever the text size makes the menu's height.
+  menu.y = math.max(4, ch - menu:height() - 6)
   function menu.update(view, dt)
     ui.Menu.update(view, dt)
     if sideview.modifier then
@@ -119,7 +121,7 @@ function commands.command(sideview, presenter, user, battle)
       battle:swap(user, partner)
       return commands.command(sideview, presenter, partner, battle)
     elseif choice == "attack" then
-      local targets = choose_targets(presenter, battle, user, "enemy")
+      local targets = choose_targets(presenter, battle, user, "enemy", Battle.attack_skill())
       if targets then action = { kind = "skill", user = user, skill = Battle.settings.attack_skill, targets = targets } end
     elseif choice == "defend" then
       action = { kind = "defend", user = user }
@@ -128,7 +130,7 @@ function commands.command(sideview, presenter, user, battle)
     elseif choice == "item" then
       local item = pick_from(sideview.command_label("item", user), item_entries(battle))
       if item then
-        local targets = choose_targets(presenter, battle, user, item.value.use.target)
+        local targets = choose_targets(presenter, battle, user, item.value.use.target, item.value)
         if targets then action = { kind = "item", user = user, item = item.value.id, targets = targets } end
       end
     elseif sideview.commands[choice] then
@@ -137,7 +139,7 @@ function commands.command(sideview, presenter, user, battle)
       local skill_type = choice ~= "skill" and choice or nil
       local picked = pick_from(sideview.command_label(choice, user), skill_entries(battle, user, skill_type))
       if picked then
-        local targets = choose_targets(presenter, battle, user, picked.value.target)
+        local targets = choose_targets(presenter, battle, user, picked.value.target, picked.value)
         if targets then action = { kind = "skill", user = user, skill = picked.value.id, targets = targets } end
       end
     end

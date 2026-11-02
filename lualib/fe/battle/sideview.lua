@@ -28,6 +28,12 @@
 --- show as such. Item commands use the battle's inventory
 --- (Battle:inventory). Text comes from `fe.battle.*` i18n keys;
 --- `settings.command_names[name]` overrides a command's label.
+---
+--- The camera uses `settings.camera` ({pitch, yaw, distance, fov,
+--- orthographic?, ortho_height?}); a stage map's `battle_camera` prop
+--- overrides it key by key (sideview.camera_settings), so a stage can ask
+--- for an orthographic view (`"battle_camera": {"orthographic": true,
+--- "ortho_height": 9}`).
 local Battle = require("fe.battle.core")
 local camera = require("fe.camera")
 local class = require("fe.class")
@@ -36,6 +42,7 @@ local commands = require("fe.battle.sideview_commands")
 local hud = require("fe.battle.sideview_hud")
 local i18n = require("fe.i18n")
 local scene = require("fe.scene")
+local schema = require("fe.schema")
 local sound = require("fe.sound")
 local stats = require("fe.rpg.stats")
 local task = require("fe.task")
@@ -101,6 +108,24 @@ i18n.defaults({ fe = { battle = {
   escape_failed = "Couldn't escape!", fallen = "The party has fallen...", next = "Next",
   assists = "{name} lends a hand!", leaves = "{name} leaves",
 } } })
+
+if schema.get("map_props") then
+  schema.extend("map_props", { battle_camera = { type = { record = {
+    pitch = { type = "number", optional = true }, yaw = { type = "number", optional = true },
+    distance = { type = "number", optional = true, min = 0 }, fov = { type = "number", optional = true, min = 1, max = 170 },
+    orthographic = { type = "boolean", optional = true, doc = "Parallel projection" },
+    ortho_height = { type = "number", optional = true, min = 0, doc = "World units shown vertically when orthographic" },
+  } }, optional = true, doc = "Side-view battle camera on this stage (overrides fe.battle.sideview.settings.camera)" } })
+end
+
+--- The battle camera for a stage world: settings.camera with the stage
+--- map's `battle_camera` prop on top, key by key.
+function sideview.camera_settings(world)
+  local out = tablex.copy(sideview.settings.camera)
+  local props = world and world:props() or {}
+  for key, value in pairs(props.battle_camera or {}) do out[key] = value end
+  return out
+end
 
 --- Label of a battle command: `commands[name].label`, settings.command_names,
 --- the fe.battle.command.<name> text, else the skill type's name.
@@ -203,8 +228,10 @@ function Presenter:start(battle)
     self:spawn(b, slots[side], counts[side])
   end
   local cam = self.world:camera()
-  local settings = sideview.settings.camera
+  local settings = sideview.camera_settings(self.world)
   self.rig = camera.rig(self.world, settings)
+  if settings.orthographic ~= nil then cam.orthographic = settings.orthographic end
+  if settings.ortho_height then cam.ortho_height = settings.ortho_height end
   local centre = self.world:points().centre
   self.rig:look_at(centre and centre.position or { x = 8, y = 0, z = 7.5 })
   self.rig:snap()

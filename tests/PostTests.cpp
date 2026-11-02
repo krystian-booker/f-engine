@@ -319,3 +319,15 @@ TEST_CASE("pixel_scale takes fractions from 1 to 8 and keeps whole numbers crisp
         CHECK_THROWS_WITH(Environment::fromJson(json), doctest::Contains("pixel_scale"));
     }
 }
+
+TEST_CASE("sprite protection defaults off and survives environment serialization") {
+    auto map = MapData::load(std::filesystem::path(FENGINE_TEST_GAME) / "maps/arena/map.json").toJson();
+    map["environment"]["post"] = {{"protect_sprites", true}, {"antialias", "fxaa"}, {"depth_of_field", true}};
+    const auto parsed = MapData::fromJson(map);
+    CHECK(parsed.environment.post.protectSprites);
+    CHECK(parsed.environment.post.fxaa());
+    CHECK(parsed.environment.post.depthOfField);
+    CHECK(MapData::fromJson(parsed.toJson()).environment.post.protectSprites);
+    map["environment"]["post"].erase("protect_sprites");
+    CHECK_FALSE(MapData::fromJson(map).environment.post.protectSprites);
+}

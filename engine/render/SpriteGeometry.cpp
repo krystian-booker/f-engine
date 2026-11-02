@@ -28,6 +28,8 @@ SpritePlacement placeSpriteClip(const Sprite& s, const SpriteAnimation& animatio
     glm::vec3 position = feet, right = camera.right(alpha), up(0, 1, 0);
     if (s.mode == SpriteMode::Facing) {
         up = glm::normalize(glm::cross(right, forward));
+    } else if (s.mode == SpriteMode::Standing) {
+        up = standingUp(forward);
     } else if (placement.lying) {
         right = glm::vec3(1, 0, 0);
         up = glm::vec3(0, 0, -1);

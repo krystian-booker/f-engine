@@ -701,7 +701,7 @@ TEST_CASE("the renderer's clip-resolved sprite placement matches placeSprite") {
     camera.yaw = 37;
     camera.snap();
     const glm::vec3 feet(3.2f, 0.5f, 7.1f);
-    for (const auto mode : {SpriteMode::Upright, SpriteMode::Facing, SpriteMode::Flat}) {
+    for (const auto mode : {SpriteMode::Upright, SpriteMode::Facing, SpriteMode::Flat, SpriteMode::Standing}) {
         for (const auto* clip : {"walk", "idle", "missing"}) {
             for (const auto facing : {glm::vec2(0, 1), glm::vec2(-1, 0), glm::vec2(0.7f, -0.7f)}) {
                 Sprite s;
@@ -723,6 +723,20 @@ TEST_CASE("the renderer's clip-resolved sprite placement matches placeSprite") {
                 CHECK(got.lying == expected.lying);
             }
         }
+    }
+    {
+        // A standing sprite stays vertical but is stretched by 1 / cos(pitch), so
+        // a texel projects as tall as it is wide under an elevated camera.
+        Camera pitched;
+        pitched.pitch = 35;
+        pitched.snap();
+        Sprite s;
+        s.mode = SpriteMode::Standing;
+        const auto placed = placeSprite(s, animation, feet, {0, 1}, pitched, 1.0, 32);
+        CHECK(placed.up.x == 0);
+        CHECK(placed.up.z == 0);
+        CHECK(placed.up.y == doctest::Approx(1.0 / std::cos(glm::radians(35.0))).epsilon(0.01));
+        CHECK(placed.anchor.y == doctest::Approx(feet.y));
     }
     CHECK(clipDirection(4, {0, 1}, 0) == animation.direction("walk", {0, 1}, 0));
     CHECK(clipDirection(4, {1, 0}, 90) == animation.direction("walk", {1, 0}, 90));

@@ -1140,6 +1140,13 @@ void MiniAudio::setMasterLimiter(bool on) {
     }
 }
 
+void MiniAudio::setDynamics(const Dynamics& dynamics) {
+    dynamics_ = dynamics;
+    if (auto* master = impl_->ready ? impl_->bus("master") : nullptr) {
+        master->dsp.setCompressor(dynamics);
+    }
+}
+
 bool MiniAudio::masterLimiter() const {
     const auto found = impl_->buses.find("master");
     return found != impl_->buses.end() && found->second->dsp.limiter();

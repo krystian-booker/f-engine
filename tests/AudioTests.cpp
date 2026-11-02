@@ -524,6 +524,29 @@ TEST_CASE("the master limiter keeps a loud mix under full scale and leaves quiet
     CHECK(quietPeak == doctest::Approx(quietRawPeak).epsilon(0.01));
 }
 
+TEST_CASE("night dynamics compress loud peaks and lift quiet sound") {
+    auto measure = [](bool night, float volume) {
+        MiniAudio audio(false);
+        audio.setMasterLimiter(false);
+        Dynamics d;
+        d.compress = night;
+        audio.setDynamics(d);
+        SoundOptions options;
+        options.loop = true;
+        options.volume = volume;
+        audio.playSound(toneFile(), options);
+        play(audio, 0.3);
+        return rms(play(audio, 0.3), 0);
+    };
+    const float loud = measure(false, 2), loudNight = measure(true, 2);
+    const float quiet = measure(false, 0.05f), quietNight = measure(true, 0.05f);
+    CHECK(loudNight < loud);
+    CHECK(quietNight > quiet);
+    CHECK(loudNight / quietNight < loud / quiet); // the range between them shrinks
+    MiniAudio audio(false);
+    CHECK_FALSE(audio.dynamics().compress);
+}
+
 TEST_CASE("music cued in one tick starts together; a later tick's cue is its own group") {
     MiniAudio audio(false);
     const auto file = tone("long", 3);

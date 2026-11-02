@@ -147,7 +147,9 @@ function data.reference_problem(ref)
             fe.fs.exists("@fe/" .. file:gsub("^fe/", "") .. ".lua")) then
       -- Function paths ("ai.slime.think") name a function inside a module.
       local parent = file:match("^(.*)/[^/]+$")
-      if not (parent and (fe.fs.exists(parent .. ".lua") or fe.fs.exists(parent .. "/init.lua"))) then
+      local lib = parent and "@fe/" .. parent:gsub("^fe/", "")
+      if not (parent and (fe.fs.exists(parent .. ".lua") or fe.fs.exists(parent .. "/init.lua")
+        or (parent:find("^fe/") and (fe.fs.exists(lib .. ".lua") or fe.fs.exists(lib .. "/init.lua"))))) then
         return "module not found: " .. id
       end
     end

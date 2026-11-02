@@ -9,6 +9,8 @@ SAMPLER2D(s_near, 5);
 SAMPLER2D(s_far, 6);
 SAMPLER2D(s_ao, 7);
 SAMPLER2D(s_distortion, 8);
+SAMPLER2D(s_protectedSprites, 9);
+uniform vec4 u_spriteProtection;
 #include "post.sh"
 #include "chromatic.sh"
 // Packed by packPost() in FrameMath.h:
@@ -23,14 +25,15 @@ vec3 encodeSrgb(vec3 c) {
 }
 void main() {
     vec2 uv = v_texcoord0;
-    if (u_post[0].w > 0.0) {
+    float protectedPixel = u_spriteProtection.x * texture2D(s_protectedSprites, uv).r;
+    if (u_post[0].w > 0.0 && protectedPixel < 0.5) {
         // Overlapping distort particles add up; past 3% of the screen they would tear.
         vec2 offset = texture2D(s_distortion, uv).xy * u_post[0].w;
         uv += offset * min(1.0, 0.03 / max(length(offset), 0.0001));
     }
     vec4 scene = texture2D(s_scene, uv);
     vec3 color = scene.rgb;
-    if (u_post[0].z > 0.0) {
+    if (u_post[0].z > 0.0 && protectedPixel < 0.5) {
         vec2 shift = chromaticShift(uv, u_post[0].z);
         color.r = texture2D(s_scene, uv + shift).r;
         color.b = texture2D(s_scene, uv - shift).b;
@@ -41,7 +44,7 @@ void main() {
     // blurred foreground then land on the worlds drawn before it instead
     // of being scaled away with the coverage.
     float coverage = scene.a;
-    if (u_post[1].x > 0.5) {
+    if (u_post[1].x > 0.5 && protectedPixel < 0.5) {
         float coc = circleOfConfusion(linearDepth(texture2D(s_depth, uv).r), uv) * u_post[2].w;
         vec4 far = texture2D(s_far, uv);
         vec4 near = texture2D(s_near, uv);

@@ -55,9 +55,11 @@ function Battler:can_act()
   return Combatant.can_act(self)
 end
 
---- Whether schedulers give this battler turns.
+--- Whether schedulers give this battler turns: it is alive and its enemy
+--- data does not say `"turns": false` (a part of a bigger enemy without a
+--- clock of its own; it can still be targeted and knocked out).
 function Battler:takes_turns()
-  return self:alive()
+  return self:alive() and not (self.def and self.def.turns == false)
 end
 
 --- How many actions the battler takes in each of its turns: the enemy

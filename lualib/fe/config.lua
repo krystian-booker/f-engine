@@ -10,6 +10,14 @@
 --- The language starts as the system's (`fe.app.locale()`) if the game
 --- ships that language, else "en". Display settings (`fullscreen`, and
 --- `display = {width, height, vsync, monitor}`) go to `fe.app.set_display`.
+--- `run_toggle` makes the Run action toggle running on the field instead
+--- of being held.
+---
+--- Game settings: `config.define(key, default, apply?, row?)` adds a key
+--- with its default (a saved value wins), an optional `apply(values)` run
+--- whenever it changes, and an optional settings-screen row
+--- (`{label = i18n key, choices? = {...}, format? = fn(value) -> text}`;
+--- booleans toggle, `choices` cycle). `config.defined` lists them in order.
 local input = require("fe.input")
 local signal = require("fe.signal")
 local tablex = require("fe.tablex")
@@ -23,6 +31,7 @@ local config = {
     high_contrast = false,  -- plain high-contrast windows and text
     battle_speed = 1,       -- multiplier games can apply to battle pacing
     battle_wait = true,     -- ATB "wait" mode
+    run_toggle = false,     -- Run toggles running instead of being held
     language = nil,         -- nil until chosen: the system language when available
     fullscreen = false,
     display = {},           -- {width?, height?, vsync?, monitor?} for fe.app.set_display
@@ -30,6 +39,8 @@ local config = {
   },
   changed = signal.new(),
   dirty = false,
+  --- Keys added with `config.define`, in order: {key, default, row?}.
+  defined = {},
 }
 
 --- Load the settings file, define the default controls and apply both
@@ -44,6 +55,9 @@ function config.load(defaults)
   end
   for key, value in pairs(saved) do
     config.values[key] = value
+  end
+  for _, entry in ipairs(config.defined) do
+    if config.values[entry.key] == nil then config.values[entry.key] = tablex.deep_copy(entry.default) end
   end
   if not config.values.language then config.values.language = config.system_language() end
   input.use_defaults()
@@ -134,6 +148,29 @@ local appliers = {
     if v.language and i18n.language ~= v.language then i18n.set_language(v.language) end
   end,
 }
+
+--- Add a setting a game (or a kit) owns: `default` fills it unless the
+--- player saved a value (also when the settings file loads later),
+--- `apply(values)` runs whenever it changes through `config.set`, and
+--- `row` (`{label, choices?, format?}`) shows it on the settings screen.
+--- Defining a key again replaces its default, applier and row.
+---@param key string
+---@param default any
+---@param apply? fun(values: table)
+---@param row? {label: string, choices?: any[], format?: fun(value: any): string}
+function config.define(key, default, apply, row)
+  local entry = { key = key, default = default, row = row }
+  local replaced = false
+  for i, other in ipairs(config.defined) do
+    if other.key == key then
+      config.defined[i] = entry
+      replaced = true
+    end
+  end
+  if not replaced then config.defined[#config.defined + 1] = entry end
+  appliers[key] = apply
+  if config.values[key] == nil then config.values[key] = tablex.deep_copy(default) end
+end
 
 --- Change one setting and apply it (call `config.save()` to persist). Only
 --- that setting is pushed to the engine, and nothing happens (the file is

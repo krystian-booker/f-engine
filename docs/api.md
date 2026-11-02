@@ -254,6 +254,8 @@ Music layers with loop points, crossfades, seeking and pitch; sounds and voices;
 | `set_bus_volume` | `fun(bus: string, volume: number)` | Set a bus volume, 0 to 4 (1 = unchanged). |
 | `bus_effect` | `fun(bus: string): {lowpass: number, reverb: number, room: number, damping: number}` | A bus's effects (see fe.audio.set_bus_effect). |
 | `set_bus_effect` | `fun(bus: string, settings: {lowpass?: number, reverb?: number, room?: number, damping?: number, fade?: number})` | Change a bus's effects; omitted fields keep their value. `lowpass` is a cutoff in Hz (0 = off), `reverb` the wet mix 0-1, `room` and `damping` 0-1. Changes glide over `fade` seconds. |
+| `dynamics` | `fun(): {night: boolean, threshold: number, ratio: number, makeup: number}` | The master bus compression (see fe.audio.set_dynamics). |
+| `set_dynamics` | `fun(settings: {night?: boolean, threshold?: number, ratio?: number, makeup?: number})` | Night listening: `night = true` compresses the master bus (above `threshold` dBFS, -60..0, the level rises 1/`ratio` as fast, 1..20; `makeup` dB, 0..24, is added back), so speech stays clear while peaks come down; the limiter still follows. Omitted fields keep their value. |
 | `duck` | `fun(bus: string, amount: number, options?: {key?: string, attack?: number, release?: number})` | Lower a bus by `amount` (0-1) while the `key` bus ('voice') is audible, gliding down over `attack` (0.08) and back over `release` (0.5) seconds. Amount 0 turns ducking off. |
 | `paused` | `fun(): boolean` | Whether the global pause is on (fe.audio.set_paused). |
 | `set_paused` | `fun(paused: boolean)` | The global pause: pausing holds everything playing now, sounds started while paused play (menu sounds), and resuming continues the held ones where they were. |

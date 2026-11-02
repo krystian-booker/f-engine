@@ -90,6 +90,7 @@ public:
     [[nodiscard]] std::size_t maxVoices() const;
     // The soft limiter on the master bus (BusDsp), on by default.
     void setMasterLimiter(bool on);
+    void setDynamics(const Dynamics& dynamics) override;
     [[nodiscard]] bool masterLimiter() const;
     // Mixes frames, advancing the mixer clock; the interleaved stereo output
     // is appended to `output` when given.

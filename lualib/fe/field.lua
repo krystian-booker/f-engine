@@ -24,8 +24,12 @@
 --- fe.field.interaction (`control`, `verb`, `command`, `target`,
 --- `interact`, `touch`, `retouch`, `run_command`, the "talk" verb) and
 --- fe.field.hooks (`handle_events`: touches, zones, footsteps; routines,
---- encounters, `make_rig`, `give`, `announce`, `on_save_point`). Each file's
---- header documents its part.
+--- encounters, `make_rig`, `give`, `announce`, `on_save_point`),
+--- fe.field.traverse (the `traverse` placement and verb, `crouch` zones,
+--- paired actions), fe.field.anchors (safe resume anchors, `no_save` zones,
+--- `remember_location`) and fe.field.waypoint (objective markers across
+--- maps, compass bearings, `hint` zones). Each file's header documents its
+--- part.
 ---
 --- Extending without forking a file: registries (`field.define`,
 --- `field.zone`, `field.routine`, `field.verb`, `field.command`), signals
@@ -110,6 +114,9 @@ local field = {
   interacted = signal.new(),    -- (entity, input)
   hud = signal.new(),           -- draw overlays above the field
   menu_requested = signal.new(),
+  --- Player speed caps by holder (crouch zones); `field.move_speed` uses
+  --- the lowest.
+  speed_caps = {},
   --- (item, count, money) when treasure is found; return true when handled.
   --- The default listener (lowest priority) announces it with
   --- `field.announce` (a toast by default).
@@ -135,14 +142,19 @@ local location = state.section("field", function() return {} end)
 
 require("fe.save").add_meta(function(meta) meta.location = location.map_name end, "fe.field.location")
 
---- Record where the player stands in the saved state (the field does this
---- every update; the autosave before it writes).
-function field.remember_location()
+--- Record exactly where the player stands in the saved state.
+function field.exact_location()
   if not field.player or not field.player:valid() then return end
   local p = field.player.position
   location.x, location.z, location.layer = p.x, p.z, field.player.layer
   location.facing = field.player.facing
 end
+
+--- Record where the player resumes in the saved state (the field does this
+--- every update; the autosave before it writes): `field.exact_location`,
+--- or on a map with safe anchors the nearest valid one (fe.field.anchors
+--- installs that version).
+field.remember_location = field.exact_location
 
 --- Reload the current map from the saved location (after loading a save).
 function field.resume()
@@ -283,10 +295,16 @@ require("fe.schema").define("map_props", {
   camera = { type = { record = {
     pitch = { type = "number", optional = true }, yaw = { type = "number", optional = true },
     distance = { type = "number", optional = true, min = 0 }, fov = { type = "number", optional = true, min = 1, max = 170 },
+    orthographic = { type = "boolean", optional = true, doc = "Parallel projection" },
+    ortho_height = { type = "number", optional = true, min = 0, doc = "World units shown vertically when orthographic" },
     min = { type = { list = "number" }, optional = true, doc = "Lower [x, z] bound of the camera target" },
     max = { type = { list = "number" }, optional = true, doc = "Upper [x, z] bound of the camera target" },
   } }, optional = true, doc = "The camera rig's defaults on this map" },
   daynight = { type = "boolean", optional = true, doc = "Run the day/night cycle here" },
+  exits = { type = { map = "string" }, optional = true,
+    doc = "Point on this map leading towards each other map (objective markers on other maps point there)" },
+  anchors = { type = { list = "any" }, optional = true,
+    doc = "Safe resume anchors: point names, or {point, when} records (see fe.field.anchors)" },
 }, { doc = "A map's props.", open = true })
 
 -- The modules of the header install their functions on this table.
@@ -295,6 +313,9 @@ require("fe.field.followers").install(field)
 require("fe.field.warp").install(field)
 require("fe.field.interaction").install(field)
 require("fe.field.hooks").install(field)
+require("fe.field.traverse").install(field)
+require("fe.field.anchors").install(field)
+require("fe.field.waypoint").install(field)
 
 -------------------------------------------------------------------------------
 -- Map starts
@@ -356,6 +377,7 @@ function field.start(map_id, point, options)
   require("fe.field.followers").watch_party()
   require("fe.field.interaction").reset()
   require("fe.field.hooks").reset()
+  require("fe.field.traverse").reset()
   for id in pairs(zone_lookup) do zone_lookup[id] = nil end
   for _, zone in ipairs(world:zones()) do zone_lookup[zone.id] = zone end
   field.rig = field.make_rig(world, field.player)

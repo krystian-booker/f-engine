@@ -22,7 +22,10 @@
 ---     the factor applies once; with no world the cutscene task's own clock
 ---     is sped up instead), and lines advance on their own;
 ---   * with `skippable = true` (or `settings.skippable`), pressing
----     `settings.skip_input` ("menu") asks whether to skip. Skipping fades
+---     `settings.skip_input` ("menu") asks whether to skip; with
+---     `settings.skip_hold = seconds` the input must be held that long
+---     instead (`cutscene.skip_progress()` is 0..1 while it is held and
+---     `cutscene.draw_skip_hold(progress)`, replaceable, shows it). Skipping fades
 ---     out and runs the rest of the cutscene at once: waits end, walks and
 ---     jumps arrive, lines go only to the backlog, so every state change
 ---     the cutscene makes still happens. The screen stays covered until the
@@ -41,8 +44,12 @@ local cutscene = {
     fast_forward = 3,       -- speed while fast-forwarding
     skippable = false,      -- default for cutscene.play's `skippable`
     skip_input = "menu",    -- asks to skip a skippable cutscene
+    skip_hold = nil,        -- seconds skip_input must be held to ask (nil: a press)
   },
 }
+
+-- Kept across hot reload: how far the skip input has been held (0..1).
+local held = { progress = 0 }
 
 --- The file's settings, for `__reload`.
 cutscene.file_defaults = { settings = tablex.deep_copy(cutscene.settings) }
@@ -53,7 +60,8 @@ function cutscene.__reload(live, fresh)
   live.file_defaults.settings = tablex.adopt(live.settings, fresh.settings, live.file_defaults.settings)
 end
 
-i18n.defaults({ fe = { cutscene = { skip = "Skip this scene?", yes = "Skip", no = "Continue" } } })
+i18n.defaults({ fe = { cutscene = { skip = "Skip this scene?", yes = "Skip", no = "Continue",
+  hold = "Hold to skip" } } })
 
 local Actor = {}
 Actor.__index = Actor
@@ -237,14 +245,66 @@ end
 ---@param world? World
 ---@param skippable boolean
 ---@param skip {covered: boolean, started: boolean?}
+--- How far the skip input has been held towards `settings.skip_hold`
+--- (0..1; 0 when not held or without a hold).
+---@return number
+function cutscene.skip_progress()
+  return held.progress
+end
+
+--- Draw the hold-to-skip indicator while the skip input is held (fe.game's
+--- `drawn`); replace to restyle.
+---@param progress number 0..1
+function cutscene.draw_skip_hold(progress)
+  local ui = require("fe.ui")
+  local text = i18n.t("fe.cutscene.hold")
+  local w = ui.measure(text) + 16
+  local x, y = ui.anchor(w, 20, "bottom-right")
+  ui.window(x, y, w, 20, { alpha = 0.85 })
+  ui.text(text, x + 8, y + 4)
+  fe.canvas.rect(x + 4, y + 16, (w - 8) * progress, 2, ui.theme.highlight)
+end
+
+game.drawn:connect(function()
+  if held.progress > 0 then cutscene.draw_skip_hold(held.progress) end
+end, 0, "fe.cutscene.skip_hold")
+
+-- Whether the player asks to skip this tick: a press, or with
+-- `settings.skip_hold` the input held that long (on game time).
+local function wants_skip(held_for, dt)
+  local input = cutscene.settings.skip_input
+  local hold = cutscene.settings.skip_hold
+  if not hold or hold <= 0 then
+    held.progress = 0
+    return fe.input.pressed(input), 0
+  end
+  if not fe.input.held(input) then
+    held.progress = 0
+    return false, 0
+  end
+  held_for = held_for + dt
+  held.progress = math.min(1, held_for / hold)
+  if held_for >= hold then
+    held.progress = 0
+    return true, 0
+  end
+  return false, held_for
+end
+
 function cutscene.watch(owner, world, skippable, skip)
   task.bind(false)
   local key = "fe.cutscene.fast_forward"
   task.finally(function()
     owner.speed = nil
     game.scale_time(key, nil)
+    held.progress = 0
   end)
+  local held_for = 0
+  local last = task.time()
   while true do
+    local now = task.time()
+    local dt = now - last
+    last = now
     local fast = not owner.skipping and dialogue.fast_forwarding()
     local scale = fast and cutscene.settings.fast_forward or nil
     if world then
@@ -252,11 +312,15 @@ function cutscene.watch(owner, world, skippable, skip)
     else
       owner.speed = scale
     end
-    if skippable and not owner.skipping and fe.input.pressed(cutscene.settings.skip_input) then
-      owner.speed = nil
-      game.scale_time(key, nil)
-      if cutscene.confirm_skip(world) then
-        cutscene.skip_scene(owner, world, skip)
+    if skippable and not owner.skipping then
+      local asked
+      asked, held_for = wants_skip(held_for, dt)
+      if asked then
+        owner.speed = nil
+        game.scale_time(key, nil)
+        if cutscene.confirm_skip(world) then
+          cutscene.skip_scene(owner, world, skip)
+        end
       end
     end
     task.frame()

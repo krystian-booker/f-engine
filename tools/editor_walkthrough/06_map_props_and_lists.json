@@ -6,7 +6,7 @@
  {"frame": 80, "mouse": [1023, 187]},
  {"frame": 84, "click": "left"},
  {"frame": 92, "expect": "fe.world.get('field'):props().daynight == nil"},
- {"frame": 94, "mouse": [1037, 477]},
+ {"frame": 94, "mouse": [1038, 545]},
  {"frame": 98, "click": "left"},
  {"frame": 108, "expect": "fe.world.get('field'):props().daynight == false"},
  {"frame": 109, "capture": "out/25_map_props_edit.png"},

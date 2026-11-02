@@ -229,6 +229,9 @@ void PostPass::render(World& world, const ScreenFx& screen, SceneTarget& scene, 
     bgfx::setTexture(6, far_.get(), farField);
     bgfx::setTexture(7, ao_.get(), ao);
     bgfx::setTexture(8, distortion_.get(), scene.distorted ? scene.distortion.get() : gpu_.white());
+    bgfx::setTexture(9, protectedSprites_.get(), s.protectSprites ? scene.spriteMask.get() : gpu_.white(), PointClamp);
+    const glm::vec4 protection(s.protectSprites ? 1.0f : 0.0f, 0, 0, 0);
+    bgfx::setUniform(protection_.get(), &protection);
     PostFrame frame;
     frame.bloomStrength = bloomStrength;
     frame.depthOfField = depthOfField;
@@ -264,6 +267,8 @@ void PostPass::render(World& world, const ScreenFx& screen, SceneTarget& scene, 
     if (fxaa) {
         view = takeView();
         target(view, "FXAA", output.framebuffer, output.rect);
+        bgfx::setTexture(1, protectedSprites_.get(), s.protectSprites ? scene.spriteMask.get() : gpu_.white(), PointClamp);
+        bgfx::setUniform(protection_.get(), &protection);
         bgfx::setTexture(0, input_.get(), bgfx::getTexture((*chain)[current].get()));
         bgfx::setUniform(uniforms_.info.get(), glm::value_ptr(info));
         fullscreen(view, fxaa_.get(), finalState, calls);

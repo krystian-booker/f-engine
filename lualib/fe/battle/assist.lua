@@ -54,7 +54,7 @@ end
 function assist.act(battle, entry)
   local skill = data.get("skills", entry.skill)
   local helper = battle:summon({ enemy = entry.enemy, side = "party", name = entry.name })
-  local pool = battle:targets_for(helper, skill.target)
+  local pool = battle:targets_for(helper, skill.target, skill)
   local results
   if #pool > 0 then
     local targets = pool
