@@ -2,11 +2,14 @@
 #include "engine/runtime/Engine.h"
 #include "engine/script/LuaHost.h"
 #include "engine/world/Animation.h"
+#include "engine/nav/Query.h"
 #include "engine/world/World.h"
 #include <cmath>
 #include <doctest/doctest.h>
 #include <fstream>
 #include <limits>
+#include <unordered_set>
+#include <utility>
 
 using namespace fe;
 
@@ -1394,6 +1397,62 @@ TEST_CASE("a climb interrupted part-way steps off at the nearer end, on that end
     CHECK_FALSE(s.world.moving(e));
     events = s.world.takeEvents();
     CHECK(count(events, WorldEvent::Kind::ClimbEnd) == 1);
+}
+
+TEST_CASE("a platform touches the grid only when what it covers changes") {
+    Json grid = flatGrid(8, 3);
+    grid["layers"][0]["walk"] = {"10000001", "10000001", "10000001"};
+    Scratch s("still", grid);
+    auto& registry = s.world.registry();
+    const auto raft = s.world.spawn("", centre(1, 1, 0.2f));
+    registry.emplace<Platform>(raft);
+    registry.emplace<Mover>(raft, Mover{.speed = 1, .collide = false});
+    s.step();
+    REQUIRE(std::as_const(s.world.grid()).at(1, 1).walkable);
+    // At rest: tick after tick, nothing is written, so nothing cached against
+    // the grid (cells under boxes, connected components) is rebuilt.
+    const auto revision = s.world.grid().revision();
+    const auto topology = s.world.grid().topologyRevision();
+    s.step(120);
+    CHECK(s.world.grid().revision() == revision);
+    CHECK(s.world.grid().topologyRevision() == topology);
+    // Rising in place (a lift) changes its cells' height, not what connects to what.
+    registry.get<Transform>(raft).position.y = 0.6f;
+    s.step();
+    CHECK(s.world.grid().revision() != revision);
+    CHECK(s.world.grid().topologyRevision() == topology);
+    CHECK(std::as_const(s.world.grid()).at(1, 1).height == doctest::Approx(0.6f));
+    // Crossing into new cells does: water becomes deck, deck becomes water.
+    s.world.moveTo(raft, centre(4, 1, 0.6f), false);
+    s.step(300);
+    CHECK(s.world.grid().topologyRevision() != topology);
+    CHECK_FALSE(std::as_const(s.world.grid()).at(1, 1).walkable);
+    CHECK(std::as_const(s.world.grid()).at(4, 1).walkable);
+    // And at rest again, it is quiet again.
+    const auto settled = s.world.grid().revision();
+    s.step(60);
+    CHECK(s.world.grid().revision() == settled);
+    // A cell a script rewrote under the platform is the script's: it is not put back.
+    auto cell = std::as_const(s.world.grid()).at(4, 1); // a copy
+    cell.height = 3;
+    s.world.grid().setCell({4, 1, 0}, cell);
+    registry.remove<Platform>(raft);
+    s.step();
+    CHECK(std::as_const(s.world.grid()).at(4, 1).height == doctest::Approx(3.0f));
+}
+
+TEST_CASE("route planning reads the world's blocked cells in place, exempting the start") {
+    Grid grid(5, 1);
+    std::unordered_set<std::int64_t> boxed{cellKey({0, 0, 0}), cellKey({2, 0, 0})};
+    StepRules rules;
+    rules.sharedBlocked = &boxed;
+    CHECK(findRoute(grid, {0, 0, 0}, {4, 0, 0}, rules).steps.empty()); // cell 2 bars the corridor
+    boxed.erase(cellKey({2, 0, 0}));
+    rules.exempt = cellKey({0, 0, 0}); // a body may leave the boxed cell it stands in
+    CHECK(findRoute(grid, {0, 0, 0}, {4, 0, 0}, rules).steps.size() == 4);
+    CHECK(findRoute(grid, {4, 0, 0}, {0, 0, 0}, rules).steps.size() == 4); // and return to it: it is exempt
+    rules.exempt = -1;
+    CHECK(findRoute(grid, {4, 0, 0}, {0, 0, 0}, rules).steps.empty());
 }
 
 TEST_CASE("platform carry stops at static boxes and only moves this tick's riders") {

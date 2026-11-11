@@ -161,8 +161,13 @@ private:
         }
         return true;
     }
+    [[nodiscard]] bool blockedCell(GridPos p) const {
+        const auto key = cellKey(grid_.wrapCell(p));
+        return rules_.blocked.contains(key) ||
+               (rules_.sharedBlocked && key != rules_.exempt && rules_.sharedBlocked->contains(key));
+    }
     [[nodiscard]] bool isGap(GridPos p, float floor) const {
-        if (!clearAbove(p, floor) || rules_.blocked.contains(cellKey(grid_.wrapCell(p)))) {
+        if (!clearAbove(p, floor) || blockedCell(p)) {
             return false;
         }
         const auto& cell = grid_.at(p);
@@ -183,7 +188,7 @@ private:
         }
         const auto& cell = grid_.at(p);
         return (rules_.fly || cell.walkable) && tagsAllow(cell) &&
-               !rules_.blocked.contains(cellKey(grid_.wrapCell(p)));
+               !blockedCell(p);
     }
     [[nodiscard]] bool climbable(GridPos from, GridPos to, int dx, int dz) const {
         if (rules_.fly) {

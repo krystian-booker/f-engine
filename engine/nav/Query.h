@@ -43,6 +43,12 @@ struct StepRules {
     std::uint32_t blockedTags = 0;            // cells with any of these tags cannot be entered
     std::uint32_t requiredTags = 0;           // when not zero: cells with none of them cannot be entered
     std::unordered_set<std::int64_t> blocked; // occupied cells that cannot be entered
+    // More cells that cannot be entered, owned by the caller and only read
+    // (a world's cells under static boxes: large, and the same for every
+    // search), except `exempt`, the one of them that may be (a body already
+    // standing beside a box may leave its cell). Null: none.
+    const std::unordered_set<std::int64_t>* sharedBlocked = nullptr;
+    std::int64_t exempt = -1;
     JumpRules jump;
     bool ladders = true; // false: ladder links are not climbed
     // The body's size in cells per side: a square anchored at the unit's cell

@@ -129,8 +129,7 @@ StepRules stepRules(LuaHost& host, World& world, const sol::object& value) {
     StepRules rules;
     const auto options = lua::options(value, "rules");
     if (!options) {
-        const auto& boxed = world.boxBlockedCells();
-        rules.blocked.insert(boxed.begin(), boxed.end());
+        rules.sharedBlocked = &world.boxBlockedCells(); // read in place, not copied per search
         return rules;
     }
     const auto& t = *options;
@@ -205,8 +204,7 @@ StepRules stepRules(LuaHost& host, World& world, const sol::object& value) {
         };
     }
     // Static boxes block the cells they stand on for every planned route.
-    const auto& boxed = world.boxBlockedCells();
-    rules.blocked.insert(boxed.begin(), boxed.end());
+    rules.sharedBlocked = &world.boxBlockedCells();
     return rules;
 }
 

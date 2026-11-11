@@ -157,6 +157,9 @@ public:
     // different cell, setLinks and addLayer. Derived data cached on the grid
     // (component()) is keyed on it.
     [[nodiscard]] std::uint64_t revision() const { return revision_; }
+    // Changes only when walkability, layers, links or wrapping change: what
+    // component() is cached against (a cell's height or tags leave it alone).
+    [[nodiscard]] std::uint64_t topologyRevision() const { return topology_; }
     // The connected component of a cell under the most permissive walking
     // rules: 4-neighbour walkable cells of a layer, joined through every step
     // and ladder link whose two ends are walkable, ignoring heights, tags and
@@ -257,7 +260,10 @@ private:
     std::vector<std::pair<std::size_t, std::size_t>> ladderIndex_; // both ends of every ladder, sorted
     std::map<std::tuple<int, int, int>, Json> cellProps_;
     std::uint64_t revision_ = 0;
-    // component() cache: one label per cell of every layer, valid for componentsRevision_.
+    // Moves with what connectivity depends on: walkability, layers, links and
+    // wrapping (every revision_ bump except a cell keeping its walkability).
+    std::uint64_t topology_ = 0;
+    // component() cache: one label per cell of every layer, valid for componentsRevision_ (a topology_).
     mutable std::vector<std::int32_t> components_;
     mutable std::uint64_t componentsRevision_ = 0;
     mutable bool componentsBuilt_ = false;

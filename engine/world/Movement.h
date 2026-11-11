@@ -2,6 +2,7 @@
 #include "engine/nav/Query.h"
 #include "engine/world/Collision.h"
 #include <map>
+#include <unordered_map>
 #include <optional>
 #include <span>
 #include <unordered_set>
@@ -169,6 +170,8 @@ private:
     void resolveAttachment(entt::entity entity, int depth);
 
     void restoreCells();
+    void platformCells(const Transform& transform, glm::vec2 half,
+                       std::vector<std::pair<GridPos, float>>& out) const;
     void carry(entt::entity rider, glm::vec3 delta, std::span<const entt::entity> aboard, glm::vec3 deck,
                glm::vec2 half);
 
@@ -188,6 +191,10 @@ private:
     EventQueue& events_;
     std::map<entt::entity, Ride> rides_; // ordered, so overlapping platforms resolve the same way every run
     std::vector<CellOverride> overrides_;
+    // restoreCells() scratch: what the platforms will cover this tick, and
+    // the overrides that stay on the grid because nothing about them changed.
+    std::vector<std::pair<GridPos, float>> wanted_, cellScratch_;
+    std::unordered_map<std::int64_t, CellOverride> kept_;
     std::vector<entt::entity> aboard_;          // a platform and its riders, which never block each other
     std::vector<entt::entity> nearScratch_;     // carryRiders() query results
     std::unordered_set<entt::entity> resolved_; // attachments placed this tick
