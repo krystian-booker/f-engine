@@ -177,12 +177,13 @@ jobs:
   # compared with them. Linux uses Xvfb with Mesa (lavapipe Vulkan, falling
   # back to OpenGL), compares with the Vulkan and OpenGL 4.3 references
   # captured there, and must pass: a capture with no reference for the
-  # backend fails it, so a backend change cannot skip the comparison. macOS
-  # compares with the Metal references, which were captured on Apple GPU
-  # hardware: the hosted runners' virtual Metal device is not guaranteed to
-  # match it within tolerance, and Windows (D3D11 on the basic render driver)
-  # is not always available on hosted runners, so both are reported without
-  # failing the workflow. The same replays always run headless in `desktop`.
+  # backend fails it, so a backend change cannot skip the comparison. The
+  # sample has no Metal or D3D11 references yet (write them on that hardware
+  # with `fengine --write-references`), so macOS and Windows only check that
+  # each capture is a rendered frame; the hosted runners' virtual Metal device
+  # and D3D11's basic render driver are not always available, so both are
+  # reported without failing the workflow. The same replays always run
+  # headless in `desktop`.
   replays:
     strategy:
       fail-fast: false

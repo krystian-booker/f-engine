@@ -193,9 +193,10 @@ local function show(self, events)
       task.wait(0.2)
     elseif event.type == "summon" then
       local centre = self.world:points().centre.position
-      local at = { x = centre.x + 2.2, y = centre.y, z = centre.z + 2.9 }
+      local at = { x = centre.x + 2.2, y = centre.y, z = centre.z - 3.0 } -- ahead of the party's line
+      -- A game shader (shaders/fs_hologram.sc) draws the summoned warden as a figure of light.
       self.entities[u] = self.world:spawn { position = at, facing = { x = -1, z = 0 },
-        sprite = { animation = u.record.sprite, clip = "idle" } }
+        sprite = { animation = u.record.sprite, clip = "idle", shader = "hologram" } }
       self.home[u] = at
       self.world:burst({ x = at.x, y = 0.8, z = at.z }, { color = { 0.6, 0.9, 1, 1 }, color_end = { 0.6, 0.9, 1, 0 },
         lifetime = 0.7, size = 0.08, velocity = { 0, 1.5, 0 }, velocity_jitter = { 1, 1, 1 } }, 24)
@@ -436,7 +437,7 @@ local function draw_party(self)
       ui.bar(x + 128, ry + 2, 30, 4, u.surge / 100, u.surge >= 100 and ui.colors.accent or ui.colors.weak)
       if u.surge >= 100 then ui.text("!", x + 160, ry, { color = ui.colors.accent }) end
     else
-      ui.text(tostring(math.max(0, u.turns_left + 1)) .. "t", x + 128, ry, { color = ui.colors.dim })
+      ui.text(math.max(0, u.turns_left) .. " turns", x + 128, ry, { color = ui.colors.dim })
     end
     local marks = ""
     for id in pairs(u.status) do marks = marks .. data.get("statuses", id).name:sub(1, 1) end
