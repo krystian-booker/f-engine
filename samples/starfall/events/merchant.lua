@@ -1,8 +1,6 @@
-local dialogue = require("fe.dialogue")
+local dialogue = require("game.dialogue")
 
-return function(ev)
-  ev.self:face(ev.player)
-  dialogue.say("Merchant", "Potions, blades and charms! What'll it be?")
-  dialogue.close()
-  require("fe.ui.screens.shop").open("vale_general")
+return function()
+  dialogue.say("Merchant", "Potions, ethers, a tent for the road. Have a look.")
+  require("game.shop").open("merchant")
 end

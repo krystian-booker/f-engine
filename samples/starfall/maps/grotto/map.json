@@ -532,25 +532,16 @@
       "position": [
         8.0,
         0.5,
-        5.0
+        5.300000190734863
       ],
       "props": {
-        "name": "Guardian",
-        "pages": [
-          {
-            "script": "events.guardian",
-            "trigger": "action"
-          },
-          {
-            "hidden": true,
-            "when": {
-              "flag": "guardian_defeated"
-            }
-          }
-        ],
-        "sprite": "sprites/golem.anim.json"
+        "hide_flag": "guardian_defeated",
+        "model": "fx/drake.glb",
+        "name": "Grotto Drake",
+        "script": "events.guardian",
+        "solid": false
       },
-      "type": "npc"
+      "type": "boss"
     },
     {
       "facing": [
@@ -567,7 +558,6 @@
       "props": {
         "name": "Vale Crystal",
         "script": "events.crystal",
-        "solid": true,
         "sprite": "sprites/crystal.anim.json"
       },
       "type": "npc"
@@ -604,8 +594,8 @@
         15.5
       ],
       "props": {
-        "map": "town",
-        "point": "return",
+        "map": "overworld",
+        "point": "grotto",
         "trigger": "touch"
       },
       "type": "door"
@@ -623,8 +613,8 @@
         15.5
       ],
       "props": {
-        "map": "town",
-        "point": "return",
+        "map": "overworld",
+        "point": "grotto",
         "trigger": "touch"
       },
       "type": "door"

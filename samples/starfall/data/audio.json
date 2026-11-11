@@ -15,6 +15,9 @@
     "title": {
       "file": "audio/title.wav"
     },
+    "overworld": {
+      "file": "audio/overworld.wav"
+    },
     "victory": {
       "file": "audio/victory.wav",
       "loop": false

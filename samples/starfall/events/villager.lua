@@ -1,14 +1,13 @@
-local cutscene = require("fe.cutscene")
-local state = require("fe.state")
+local dialogue = require("game.dialogue")
+local state = require("game.state")
 
-return function(ev)
-  local me = cutscene.actor(ev.self)
-  me:face(ev.player)
-  if state.flag("crystal_restored") then
-    me:emote("music")
-    me:say("Can you feel it? Spring is coming!")
-  else
-    me:emote("sweat")
-    me:say("Brr. It's been cold since the crystal dimmed.")
-  end
+local lines = {
+  "Out on the coast, watch the sensor in the corner. When it turns red, something is about to jump you.",
+  "Wolves fear the cold, slimes fear fire. What a creature fears, you only learn by trying.",
+  "They say an echo grows the longer you wear it.",
+}
+
+return function()
+  local index = state.data.steps % #lines + 1
+  dialogue.say("Villager", lines[index])
 end

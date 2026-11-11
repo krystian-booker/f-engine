@@ -1,35 +1,25 @@
--- Elder Rowan starts the main quest and rewards its end.
-local dialogue = require("fe.dialogue")
-local inventory = require("fe.rpg.inventory")
-local quest = require("fe.quest")
-local state = require("fe.state")
+local dialogue = require("game.dialogue")
+local state = require("game.state")
 
-return function(ev)
-  local say = function(text) dialogue.say("Elder Rowan", text, { portrait = "portraits/elder.png" }) end
-  if quest.status("fading_crystal") == "completed" then
-    say("The Vale shines again thanks to you, {leader}.")
-    return
-  end
-  if state.flag("crystal_restored") then
-    say("You've done it! The crystal's warmth reaches even here.")
-    if not state.flag("elder_reward") then
-      state.set_flag("elder_reward")
-      inventory.add_money(400)
-      dialogue.say(nil, "Received {color:highlight}400 " .. inventory.settings.currency .. "{color:reset}.")
-      quest.complete("fading_crystal")
-    end
-    return
-  end
-  if quest.stage("fading_crystal").id == "grotto" then
-    say("The grotto lies north of the plaza. Mind the guardian.")
-    return
-  end
-  say("The Vale Crystal is dimming, {leader}.{wait:0.4} Without it, winter will never leave.")
-  local answer = dialogue.choice({ "We'll find out why.", "Let us prepare first." })
-  if answer == 1 then
-    quest.advance("fading_crystal")
-    say("Bless you. Take supplies from the merchant, and rest at the inn if you need.")
+return function(context)
+  local portrait = { portrait = "portraits/elder.png" }
+  if state.flag("guardian_defeated") and not state.flag("skiff") then
+    dialogue.say("Elder Rowan", "The crystal burns again. You have done what none of us could.", portrait)
+    dialogue.say("Elder Rowan", "My old skiff is moored south of the gate. Take her: there is a shrine on the "
+      .. "islet to the east that no road reaches.", portrait)
+    state.set_flag("skiff")
+    context.field.grant_vehicle("skiff")
+    require("game.ui").toast("Received the skiff.")
+  elseif state.flag("skiff") then
+    dialogue.say("Elder Rowan", "The skiff lands only on open ground. Mind the forest.", portrait)
+  elseif state.flag("met_elder") then
+    dialogue.say("Elder Rowan", "The grotto lies east, across the river. Ask the stablehand for a strider: "
+      .. "they ford water we cannot.", portrait)
   else
-    say("Of course. Return when you're ready.")
+    dialogue.say("Elder Rowan", "The crystal in the grotto has gone dark, and a drake has made its nest "
+      .. "before it.", portrait)
+    dialogue.say("Elder Rowan", "Strike what a foe is weak to and its guard will break. Break them all at once "
+      .. "and your echoes will answer together.", portrait)
+    state.set_flag("met_elder")
   end
 end

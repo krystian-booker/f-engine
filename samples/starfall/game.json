@@ -1,7 +1,7 @@
 {
-  "title": "Crystal of the Vale",
-  "id": "vale",
+  "title": "Starfall",
+  "id": "starfall",
   "window": {"width": 1280, "height": 720},
-  "virtual_resolution": {"width": 480, "height": 270},
+  "virtual_resolution": {"width": 640, "height": 360},
   "pixels_per_unit": 32
 }

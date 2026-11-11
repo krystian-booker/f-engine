@@ -1,42 +1,58 @@
--- Crystal of the Vale: a classic side-view, active-time-battle sample.
--- Quest updates appear as toasts.
-local battle = require("fe.battle")
-local data = require("fe.data")
-local devtools = require("fe.devtools")
-local field = require("fe.field")
-local inventory = require("fe.rpg.inventory")
-local party = require("fe.rpg.party")
-local quest = require("fe.quest")
-local ui = require("fe.ui")
+--- Starfall: a small turn-based RPG in the HD-2D style, and the engine's one
+--- sample. The engine provides worlds, sprites, input, audio, text and saves;
+--- every rule of the game is in this folder:
+---
+---   game/task.lua, scenes.lua   coroutines and the scene stack
+---   game/input.lua, ui.lua      actions, button prompts, windows and lists
+---   game/data.lua, state.lua    data tables and the save file
+---   game/field.lua              exploration: placements, doors, vehicles, encounters
+---   game/dialogue.lua           message boxes and choices
+---   game/battle/rules.lua       the battle system (no drawing)
+---   game/battle/scene.lua       the battle on screen
+---   game/menu.lua, shop.lua, title.lua
+---   game/editor.lua             what the F1 editor knows about this game
+---   events/*.lua                what the people and things on the maps do
+local audio = require("game.audio")
+local data = require("game.data")
+local editor = require("game.editor")
+local input = require("game.input")
+local scenes = require("game.scenes")
+local task = require("game.task")
+local ui = require("game.ui")
 
-local quest_toasts = { stage = "Quest updated: {name}", completed = "Quest complete: {name}" }
+local main = { editor = editor }
 
-quest.changed:connect(function(id, what)
-  local text = id and quest_toasts[what]
-  if text then ui.toast((text:gsub("{name}", data.get("quests", id).name)), { sound = "confirm" }) end
-end, 0, "vale.quest_toasts")
+function main.init()
+  local settings = fe.save.read_config()
+  input.setup(settings.bindings)
+  for bus, volume in pairs(settings.volume or {}) do fe.audio.set_bus_volume(bus, volume) end
+  data.reload()
+  require("game.title").open()
+end
 
-battle.settings.presentation = "fe.battle.sideview"
-local sideview = require("fe.battle.sideview")
-sideview.settings.command_names.art = "Arts"
-sideview.settings.command_names.magic = "Magic"
-battle.rules = require("battle_rules")
+function main.update(dt)
+  task.update(dt)
+  scenes.update(dt)
+  ui.update(dt)
+end
 
-return require("fe.starter").main({
-  title = "Crystal of the Vale",
-  subtitle = "An f-engine sample",
-  new_game = function()
-    party.join("aster")
-    party.join("mira")
-    inventory.add("potion", 3)
-    inventory.add_money(150)
-    quest.start("fading_crystal")
-    field.start("town", "entry")
-  end,
-  setup = function()
-    field.settings.followers = 1
-    devtools.register("Battle: slimes", function() battle.encounter("slimes", { stage = "battle_grass" }) end)
-    devtools.register("Battle: guardian", function() battle.encounter("guardian") end)
-    devtools.register("Warp: grotto", function() field.warp("grotto", "entry") end)
-  end,
-})
+function main.post_update(dt)
+  scenes.post_update(dt)
+end
+
+function main.draw(alpha)
+  scenes.draw(alpha)
+  ui.draw_toasts()
+end
+
+function main.file_changed(path)
+  editor.file_changed(path)
+end
+
+--- `fengine_headless --check`: the data tables must be consistent.
+function main.validate()
+  data.validate()
+  local _ = audio
+end
+
+return main

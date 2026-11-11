@@ -1,5 +1,0 @@
-[
-  {"id": "poison", "name": "Poison", "turns": 4, "tags": ["debuff"], "removed_by": ["battle_end", "rest"],
-   "on_turn": [{"type": "damage", "formula": "percent", "power": 8, "always_hit": true, "variance": 0}]},
-  {"id": "rallied", "name": "Rallied", "turns": 3, "tags": ["buff"], "modifiers": [{"stat": "attack", "mul": 1.3}]}
-]

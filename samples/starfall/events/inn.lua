@@ -1,23 +1,22 @@
--- The inn: pay to fully recover the party.
-local dialogue = require("fe.dialogue")
-local inventory = require("fe.rpg.inventory")
-local party = require("fe.rpg.party")
-local transition = require("fe.transition")
+local audio = require("game.audio")
+local dialogue = require("game.dialogue")
+local state = require("game.state")
+local task = require("game.task")
 
-local PRICE = 20
-
-return function(ev)
-  dialogue.say("Innkeeper", "A warm bed and a hot meal for " .. PRICE .. " " .. inventory.settings.currency .. ". Stay the night?")
-  if dialogue.choice({ "Rest", "Not now" }) ~= 1 then return end
-  if not inventory.spend(PRICE) then
-    dialogue.say("Innkeeper", "I'm afraid that's not enough coin.")
+return function()
+  local price = 20
+  if dialogue.choose("Innkeeper", "A bed for the night is " .. price .. " gil.", { "Stay", "Not now" }, { cancel = 2 }) ~= 1 then
     return
   end
-  dialogue.close()
-  transition.out("fade", 0.6)
-  party.recover()
-  require("fe.sound").play("heal")
-  require("fe.task").wait(0.6)
-  transition.into("fade", 0.6)
-  dialogue.say("Innkeeper", "Good morning! Safe travels.")
+  if state.data.gold < price then
+    dialogue.say("Innkeeper", "Come back when your purse is heavier.")
+    return
+  end
+  state.data.gold = state.data.gold - price
+  task.over(0.5, function(t) fe.screen.set { fade = { 0, 0, 0, t } } end)
+  state.heal_party()
+  audio.sfx("heal")
+  task.wait(0.6)
+  task.over(0.5, function(t) fe.screen.set { fade = { 0, 0, 0, 1 - t } } end)
+  dialogue.say("Innkeeper", "Rested? Safe roads.")
 end

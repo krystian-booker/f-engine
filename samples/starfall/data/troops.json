@@ -1,5 +1,54 @@
 [
-  {"id": "slimes", "members": [{"enemy": "slime"}, {"enemy": "slime"}], "stage": "battle_grass", "music": "battle"},
-  {"id": "wisps", "members": [{"enemy": "wisp"}, {"enemy": "wisp"}, {"enemy": "slime"}], "stage": "battle_cave", "music": "battle"},
-  {"id": "guardian", "name": "The Guardian", "members": [{"enemy": "golem"}], "stage": "battle_cave", "music": "boss", "escapable": false}
+  {
+    "id": "slimes",
+    "enemies": [
+      "slime",
+      "slime"
+    ]
+  },
+  {
+    "id": "pack",
+    "enemies": [
+      "wolf",
+      "wolf"
+    ]
+  },
+  {
+    "id": "mixed",
+    "enemies": [
+      "slime",
+      "wolf",
+      "slime"
+    ]
+  },
+  {
+    "id": "wisps",
+    "enemies": [
+      "wisp",
+      "wisp"
+    ]
+  },
+  {
+    "id": "embers",
+    "enemies": [
+      "ember",
+      "wisp",
+      "ember"
+    ]
+  },
+  {
+    "id": "golem",
+    "enemies": [
+      "golem",
+      "wisp"
+    ]
+  },
+  {
+    "id": "guardian",
+    "enemies": [
+      "drake"
+    ],
+    "boss": true,
+    "music": "boss"
+  }
 ]

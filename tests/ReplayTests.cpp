@@ -157,13 +157,13 @@ TEST_CASE("headless replays run Lua, waits and asserts without a window") {
 
 TEST_CASE("replay captures must be rendered frames and match the backend's references") {
     const auto references =
-        std::filesystem::path(FENGINE_BUILTIN) / ".." / "samples" / "starfall" / "replays" / "reference" / "metal";
-    const auto live = Image::load(references / "postfx-live.png");
-    const auto custom = Image::load(references / "postfx-custom.png");
+        std::filesystem::path(FENGINE_BUILTIN) / ".." / "samples" / "starfall" / "replays" / "reference" / "vulkan";
+    const auto live = Image::load(references / "explore-town.png");
+    const auto custom = Image::load(references / "battle-boss.png");
     CHECK(live.width == ReferenceWidth);
     // Rendered scenes, dark or sepia ones included, pass; black, cleared and
     // single-colour frames don't.
-    for (const auto* name : {"postfx-live.png", "postfx-custom.png", "postfx-shatter.png"}) {
+    for (const auto* name : {"explore-town.png", "battle-boss.png", "explore-dialogue.png"}) {
         CAPTURE(name);
         CHECK(blankFrameProblem(Image::load(references / name)).empty());
     }

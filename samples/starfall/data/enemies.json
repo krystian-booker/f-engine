@@ -1,14 +1,227 @@
 [
-  {"id": "slime", "name": "Slime", "sprite": "sprites/slime.anim.json", "level": 2,
-   "stats": {"max_hp": 70, "attack": 16, "defense": 5, "magic": 5, "spirit": 4, "speed": 10, "accuracy": 0, "evasion": 0, "critical": 2},
-   "skills": ["attack", "venom"], "ai": "ai.slime.think", "resist": {"fire": 1.5},
-   "rewards": {"exp": 24, "money": 14, "drops": [{"item": "potion", "chance": 0.3}]}},
-  {"id": "wisp", "name": "Wisp", "sprite": "sprites/wisp.anim.json", "level": 3,
-   "stats": {"max_hp": 60, "attack": 8, "defense": 4, "magic": 20, "spirit": 14, "speed": 20, "accuracy": 0, "evasion": 10, "critical": 0},
-   "skills": ["glow"], "resist": {"fire": 0.5, "light": 0},
-   "rewards": {"exp": 32, "money": 20, "drops": [{"item": "ether", "chance": 0.2}]}},
-  {"id": "golem", "name": "Crystal Guardian", "sprite": "sprites/golem.anim.json", "level": 6, "scale": 1.4,
-   "stats": {"max_hp": 900, "attack": 34, "defense": 18, "magic": 10, "spirit": 12, "speed": 9, "accuracy": 0, "evasion": 0, "critical": 4},
-   "skills": ["attack", "quake"], "ai": "ai.golem.think", "resist": {"fire": 0.7},
-   "rewards": {"exp": 260, "money": 300, "drops": [{"item": "calm_charm", "chance": 1}]}}
+  {
+    "id": "slime",
+    "name": "Slime",
+    "sprite": "sprites/slime.anim.json",
+    "stats": {
+      "hp": 38,
+      "mp": 0,
+      "atk": 9,
+      "def": 6,
+      "mag": 4,
+      "res": 4,
+      "spd": 6
+    },
+    "break": 3,
+    "affinity": {
+      "fire": "weak",
+      "ice": "resist"
+    },
+    "skills": [
+      {
+        "id": "tackle",
+        "weight": 3
+      },
+      {
+        "id": "ooze",
+        "weight": 2
+      }
+    ],
+    "exp": 9,
+    "gold": 6,
+    "mastery": 3
+  },
+  {
+    "id": "wolf",
+    "name": "Coast Wolf",
+    "sprite": "sprites/wolf.anim.json",
+    "stats": {
+      "hp": 46,
+      "mp": 0,
+      "atk": 12,
+      "def": 7,
+      "mag": 3,
+      "res": 5,
+      "spd": 13
+    },
+    "break": 4,
+    "affinity": {
+      "ice": "weak"
+    },
+    "skills": [
+      {
+        "id": "bite",
+        "weight": 4
+      },
+      {
+        "id": "howl",
+        "weight": 1
+      }
+    ],
+    "exp": 12,
+    "gold": 8,
+    "mastery": 4
+  },
+  {
+    "id": "wisp",
+    "name": "Wisp",
+    "sprite": "sprites/wisp.anim.json",
+    "stats": {
+      "hp": 30,
+      "mp": 20,
+      "atk": 4,
+      "def": 5,
+      "mag": 12,
+      "res": 10,
+      "spd": 10
+    },
+    "break": 3,
+    "affinity": {
+      "light": "weak",
+      "physical": "resist",
+      "dark": "null"
+    },
+    "skills": [
+      {
+        "id": "will_o",
+        "weight": 3
+      },
+      {
+        "id": "blinding_dust",
+        "weight": 1
+      }
+    ],
+    "exp": 11,
+    "gold": 9,
+    "mastery": 4
+  },
+  {
+    "id": "ember",
+    "name": "Ember",
+    "sprite": "sprites/ember.anim.json",
+    "stats": {
+      "hp": 34,
+      "mp": 20,
+      "atk": 5,
+      "def": 5,
+      "mag": 13,
+      "res": 9,
+      "spd": 9
+    },
+    "break": 3,
+    "affinity": {
+      "ice": "weak",
+      "fire": "absorb"
+    },
+    "skills": [
+      {
+        "id": "will_o",
+        "weight": 2
+      },
+      {
+        "id": "ember_burst",
+        "weight": 2
+      }
+    ],
+    "exp": 13,
+    "gold": 10,
+    "mastery": 5
+  },
+  {
+    "id": "golem",
+    "name": "Cave Golem",
+    "sprite": "sprites/golem.anim.json",
+    "stats": {
+      "hp": 110,
+      "mp": 0,
+      "atk": 15,
+      "def": 14,
+      "mag": 4,
+      "res": 6,
+      "spd": 4
+    },
+    "break": 6,
+    "affinity": {
+      "bolt": "weak",
+      "physical": "resist"
+    },
+    "skills": [
+      {
+        "id": "tackle",
+        "weight": 3
+      },
+      {
+        "id": "crush",
+        "weight": 2
+      }
+    ],
+    "exp": 30,
+    "gold": 26,
+    "mastery": 9
+  },
+  {
+    "id": "drake",
+    "name": "Grotto Drake",
+    "model": "fx/drake.glb",
+    "scale": 1.25,
+    "stats": {
+      "hp": 430,
+      "mp": 60,
+      "atk": 17,
+      "def": 11,
+      "mag": 15,
+      "res": 10,
+      "spd": 9
+    },
+    "break": 10,
+    "affinity": {
+      "bolt": "weak",
+      "ice": "null",
+      "fire": "resist"
+    },
+    "skills": [
+      {
+        "id": "bite",
+        "weight": 3
+      },
+      {
+        "id": "tail_sweep",
+        "weight": 2
+      },
+      {
+        "id": "frost_breath",
+        "weight": 2
+      }
+    ],
+    "exp": 140,
+    "gold": 220,
+    "mastery": 30
+  },
+  {
+    "id": "warden",
+    "name": "Warden",
+    "sprite": "sprites/warden.anim.json",
+    "ally": true,
+    "stats": {
+      "hp": 80,
+      "mp": 0,
+      "atk": 8,
+      "def": 8,
+      "mag": 14,
+      "res": 10,
+      "spd": 12
+    },
+    "break": 0,
+    "turns": 3,
+    "skills": [
+      {
+        "id": "warden_strike",
+        "weight": 1
+      }
+    ],
+    "finale": "warden_finale",
+    "exp": 0,
+    "gold": 0,
+    "mastery": 0
+  }
 ]

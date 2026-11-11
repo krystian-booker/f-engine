@@ -1,14 +1,571 @@
-[
-  {"tick": 20, "input": {"key:Return": 1}},
-  {"tick": 22, "input": {"key:Return": 0}},
-  {"tick": 23, "wait_for": "require('fe.field').player ~= nil", "timeout": 300},
-  {"tick": 30, "input": {"key:Up": 1}},
-  {"tick": 120, "input": {"key:Up": 0}},
-  {"tick": 125, "assert": "require('fe.field').player.position.z < 12", "message": "The player walked north"},
-  {"tick": 130, "input": {"key:Tab": 1}},
-  {"tick": 132, "input": {"key:Tab": 0}},
-  {"tick": 140, "assert": "require('fe.scene').find('menu') ~= nil", "message": "The main menu opened"},
-  {"tick": 150, "input": {"key:Escape": 1}},
-  {"tick": 152, "input": {"key:Escape": 0}},
-  {"tick": 160, "assert": "require('fe.scene').top() == require('fe.field').scene", "message": "The menu closed"}
-]
+{
+ "seed": 7,
+ "commands": [
+  {
+   "tick": 30,
+   "capture": "replay-out/explore-title.png",
+   "compare": "reference/{backend}/explore-title.png",
+   "tolerance": 0.04
+  },
+  {
+   "tick": 34,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 36,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 40,
+   "wait_for": "require('game.field').world ~= nil and require('game.field').world.map_id == 'town'",
+   "timeout": 300
+  },
+  {
+   "tick": 42,
+   "assert": "#require('game.state').data.party == 4"
+  },
+  {
+   "tick": 82,
+   "capture": "replay-out/explore-town.png",
+   "compare": "reference/{backend}/explore-town.png",
+   "tolerance": 0.04
+  },
+  {
+   "tick": 84,
+   "lua": "local f=require('game.field'); local e=f.world:find('elder'); f.player:place({x=e.position.x, z=e.position.z+0.9}); f.player:face(e)"
+  },
+  {
+   "tick": 88,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 90,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 150,
+   "capture": "replay-out/explore-dialogue.png",
+   "compare": "reference/{backend}/explore-dialogue.png",
+   "tolerance": 0.04
+  },
+  {
+   "tick": 152,
+   "lua": "require('game.field').player:face('south')"
+  },
+  {
+   "tick": 160,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 162,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 170,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 172,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 180,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 182,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 190,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 192,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 200,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 202,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 210,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 212,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 220,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 222,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 230,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 232,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 240,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 242,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 250,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 252,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 260,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 262,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 270,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 272,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 276,
+   "wait_for": "require('game.field').locked == 0 and require('game.scenes').top() == require('game.field').scene",
+   "timeout": 900
+  },
+  {
+   "tick": 278,
+   "assert": "require('game.state').flag('met_elder')"
+  },
+  {
+   "tick": 280,
+   "lua": "local f=require('game.field'); local e=f.world:find('stablehand'); f.player:place({x=e.position.x, z=e.position.z+0.9}); f.player:face(e)"
+  },
+  {
+   "tick": 284,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 286,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 292,
+   "lua": "require('game.field').player:face('south')"
+  },
+  {
+   "tick": 300,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 302,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 310,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 312,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 320,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 322,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 330,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 332,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 340,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 342,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 350,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 352,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 360,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 362,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 370,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 372,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 376,
+   "wait_for": "require('game.field').locked == 0 and require('game.scenes').top() == require('game.field').scene",
+   "timeout": 900
+  },
+  {
+   "tick": 378,
+   "assert": "require('game.state').flag('strider')"
+  },
+  {
+   "tick": 380,
+   "lua": "local f=require('game.field'); local g=f.world:find('to_coast'); f.player:place({x=g.position.x, z=g.position.z-1.2})"
+  },
+  {
+   "tick": 382,
+   "input": [
+    [
+     "key:Down",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 386,
+   "wait_for": "require('game.field').world.map_id == 'overworld' and require('game.field').locked == 0",
+   "timeout": 600
+  },
+  {
+   "tick": 388,
+   "input": [
+    [
+     "key:Down",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 428,
+   "capture": "replay-out/explore-overworld.png",
+   "compare": "reference/{backend}/explore-overworld.png",
+   "tolerance": 0.04
+  },
+  {
+   "tick": 430,
+   "lua": "local f=require('game.field'); f.player:place(f.world:find('strider').position)"
+  },
+  {
+   "tick": 434,
+   "input": [
+    [
+     "key:V",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 436,
+   "input": [
+    [
+     "key:V",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 440,
+   "assert": "require('game.state').data.riding == 'strider'"
+  },
+  {
+   "tick": 442,
+   "lua": "require('game.field').player:place({x=16.5, z=14.5})"
+  },
+  {
+   "tick": 444,
+   "input": [
+    [
+     "key:Right",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 504,
+   "input": [
+    [
+     "key:Right",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 508,
+   "assert": "require('game.field').player.position.x > 20"
+  },
+  {
+   "tick": 518,
+   "capture": "replay-out/explore-strider.png",
+   "compare": "reference/{backend}/explore-strider.png",
+   "tolerance": 0.04
+  }
+ ]
+}

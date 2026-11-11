@@ -1,0 +1,135 @@
+[
+  {
+    "id": "vanguard",
+    "name": "Vanguard",
+    "about": "Shields the wounded: takes single blows aimed at an ally below half health.",
+    "passive": "cover",
+    "bonus": {
+      "def": 3,
+      "hp": 15
+    },
+    "rank_points": 40,
+    "max_rank": 3,
+    "skills": [
+      {
+        "id": "guard_break",
+        "rank": 1
+      },
+      {
+        "id": "rally",
+        "rank": 2
+      }
+    ],
+    "unison": "bulwark_chorus"
+  },
+  {
+    "id": "dawnlight",
+    "name": "Dawnlight",
+    "about": "A healer's echo.",
+    "bonus": {
+      "mag": 2,
+      "mp": 6
+    },
+    "rank_points": 40,
+    "max_rank": 3,
+    "skills": [
+      {
+        "id": "grace",
+        "rank": 1
+      },
+      {
+        "id": "purify",
+        "rank": 2
+      }
+    ],
+    "unison": "dawn_chorus"
+  },
+  {
+    "id": "stormcall",
+    "name": "Stormcall",
+    "about": "Lightning that shatters guards.",
+    "bonus": {
+      "spd": 2,
+      "atk": 1
+    },
+    "rank_points": 40,
+    "max_rank": 3,
+    "skills": [
+      {
+        "id": "spark",
+        "rank": 1
+      },
+      {
+        "id": "chain_bolt",
+        "rank": 2
+      }
+    ],
+    "unison": "tempest_verse"
+  },
+  {
+    "id": "frostveil",
+    "name": "Frostveil",
+    "about": "Cold that slows what it touches.",
+    "bonus": {
+      "res": 3,
+      "mag": 2
+    },
+    "rank_points": 40,
+    "max_rank": 3,
+    "skills": [
+      {
+        "id": "frost_lance",
+        "rank": 1
+      },
+      {
+        "id": "hush",
+        "rank": 2
+      }
+    ],
+    "unison": "glacial_hymn"
+  },
+  {
+    "id": "emberheart",
+    "name": "Emberheart",
+    "about": "The grotto crystal's fire.",
+    "bonus": {
+      "atk": 2,
+      "mag": 2
+    },
+    "rank_points": 40,
+    "max_rank": 3,
+    "skills": [
+      {
+        "id": "flare",
+        "rank": 1
+      },
+      {
+        "id": "wildfire",
+        "rank": 2
+      }
+    ],
+    "unison": "cinder_requiem"
+  },
+  {
+    "id": "tidecaller",
+    "name": "Tidecaller",
+    "about": "The shrine's gift: the sea's patience.",
+    "bonus": {
+      "mp": 8,
+      "res": 2
+    },
+    "rank_points": 40,
+    "max_rank": 3,
+    "skills": [
+      {
+        "id": "tide_mend",
+        "rank": 1
+      },
+      {
+        "id": "purify",
+        "rank": 2
+      }
+    ],
+    "unison": "tidal_grace"
+  }
+]

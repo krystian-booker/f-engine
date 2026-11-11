@@ -1,23 +1,56 @@
 [
-  {"id": "potion", "name": "Potion", "price": 30, "icon": "potion", "description": "Restores 80 HP.",
-   "use": {"target": "ally", "effects": [{"type": "heal", "formula": "fixed", "power": 80, "variance": 0}]}},
-  {"id": "ether", "name": "Ether", "price": 90, "description": "Restores 25 MP.",
-   "use": {"target": "ally", "effects": [{"type": "resource", "resource": "mp", "amount": 25}]}},
-  {"id": "antidote", "name": "Antidote", "price": 20, "description": "Cures poison.",
-   "use": {"target": "ally", "effects": [{"type": "remove_state", "state": "poison"}]}},
-  {"id": "phoenix_down", "name": "Phoenix Plume", "price": 200, "description": "Revives a fallen ally.",
-   "use": {"target": "dead_ally", "effects": [{"type": "revive", "fraction": 0.25}]}},
-  {"id": "bronze_sword", "name": "Bronze Sword", "kind": "equipment", "price": 100, "description": "A reliable blade.",
-   "equip": {"slot": "weapon", "type": "sword", "modifiers": [{"stat": "attack", "add": 8}]}},
-  {"id": "steel_sword", "name": "Steel Sword", "kind": "equipment", "price": 420, "description": "Keen and heavy.",
-   "equip": {"slot": "weapon", "type": "sword", "modifiers": [{"stat": "attack", "add": 18}]}},
-  {"id": "oak_staff", "name": "Oak Staff", "kind": "equipment", "price": 90,
-   "equip": {"slot": "weapon", "type": "staff", "modifiers": [{"stat": "magic", "add": 6}]}},
-  {"id": "leather", "name": "Leather Coat", "kind": "equipment", "price": 80,
-   "equip": {"slot": "body", "type": "armor", "modifiers": [{"stat": "defense", "add": 6}]}},
-  {"id": "robe", "name": "Linen Robe", "kind": "equipment", "price": 70,
-   "equip": {"slot": "body", "type": "robe", "modifiers": [{"stat": "defense", "add": 3}, {"stat": "spirit", "add": 3}]}},
-  {"id": "calm_charm", "name": "Calm Charm", "kind": "equipment", "price": 260, "description": "Teaches Vigil while worn.",
-   "equip": {"slot": "accessory", "type": "trinket", "skills": ["vigil"]}},
-  {"id": "vale_crystal", "name": "Vale Crystal", "kind": "key", "description": "It hums with warm light."}
+  {
+    "id": "potion",
+    "name": "Potion",
+    "price": 30,
+    "about": "Restores 60 HP.",
+    "effect": {
+      "kind": "heal",
+      "amount": 60
+    },
+    "target": "ally"
+  },
+  {
+    "id": "ether",
+    "name": "Ether",
+    "price": 80,
+    "about": "Restores 20 MP.",
+    "effect": {
+      "kind": "mp",
+      "amount": 20
+    },
+    "target": "ally"
+  },
+  {
+    "id": "tonic",
+    "name": "Tonic",
+    "price": 40,
+    "about": "Cures ailments.",
+    "effect": {
+      "kind": "cure"
+    },
+    "target": "ally"
+  },
+  {
+    "id": "ash",
+    "name": "Phoenix Ash",
+    "price": 150,
+    "about": "Raises a fallen ally.",
+    "effect": {
+      "kind": "revive",
+      "fraction": 0.4
+    },
+    "target": "ally"
+  },
+  {
+    "id": "tent",
+    "name": "Tent",
+    "price": 120,
+    "about": "Rests the whole party. Field only.",
+    "effect": {
+      "kind": "tent"
+    },
+    "target": "party",
+    "field_only": true
+  }
 ]

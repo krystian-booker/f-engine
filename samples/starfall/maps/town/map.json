@@ -4,30 +4,6 @@
     "colliders": [
       {
         "max": [
-          14.0,
-          1.2000000476837158,
-          5.0
-        ],
-        "min": [
-          13.5,
-          -0.05000000074505806,
-          2.0
-        ]
-      },
-      {
-        "max": [
-          16.5,
-          1.2000000476837158,
-          5.0
-        ],
-        "min": [
-          16.0,
-          -0.05000000074505806,
-          2.0
-        ]
-      },
-      {
-        "max": [
           1.75,
           1.2000000476837158,
           6.75
@@ -135,7 +111,7 @@
         ]
       }
     ],
-    "fingerprint": "fbf492c7a9e206f1",
+    "fingerprint": "d01edf5a8adc2f91",
     "options": {
       "block_edges": true,
       "box_drops": true,
@@ -149,14 +125,6 @@
       "step": 0.6000000238418579
     },
     "overrides": [
-      {
-        "d": 1,
-        "layer": 0,
-        "w": 2,
-        "walkable": true,
-        "x": 9,
-        "z": 0
-      },
       {
         "d": 1,
         "layer": 0,
@@ -317,9 +285,9 @@
         "height": [
           "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
           "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
-          "0 0 2.25 2.25 2.25 2.25 0 0 0 0 0 0 0 0 2.25 2.25 0 0 0 0",
-          "0 0 2.25 2.25 2.25 2.25 0 0 0 0 0 0 0 0 2.25 2.25 0 0 0 0",
-          "0 0 2.25 2.25 2.25 2.25 0 0 0 0 0 0 0 0 2.25 2.25 0 0 0 0",
+          "0 0 2.25 2.25 2.25 2.25 0 0 0 0 0 0 0 2.25 2.25 2.25 0 0 0 0",
+          "0 0 2.25 2.25 2.25 2.25 0 0 0 0 0 0 0 2.25 2.25 2.25 0 0 0 0",
+          "0 0 2.25 2.25 2.25 2.25 0 0 0 0 0 0 0 2.25 2.25 2.25 0 0 0 0",
           "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
           "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
           "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
@@ -352,11 +320,11 @@
           "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
         ],
         "walk": [
-          "00000000011000000000",
+          "00000000000000000000",
           "01111111111111111110",
-          "01000011111111001110",
-          "01000011111111001110",
-          "01000011111111001110",
+          "01000011111110001110",
+          "01000011111110001110",
+          "01000011111110001110",
           "01111111111111111110",
           "01111111111111111110",
           "01111111111111111110",
@@ -484,7 +452,7 @@
       "id": "house_merchant",
       "layer": 0,
       "position": [
-        15.0,
+        14.5,
         0.0,
         3.5
       ],
@@ -678,12 +646,7 @@
       ],
       "props": {
         "name": "Elder Rowan",
-        "pages": [
-          {
-            "script": "events.elder",
-            "trigger": "action"
-          }
-        ],
+        "script": "events.elder",
         "sprite": "sprites/elder.anim.json"
       },
       "type": "npc"
@@ -740,9 +703,28 @@
       ],
       "props": {
         "name": "Villager",
-        "routine": "wander",
         "script": "events.villager",
-        "sprite": "sprites/villager.anim.json"
+        "sprite": "sprites/villager.anim.json",
+        "wander": true
+      },
+      "type": "npc"
+    },
+    {
+      "facing": [
+        -1.0,
+        0.0
+      ],
+      "id": "stablehand",
+      "layer": 0,
+      "position": [
+        12.5,
+        0.0,
+        13.5
+      ],
+      "props": {
+        "name": "Stablehand",
+        "script": "events.stablehand",
+        "sprite": "sprites/stablehand.anim.json"
       },
       "type": "npc"
     },
@@ -778,7 +760,7 @@
         13.5
       ],
       "props": {
-        "text": "North: the Crystal Grotto."
+        "text": "South gate: the Starfall Coast. The Crystal Grotto lies east, across the river."
       },
       "type": "sign"
     },
@@ -804,16 +786,16 @@
         0.0,
         1.0
       ],
-      "id": "to_grotto",
+      "id": "to_coast",
       "layer": 0,
       "position": [
         9.5,
         0.0,
-        0.5
+        15.5
       ],
       "props": {
-        "map": "grotto",
-        "point": "entry",
+        "map": "overworld",
+        "point": "town",
         "trigger": "touch"
       },
       "type": "door"
@@ -823,16 +805,16 @@
         0.0,
         1.0
       ],
-      "id": "to_grotto2",
+      "id": "to_coast2",
       "layer": 0,
       "position": [
         10.5,
         0.0,
-        0.5
+        15.5
       ],
       "props": {
-        "map": "grotto",
-        "point": "entry",
+        "map": "overworld",
+        "point": "town",
         "trigger": "touch"
       },
       "type": "door"
@@ -894,24 +876,11 @@
       "position": [
         9.5,
         0.0,
-        14.5
-      ]
-    },
-    "return": {
-      "facing": [
-        0.0,
-        1.0
-      ],
-      "layer": 0,
-      "position": [
-        9.5,
-        0.0,
-        1.7999999523162842
+        13.600000381469727
       ]
     }
   },
   "props": {
-    "battle_stage": "battle_grass",
     "camera": {
       "distance": 18,
       "fov": 30,
