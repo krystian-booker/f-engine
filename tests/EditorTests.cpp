@@ -2,8 +2,8 @@
 #include "engine/editor/MapEdits.h"
 #include "engine/world/Components.h"
 #include "engine/world/World.h"
-#include <doctest/doctest.h>
 #include <array>
+#include <doctest/doctest.h>
 
 using namespace fe;
 
@@ -433,7 +433,8 @@ TEST_CASE("a transform edited in the World tab moves the entity in the collision
 
 TEST_CASE("editor forms read mistyped JSON as absent instead of throwing") {
     using namespace editorui;
-    const Json record = Json::parse(R"({"id": 7, "name": "x", "rate": "fast", "on": 1, "list": {}, "obj": []})");
+    const Json record =
+        Json::parse(R"({"id": 7, "name": "x", "rate": "fast", "on": 1, "list": {}, "obj": []})");
     CHECK(jsonString(record, "id", "fallback") == "fallback");
     CHECK(jsonString(record, "name", "fallback") == "x");
     CHECK(jsonNumber(record, "rate", 2) == 2);
@@ -607,7 +608,8 @@ TEST_CASE("the editor camera adopts the game view, clamps its orbit and frames a
     editor.frame({0, 0, 0}, {12, 2, 10});
     CHECK(editor.camera.target == glm::vec3(6, 1, 5));
     // Every corner of the box projects inside the view.
-    for (const auto corner : {glm::vec3(0, 0, 0), glm::vec3(12, 0, 0), glm::vec3(0, 2, 10), glm::vec3(12, 2, 10)}) {
+    for (const auto corner :
+         {glm::vec3(0, 0, 0), glm::vec3(12, 0, 0), glm::vec3(0, 2, 10), glm::vec3(12, 2, 10)}) {
         const auto ndc = editor.camera.project(corner, 4.0f / 3.0f);
         CHECK(std::abs(ndc.x) <= 1);
         CHECK(std::abs(ndc.y) <= 1);
@@ -616,7 +618,8 @@ TEST_CASE("the editor camera adopts the game view, clamps its orbit and frames a
     // Pan by half the view moves the target by half the view height.
     const auto before = editor.camera.target;
     editor.pan({0, 300}, 600);
-    CHECK(glm::length(editor.camera.target - before) == doctest::Approx(editor.camera.viewHeight() * 0.5f).epsilon(0.01));
+    CHECK(glm::length(editor.camera.target - before) ==
+          doctest::Approx(editor.camera.viewHeight() * 0.5f).epsilon(0.01));
     editor.setOrthographic(true);
     CHECK(editor.camera.orthographic);
     CHECK(editor.camera.orthoHeight > 0);
@@ -708,7 +711,8 @@ TEST_CASE("picking finds handles by screen distance, entities and placements by 
     CHECK(pickScene(s.world, s.view, s.pixelOf({2.5f, 0, 8.5f}) + glm::vec2(4, -4), s.options()) ==
           Selection::placement("ghost"));
     // The elder's body (its collider) is under the ray: the placement, not a bare entity.
-    CHECK(pickScene(s.world, s.view, s.pixelOf({6.5f, 0.6f, 6.5f}), s.options()) == Selection::placement("elder"));
+    CHECK(pickScene(s.world, s.view, s.pixelOf({6.5f, 0.6f, 6.5f}), s.options()) ==
+          Selection::placement("elder"));
     CHECK(pickScene(s.world, s.view, s.pixelOf({4, 0, 4}), s.options()) == Selection::zone("plaza"));
     CHECK(pickScene(s.world, s.view, s.pixelOf({8.5f, 0.5f, 7.5f}), s.options()) == Selection::collider(0));
     // Open ground selects nothing; outside the view picks nothing.
@@ -747,13 +751,15 @@ TEST_CASE("scene edits snap to cells, make placements for dropped assets and mov
     CHECK(uniquePlacementId("chest", existing) == "chest");
     existing.push_back(Placement{.id = "chest"});
     CHECK(uniquePlacementId("chest", existing) == "chest2");
-    const auto sprite = placementForAsset(AssetKind::Sprite, "sprites/chest.anim.json", {4, 5, 0}, grid, "npc", existing);
+    const auto sprite =
+        placementForAsset(AssetKind::Sprite, "sprites/chest.anim.json", {4, 5, 0}, grid, "npc", existing);
     REQUIRE(sprite);
     CHECK(sprite->id == "chest2");
     CHECK(sprite->type == "npc");
     CHECK(sprite->props.at("sprite") == "sprites/chest.anim.json");
     CHECK(sprite->position == cellCentre(grid, {4, 5, 0}));
-    const auto model = placementForAsset(AssetKind::Model, "fx/Crate-01.glb", {1, 1, 0}, grid, "npc", existing);
+    const auto model =
+        placementForAsset(AssetKind::Model, "fx/Crate-01.glb", {1, 1, 0}, grid, "npc", existing);
     REQUIRE(model);
     CHECK(model->type == "prop");
     CHECK(model->id == "crate_01");
@@ -770,10 +776,12 @@ TEST_CASE("scene edits snap to cells, make placements for dropped assets and mov
     at.yaw = 0;
     at.scale = glm::vec3(0.5f);
     CHECK(footprintCells(house, at) == glm::ivec2(2, 2)); // 2 x 1.5 rounds to 2 x 2
-    CHECK(snapForFootprint(grid, {3.7f, 0, 2.2f}, {4, 3}, 0) == glm::vec3(4, grid.heightAt({4, 2.5f}, 0), 2.5f));
-    CHECK(snapForFootprint(grid, {3.7f, 0, 2.2f}, {1, 1}, 0) == glm::vec3(3.5f, grid.heightAt({3.5f, 2.5f}, 0), 2.5f));
-    const auto dropped = placementForAsset(AssetKind::Model, "fx/house.glb", {3, 2, 0}, grid, "npc", existing, &house,
-                                           glm::vec3(3.7f, 0, 2.2f));
+    CHECK(snapForFootprint(grid, {3.7f, 0, 2.2f}, {4, 3}, 0) ==
+          glm::vec3(4, grid.heightAt({4, 2.5f}, 0), 2.5f));
+    CHECK(snapForFootprint(grid, {3.7f, 0, 2.2f}, {1, 1}, 0) ==
+          glm::vec3(3.5f, grid.heightAt({3.5f, 2.5f}, 0), 2.5f));
+    const auto dropped = placementForAsset(AssetKind::Model, "fx/house.glb", {3, 2, 0}, grid, "npc", existing,
+                                           &house, glm::vec3(3.7f, 0, 2.2f));
     REQUIRE(dropped);
     CHECK(dropped->position.x == doctest::Approx(4));
     CHECK(dropped->position.z == doctest::Approx(2.5f));
@@ -839,12 +847,13 @@ TEST_CASE("handles mark zones, points, lights, colliders, triggers and unspawned
     const auto spotIndex = static_cast<int>(map.lights.size()) - 1;
     buildHandles(s.world, options, Selection::light(spotIndex), {}, 1, batch);
     const auto icons = [&](HandleBatch::Icon::Shape shape) {
-        return std::count_if(batch.icons.begin(), batch.icons.end(), [&](const auto& i) { return i.shape == shape; });
+        return std::count_if(batch.icons.begin(), batch.icons.end(),
+                             [&](const auto& i) { return i.shape == shape; });
     };
     CHECK(icons(HandleBatch::Icon::Shape::Flag) == static_cast<long>(map.points.size())); // the points
-    CHECK(icons(HandleBatch::Icon::Shape::Square) == 1);                                   // the zone
-    CHECK(icons(HandleBatch::Icon::Shape::Sun) == static_cast<long>(map.lights.size()));   // the lights
-    CHECK(icons(HandleBatch::Icon::Shape::Diamond) >= 1);                                  // the ghost placement
+    CHECK(icons(HandleBatch::Icon::Shape::Square) == 1);                                  // the zone
+    CHECK(icons(HandleBatch::Icon::Shape::Sun) == static_cast<long>(map.lights.size()));  // the lights
+    CHECK(icons(HandleBatch::Icon::Shape::Diamond) >= 1); // the ghost placement
     // Zone edges sit on the ground; the collider is a 12-edge box; the
     // selected spot light draws its cone; the trigger a cylinder.
     const auto onGround = std::count_if(batch.lines.begin(), batch.lines.end(), [&](const auto& l) {
@@ -859,15 +868,18 @@ TEST_CASE("handles mark zones, points, lights, colliders, triggers and unspawned
     CHECK(std::count_if(batch.lines.begin(), batch.lines.end(),
                         [&](const auto& l) { return l.color == handleColors::TriggerColor; }) > 0);
     // Labels name the point and the ghost.
-    CHECK(std::any_of(batch.labels.begin(), batch.labels.end(), [](const auto& l) { return l.text == "mark"; }));
-    CHECK(std::any_of(batch.labels.begin(), batch.labels.end(), [](const auto& l) { return l.text == "ghost (marker)"; }));
+    CHECK(std::any_of(batch.labels.begin(), batch.labels.end(),
+                      [](const auto& l) { return l.text == "mark"; }));
+    CHECK(std::any_of(batch.labels.begin(), batch.labels.end(),
+                      [](const auto& l) { return l.text == "ghost (marker)"; }));
     // An unselected light draws no reach; toggles drop whole kinds.
     HandleBatch quiet;
     buildHandles(s.world, options, {}, {}, 1, quiet);
     CHECK(std::none_of(quiet.lines.begin(), quiet.lines.end(), [&](const auto& l) {
         return l.color.r == handleColors::LightColor.r && l.color.g == handleColors::LightColor.g;
     }));
-    options.zones = options.points = options.lights = options.colliders = options.triggers = options.placements = false;
+    options.zones = options.points = options.lights = options.colliders = options.triggers =
+        options.placements = false;
     HandleBatch none;
     buildHandles(s.world, options, {}, {}, 1, none);
     CHECK(none.lines.empty());
@@ -949,7 +961,6 @@ TEST_CASE("boxes merge into slabs and are cut around a rectangle") {
     CHECK(cutBox(slab, {0, 0}, {10, 10}).empty());
 }
 
-
 TEST_CASE("a model's box follows the placement's position, yaw and scale") {
     Model model;
     model.min = {-1, 0, -0.5f};
@@ -1013,7 +1024,6 @@ TEST_CASE("rectangle and flood fills paint many cells in one step") {
     CHECK(floodFill(grid, brush, {3, 6, 0}) == 0);
 }
 
-
 // --- Walkability bake ---------------------------------------------------------
 
 #include "engine/editor/WalkBake.h"
@@ -1069,20 +1079,22 @@ struct ModelBuilder {
 };
 
 Grid flatGrid(int width, int depth) {
-    Json grid = {{"width", width}, {"depth", depth}, {"layers", Json::array({{{"name", "ground"}, {"height_fill", 0}, {"walk_fill", false}}})}};
+    Json grid = {{"width", width},
+                 {"depth", depth},
+                 {"layers", Json::array({{{"name", "ground"}, {"height_fill", 0}, {"walk_fill", false}}})}};
     return Grid::fromJson(grid);
 }
 } // namespace
 
 TEST_CASE("the walkability bake reads floors, houses, ramps, cliffs and water from geometry") {
     ModelBuilder b;
-    b.floor(0, 0, 8, 6, 0);              // level ground over the whole 8x6 map
-    b.box({2, 0, 1}, {4, 3, 3});          // a house covering cells (2..3, 1..2): its roof is an island
-    b.box({5.5f, 0, 4}, {6, 1.5f, 5});    // a post covering half of cell (5, 4)
-    b.floor(6, 0, 8, 2, 1);              // a cliff top one unit up over cells (6..7, 0..1)...
-    b.rampX(4, 0, 6, 2, 0, 1);            // ...reached by a ramp over cells (4..5, 0..1)
-    b.rampX(0, 4, 1, 5, 0, 0.5f);         // a gentle ramp in cell (0, 4) rising towards +x
-    b.floor(0, 5, 2, 6, 0.2f, true);      // a pond over cells (0..1, 5)
+    b.floor(0, 0, 8, 6, 0);            // level ground over the whole 8x6 map
+    b.box({2, 0, 1}, {4, 3, 3});       // a house covering cells (2..3, 1..2): its roof is an island
+    b.box({5.5f, 0, 4}, {6, 1.5f, 5}); // a post covering half of cell (5, 4)
+    b.floor(6, 0, 8, 2, 1);            // a cliff top one unit up over cells (6..7, 0..1)...
+    b.rampX(4, 0, 6, 2, 0, 1);         // ...reached by a ramp over cells (4..5, 0..1)
+    b.rampX(0, 4, 1, 5, 0, 0.5f);      // a gentle ramp in cell (0, 4) rising towards +x
+    b.floor(0, 5, 2, 6, 0.2f, true);   // a pond over cells (0..1, 5)
     const auto grid = flatGrid(8, 6);
     BakeOptions options;
     options.blockEdges = false; // the test's ramp, pond and cliff lie on the ring
@@ -1185,7 +1197,7 @@ TEST_CASE("the brush records overrides on a derived map, and clearing one hands 
     CHECK(map.bake.overrides[0].tags.empty());
     CHECK(map.bake.overrides[0].untags == std::vector<std::string>{"water"});
     tag.tag.clear();
-    CHECK_FALSE(setOverride(map, {2, 2, 0}, tag)); // no tag named
+    CHECK_FALSE(setOverride(map, {2, 2, 0}, tag));   // no tag named
     CHECK_FALSE(setOverride(map, {80, 2, 0}, open)); // outside the grid
     // A rectangle is one override; a later cell stroke inside it is a new entry.
     CHECK(setOverrideRect(map, {4, 1, 0}, {6, 3, 0}, open));
@@ -1231,8 +1243,10 @@ TEST_CASE("the kit's stairs bake to ramps and its cliff block to a raised floor"
     ground.floor(0, 0, 8, 6, 0);
     Placement up, block;
     up.position = {3, 0, 2.5f}; // stairs over cells (2, 2) and (3, 2), rising east
-    block.position = {5, 0, 3};  // a 2 x 2 cliff block over cells (4..5, 2..3), one unit up
-    const BakePiece pieces[] = {{&ground.model, glm::mat4(1)}, {stairs.get(), placementMatrix(up)}, {cliff.get(), placementMatrix(block)}};
+    block.position = {5, 0, 3}; // a 2 x 2 cliff block over cells (4..5, 2..3), one unit up
+    const BakePiece pieces[] = {{&ground.model, glm::mat4(1)},
+                                {stairs.get(), placementMatrix(up)},
+                                {cliff.get(), placementMatrix(block)}};
     BakeOptions options;
     options.blockEdges = false;
     const auto result = bakeWalkability(pieces, flatGrid(8, 6), options);
@@ -1333,7 +1347,9 @@ TEST_CASE("collision nodes replace the visible mesh in the bake") {
     collider.hidden = true;
     house.model.parts.push_back(collider);
     auto& part = house.model.parts.back();
-    const auto tri = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c) { house.tri(part, a, b, c); };
+    const auto tri = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c) {
+        house.tri(part, a, b, c);
+    };
     const glm::vec3 lo(3, 0, 2), hi(4, 2, 3);
     tri({lo.x, hi.y, lo.z}, {hi.x, hi.y, lo.z}, {hi.x, hi.y, hi.z});
     tri({lo.x, hi.y, lo.z}, {hi.x, hi.y, hi.z}, {lo.x, hi.y, hi.z});
@@ -1413,13 +1429,15 @@ TEST_CASE("a region re-bake replaces only the derived boxes inside the region an
     map.grid = grid;
     map.colliders.push_back({{6, 0, 1}, {7, 1, 2}}); // an authored wall
     {
-        const BakePiece pieces[] = {{&ground.model, glm::mat4(1)}, {&post.model, placementMatrix(left)},
-                                  {&post.model, placementMatrix(right)}};
+        const BakePiece pieces[] = {{&ground.model, glm::mat4(1)},
+                                    {&post.model, placementMatrix(left)},
+                                    {&post.model, placementMatrix(right)}};
         applyBake(map, bakeWalkability(pieces, grid, options), options);
     }
     const auto boxesNear = [&](float x, float z) {
         return std::count_if(map.bake.colliders.begin(), map.bake.colliders.end(), [&](const Box& b) {
-            return b.min.x >= x - 1e-3f && b.max.x <= x + 1 + 1e-3f && b.min.z >= z - 1e-3f && b.max.z <= z + 1 + 1e-3f;
+            return b.min.x >= x - 1e-3f && b.max.x <= x + 1 + 1e-3f && b.min.z >= z - 1e-3f &&
+                   b.max.z <= z + 1 + 1e-3f;
         });
     };
     CHECK(boxesNear(1, 1) > 0);
@@ -1456,7 +1474,8 @@ TEST_CASE("overrides round-trip through JSON and apply after a bake") {
     map.grid = flatGrid(8, 6);
     map.bake.options = BakeOptions{}.toJson();
     map.bake.overrides.push_back({1, 1, 0, 2, 1, true, std::nullopt, std::nullopt, 1, {}, {}});
-    map.bake.overrides.push_back({3, 3, 0, 1, 1, std::nullopt, 0.5f, Ramp::East, 0.5f, {"encounter:slimes"}, {"water"}});
+    map.bake.overrides.push_back(
+        {3, 3, 0, 1, 1, std::nullopt, 0.5f, Ramp::East, 0.5f, {"encounter:slimes"}, {"water"}});
     const auto json = map.toJson();
     REQUIRE(json.contains("bake"));
     CHECK(json["bake"]["overrides"][0]["w"] == 2);
@@ -1503,7 +1522,8 @@ TEST_CASE("the bake fingerprint changes with placements, geometry, models and op
     house.position = {2, 0, 2};
     house.props = {{"model", "fx/house.glb"}};
     map.placements.push_back(house);
-    std::map<std::string, std::string> files = {{"maps/fp/geometry.glb", "terrain"}, {"fx/house.glb", "house"}};
+    std::map<std::string, std::string> files = {{"maps/fp/geometry.glb", "terrain"},
+                                                {"fx/house.glb", "house"}};
     const auto reader = [&](const std::string& path) -> std::optional<std::string> {
         const auto found = files.find(path);
         return found == files.end() ? std::nullopt : std::optional(found->second);

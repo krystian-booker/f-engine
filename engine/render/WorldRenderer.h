@@ -114,7 +114,8 @@ private:
     const Uniforms& uniforms_;
     CustomShaders& custom_;
     int pixelsPerUnit_;
-    Program world_, worldInstanced_, sprite_, water_, shadow_, shadowInstanced_, sky_, overlay_, distort_, spriteMask_;
+    Program world_, worldInstanced_, sprite_, water_, shadow_, shadowInstanced_, sky_, overlay_, distort_,
+        spriteMask_;
     Uniform distortUniform_;
     ShadowAtlas atlas_;
     std::vector<std::unique_ptr<SceneLighting>> lightingSlots_;
@@ -131,7 +132,7 @@ private:
     // Script-set u_params per entity, per world (the world's address keys it).
     std::unordered_map<const World*, std::unordered_map<entt::entity, ShaderParams>> shaderParams_;
     const std::unordered_map<entt::entity, ShaderParams>* params_ = nullptr; // this render's world
-    const entt::registry* registry_ = nullptr;                                // this render's world
+    const entt::registry* registry_ = nullptr;                               // this render's world
     std::vector<Transparent> transparent_;
     std::vector<int> quadList_;
     std::vector<glm::mat4> pose_;

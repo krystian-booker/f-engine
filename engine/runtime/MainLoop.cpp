@@ -191,14 +191,13 @@ void pace(double seconds) {
     if (seconds <= 0) {
         return;
     }
-    const auto deadline = Clock::now() + std::chrono::duration_cast<Clock::duration>(
-                                             std::chrono::duration<double>(seconds));
+    const auto deadline =
+        Clock::now() + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(seconds));
     constexpr double SpinSeconds = 0.0015;
     if (seconds > SpinSeconds) {
         SDL_DelayNS(static_cast<Uint64>((seconds - SpinSeconds) * 1e9));
     }
-    while (Clock::now() < deadline) {
-    }
+    while (Clock::now() < deadline) {}
 }
 
 // Replays and recordings are deterministic: a fixed seed unless one is given.
@@ -230,9 +229,10 @@ OutputColor outputRequest(const RuntimeOptions& options, const GameConfig& confi
 class Session {
 public:
     Session(const RuntimeOptions& options, const GameConfig& config)
-        : options_(options), window_(config), renderer_(window_, options.shaders, outputRequest(options, config)),
-          replay_(loadReplay(options)), engine_(engineOptions(), config),
-          frame_(renderer_, engine_.assets(), config.pixelsPerUnit), input_(engine_.input())
+        : options_(options), window_(config),
+          renderer_(window_, options.shaders, outputRequest(options, config)), replay_(loadReplay(options)),
+          engine_(engineOptions(), config), frame_(renderer_, engine_.assets(), config.pixelsPerUnit),
+          input_(engine_.input())
 #if FENGINE_DEV
           ,
           editor_(engine_), reloader_(options, options.shaders)
@@ -245,8 +245,12 @@ public:
 #if FENGINE_DEV
         editor_.attach(frame_);
         editor_.setWindow(window_.native());
-        engine_.editorHooks().leaveMap = [this](const std::string& world) { return editor_.requestLeaveMap(world); };
-        engine_.editorHooks().leaveResult = [this] { return editor_.leaveMapResult(); };
+        engine_.editorHooks().leaveMap = [this](const std::string& world) {
+            return editor_.requestLeaveMap(world);
+        };
+        engine_.editorHooks().leaveResult = [this] {
+            return editor_.leaveMapResult();
+        };
         if (!options.userData.empty()) {
             editor_.setLayoutFile(options.userData / "editor.ini");
         }

@@ -623,7 +623,8 @@ MapData MapData::fromJson(const Json& j) {
             over.layer = o.value("layer", 0);
             over.w = o.value("w", 1);
             over.d = o.value("d", 1);
-            const auto where = "Bake override at (" + std::to_string(over.x) + ", " + std::to_string(over.z) + ")";
+            const auto where =
+                "Bake override at (" + std::to_string(over.x) + ", " + std::to_string(over.z) + ")";
             if (over.w < 1 || over.d < 1 || !m.grid.inRange(over.x, over.z, over.layer) ||
                 !m.grid.inRange(over.x + over.w - 1, over.z + over.d - 1, over.layer)) {
                 throw std::runtime_error(where + " lies outside the grid");
@@ -679,7 +680,8 @@ Json MapData::toJson() const {
             out["yaw"] = p.yaw;
         }
         if (p.scale != glm::vec3(1)) {
-            out["scale"] = p.scale.x == p.scale.y && p.scale.y == p.scale.z ? Json(p.scale.x) : fe::toJson(p.scale);
+            out["scale"] =
+                p.scale.x == p.scale.y && p.scale.y == p.scale.z ? Json(p.scale.x) : fe::toJson(p.scale);
         }
         placementsJson.push_back(std::move(out));
     }

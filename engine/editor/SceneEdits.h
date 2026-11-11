@@ -29,18 +29,18 @@ struct Model;
 
 // `prefix` followed by the first number no placement uses as an id ("chest",
 // "chest2"...); the prefix itself when free.
-[[nodiscard]] std::string uniquePlacementId(const std::string& prefix, const std::vector<Placement>& placements);
+[[nodiscard]] std::string uniquePlacementId(const std::string& prefix,
+                                            const std::vector<Placement>& placements);
 // The placement to make when an asset is dropped on a cell: a sprite becomes
 // the game's default placement type (`defaultType`, from the game's editor.describe hook) with
 // `props.sprite`, a model a "prop" with `props.model`. A model given with the
 // drop `point` snaps by its footprint (snapForFootprint); otherwise the
 // placement stands at the cell's centre. Nullopt for assets that cannot stand
 // in a scene (audio, scripts).
-[[nodiscard]] std::optional<Placement> placementForAsset(AssetKind kind, const std::string& path, GridPos cell,
-                                                         const Grid& grid, const std::string& defaultType,
-                                                         const std::vector<Placement>& existing,
-                                                         const Model* model = nullptr,
-                                                         std::optional<glm::vec3> point = std::nullopt);
+[[nodiscard]] std::optional<Placement>
+placementForAsset(AssetKind kind, const std::string& path, GridPos cell, const Grid& grid,
+                  const std::string& defaultType, const std::vector<Placement>& existing,
+                  const Model* model = nullptr, std::optional<glm::vec3> point = std::nullopt);
 // A copy of a placement beside the original with a fresh id.
 [[nodiscard]] Placement duplicatePlacement(const Placement& source, const std::vector<Placement>& existing);
 

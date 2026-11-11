@@ -336,7 +336,8 @@ struct MiniAudio::Impl {
     // Applies a pitch: through the shifter when the speed is to be kept and
     // the shifter can do it, as varispeed otherwise.
     void applyPitch(Sound& sound, float pitch, bool preserveSpeed) {
-        const bool shift = preserveSpeed && pitch != 1.0f && PitchShift::supports(pitch) && ensureShifter(sound);
+        const bool shift =
+            preserveSpeed && pitch != 1.0f && PitchShift::supports(pitch) && ensureShifter(sound);
         if (preserveSpeed && pitch != 1.0f && !PitchShift::supports(pitch) && !warnedVarispeed) {
             warnedVarispeed = true;
             log(LogLevel::Warning, "preserve_speed keeps the speed only for pitches 0.5 to 2; " +

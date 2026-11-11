@@ -38,26 +38,39 @@ bool looksLikeModule(std::string_view text) {
     if (text.empty() || text.size() > 128) {
         return false;
     }
-    return std::all_of(text.begin(), text.end(), [](char c) {
-        return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '.';
-    }) && text.find('/') == std::string_view::npos && text.front() != '.' && text.back() != '.';
+    return std::all_of(
+               text.begin(), text.end(),
+               [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '.'; }) &&
+           text.find('/') == std::string_view::npos && text.front() != '.' && text.back() != '.';
 }
 } // namespace
 
 const char* assetKindName(AssetKind kind) {
     switch (kind) {
-    case AssetKind::Sprite: return "sprite";
-    case AssetKind::Image: return "image";
-    case AssetKind::Model: return "model";
-    case AssetKind::Audio: return "audio";
-    case AssetKind::Lut: return "lut";
-    case AssetKind::Script: return "script";
-    case AssetKind::Map: return "map";
-    case AssetKind::Data: return "data";
-    case AssetKind::Shader: return "shader";
-    case AssetKind::Font: return "font";
-    case AssetKind::Text: return "text";
-    case AssetKind::Other: break;
+    case AssetKind::Sprite:
+        return "sprite";
+    case AssetKind::Image:
+        return "image";
+    case AssetKind::Model:
+        return "model";
+    case AssetKind::Audio:
+        return "audio";
+    case AssetKind::Lut:
+        return "lut";
+    case AssetKind::Script:
+        return "script";
+    case AssetKind::Map:
+        return "map";
+    case AssetKind::Data:
+        return "data";
+    case AssetKind::Shader:
+        return "shader";
+    case AssetKind::Font:
+        return "font";
+    case AssetKind::Text:
+        return "text";
+    case AssetKind::Other:
+        break;
     }
     return "other";
 }
@@ -171,10 +184,17 @@ void AssetCatalog::scan() {
     }
     for (const auto& entry : std::vector<AssetEntry>(entries_)) {
         switch (entry.kind) {
-        case AssetKind::Map: indexMap(entry.path); break;
-        case AssetKind::Data: indexData(entry.path); break;
-        case AssetKind::Sprite: indexSprite(entry.path); break;
-        default: break;
+        case AssetKind::Map:
+            indexMap(entry.path);
+            break;
+        case AssetKind::Data:
+            indexData(entry.path);
+            break;
+        case AssetKind::Sprite:
+            indexSprite(entry.path);
+            break;
+        default:
+            break;
         }
     }
     std::sort(maps_.begin(), maps_.end(), [](const MapInfo& a, const MapInfo& b) { return a.id < b.id; });
@@ -183,11 +203,11 @@ void AssetCatalog::scan() {
     }
 }
 
-void AssetCatalog::addReference(const std::string& target, const std::string& file, const std::string& where) {
+void AssetCatalog::addReference(const std::string& target, const std::string& file,
+                                const std::string& where) {
     auto& list = references_[target];
-    if (std::none_of(list.begin(), list.end(), [&](const AssetReference& r) {
-            return r.file == file && r.where == where;
-        })) {
+    if (std::none_of(list.begin(), list.end(),
+                     [&](const AssetReference& r) { return r.file == file && r.where == where; })) {
         list.push_back({file, where});
     }
 }
@@ -197,7 +217,8 @@ void AssetCatalog::addReference(const std::string& target, const std::string& fi
 // `script`, `ai`, `check` and `fn` are modules (a page's `check` is
 // "module.function"); `map` a map id, as is any map property whose value
 // names a map folder; `music`, `sound`, `sfx` and `voice` an audio id.
-void AssetCatalog::indexJson(const Json& value, const std::string& file, const std::string& where, bool isMap) {
+void AssetCatalog::indexJson(const Json& value, const std::string& file, const std::string& where,
+                             bool isMap) {
     if (value.is_object()) {
         for (const auto& [key, child] : value.items()) {
             const auto path = where.empty() ? key : where + "/" + key;
@@ -213,14 +234,15 @@ void AssetCatalog::indexJson(const Json& value, const std::string& file, const s
                     // file exists as named.
                     const auto dot = text.rfind('.');
                     const bool whole = exists(moduleFile(text));
-                    addReference(moduleFile(!whole && dot != std::string::npos ? text.substr(0, dot) : text), file,
-                                 path);
+                    addReference(moduleFile(!whole && dot != std::string::npos ? text.substr(0, dot) : text),
+                                 file, path);
                 } else if (key == "map" && !text.empty() && text.find('/') == std::string::npos) {
                     addReference("maps/" + text + "/map.json", file, path);
                 } else if (isMap && where == "props" && exists("maps/" + text + "/map.json")) {
                     // A map property naming another map (a stage, a destination).
                     addReference("maps/" + text + "/map.json", file, path);
-                } else if ((key == "music" || key == "sound" || key == "sfx" || key == "voice") && !text.empty()) {
+                } else if ((key == "music" || key == "sound" || key == "sfx" || key == "voice") &&
+                           !text.empty()) {
                     addReference("audio:" + text, file, path);
                 }
             } else {
@@ -378,8 +400,9 @@ std::vector<std::pair<std::string, AssetReference>> AssetCatalog::missing() cons
         if (target.starts_with("audio:")) {
             const auto id = target.substr(6);
             // A path-like id names a file directly (the convention of data/audio.json).
-            found = id.find('/') != std::string::npos || id.find('.') != std::string::npos ? exists(id)
-                                                                                           : audioIds.contains(id);
+            found = id.find('/') != std::string::npos || id.find('.') != std::string::npos
+                        ? exists(id)
+                        : audioIds.contains(id);
         } else {
             found = exists(target);
         }
@@ -396,7 +419,8 @@ std::vector<std::string> AssetCatalog::modules(std::string_view folder) const {
     std::vector<std::string> out;
     const std::string prefix = folder.empty() ? std::string() : std::string(folder) + "/";
     for (const auto& entry : entries_) {
-        if (entry.kind != AssetKind::Script || !entry.path.starts_with(prefix) || entry.path.starts_with("tests/")) {
+        if (entry.kind != AssetKind::Script || !entry.path.starts_with(prefix) ||
+            entry.path.starts_with("tests/")) {
             continue;
         }
         auto module = entry.path.substr(0, entry.path.size() - 4);

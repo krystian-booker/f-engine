@@ -38,11 +38,11 @@ inline constexpr int MaxFootprint = 8;
 // follow Grid::traverseLink and ladders Grid::ladderStep, the rules movers use.
 struct StepRules {
     bool diagonal = false;
-    float maxUp = 0.6f;                                    // largest climb between adjacent cells
-    float maxDown = 0.6f;                                  // largest drop
-    std::uint32_t blockedTags = 0;                         // cells with any of these tags cannot be entered
-    std::uint32_t requiredTags = 0;                        // when not zero: cells with none of them cannot be entered
-    std::unordered_set<std::int64_t> blocked;              // occupied cells that cannot be entered
+    float maxUp = 0.6f;                       // largest climb between adjacent cells
+    float maxDown = 0.6f;                     // largest drop
+    std::uint32_t blockedTags = 0;            // cells with any of these tags cannot be entered
+    std::uint32_t requiredTags = 0;           // when not zero: cells with none of them cannot be entered
+    std::unordered_set<std::int64_t> blocked; // occupied cells that cannot be entered
     JumpRules jump;
     bool ladders = true; // false: ladder links are not climbed
     // The body's size in cells per side: a square anchored at the unit's cell
@@ -55,10 +55,10 @@ struct StepRules {
     // be crossed and ended on); grid bounds, blocked tags and blocked cells
     // still hold.
     bool fly = false;
-    // Called for every candidate step with its base cost (distance); returns the cost to use, or nullopt when the step is impossible.
-    // Results must be finite and non-negative (std::invalid_argument otherwise).
-    // With a cost function findPath searches without a distance estimate, so
-    // its result stays the cheapest route whatever the costs are.
+    // Called for every candidate step with its base cost (distance); returns the cost to use, or nullopt when
+    // the step is impossible. Results must be finite and non-negative (std::invalid_argument otherwise). With
+    // a cost function findPath searches without a distance estimate, so its result stays the cheapest route
+    // whatever the costs are.
     std::function<std::optional<float>(GridPos from, GridPos to, float base)> cost;
 };
 

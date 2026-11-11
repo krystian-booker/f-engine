@@ -156,8 +156,8 @@ TEST_CASE("headless replays run Lua, waits and asserts without a window") {
 }
 
 TEST_CASE("replay captures must be rendered frames and match the backend's references") {
-    const auto references =
-        std::filesystem::path(FENGINE_BUILTIN) / ".." / "samples" / "starfall" / "replays" / "reference" / "vulkan";
+    const auto references = std::filesystem::path(FENGINE_BUILTIN) / ".." / "samples" / "starfall" /
+                            "replays" / "reference" / "vulkan";
     const auto live = Image::load(references / "explore-town.png");
     const auto custom = Image::load(references / "battle-boss.png");
     CHECK(live.width == ReferenceWidth);

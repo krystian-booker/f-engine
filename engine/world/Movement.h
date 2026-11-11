@@ -188,8 +188,8 @@ private:
     EventQueue& events_;
     std::map<entt::entity, Ride> rides_; // ordered, so overlapping platforms resolve the same way every run
     std::vector<CellOverride> overrides_;
-    std::vector<entt::entity> aboard_; // a platform and its riders, which never block each other
-    std::vector<entt::entity> nearScratch_; // carryRiders() query results
+    std::vector<entt::entity> aboard_;          // a platform and its riders, which never block each other
+    std::vector<entt::entity> nearScratch_;     // carryRiders() query results
     std::unordered_set<entt::entity> resolved_; // attachments placed this tick
     int routeVisitLimit_ = DefaultRouteVisits;
     const std::unordered_set<std::int64_t>* blockedCells_ = nullptr;

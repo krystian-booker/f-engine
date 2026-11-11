@@ -308,8 +308,10 @@ TEST_CASE("blend modes parse by name, accept the boolean alias and round-trip on
 }
 
 TEST_CASE("water surfaces draw first in the alpha pass, before every other blended draw") {
-    std::vector<TransparentKey> draws = {{BlendMode::Alpha, 2}, {BlendMode::Alpha, 5, true},
-                                         {BlendMode::Additive, 9}, {BlendMode::Alpha, 30},
+    std::vector<TransparentKey> draws = {{BlendMode::Alpha, 2},
+                                         {BlendMode::Alpha, 5, true},
+                                         {BlendMode::Additive, 9},
+                                         {BlendMode::Alpha, 30},
                                          {BlendMode::Alpha, 12, true}};
     std::stable_sort(draws.begin(), draws.end(), drawsBefore);
     // Both water surfaces (back to front among themselves), then the sprites
@@ -665,7 +667,8 @@ TEST_CASE("mirrored glTF matrix nodes import mirrored, and image URIs stay in th
     const auto folder = std::filesystem::temp_directory_path() / "fengine-render-mirror";
     std::filesystem::remove_all(folder);
     std::filesystem::create_directories(folder);
-    std::ofstream(folder / "mirror.gltf") << R"({"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0]}],
+    std::ofstream(folder / "mirror.gltf")
+        << R"({"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0]}],
       "nodes": [{"matrix": [-2, 0, 0, 0,  0, 3, 0, 0,  0, 0, 1, 0,  4, 5, 6, 1]}]})";
     const auto model = Model::load(folder / "mirror.gltf");
     REQUIRE(model.nodes.size() == 1);
@@ -678,7 +681,8 @@ TEST_CASE("mirrored glTF matrix nodes import mirrored, and image URIs stay in th
     CHECK(model.restPose[0][0].x == doctest::Approx(-2));
     CHECK(model.restPose[0][3].x == doctest::Approx(4));
 
-    std::ofstream(folder / "escape.gltf") << R"({"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0]}],
+    std::ofstream(folder / "escape.gltf")
+        << R"({"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0]}],
       "nodes": [{"mesh": 0}],
       "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "material": 0}]}],
       "materials": [{"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}],
@@ -701,7 +705,8 @@ TEST_CASE("the renderer's clip-resolved sprite placement matches placeSprite") {
     camera.yaw = 37;
     camera.snap();
     const glm::vec3 feet(3.2f, 0.5f, 7.1f);
-    for (const auto mode : {SpriteMode::Upright, SpriteMode::Facing, SpriteMode::Flat, SpriteMode::Standing}) {
+    for (const auto mode :
+         {SpriteMode::Upright, SpriteMode::Facing, SpriteMode::Flat, SpriteMode::Standing}) {
         for (const auto* clip : {"walk", "idle", "missing"}) {
             for (const auto facing : {glm::vec2(0, 1), glm::vec2(-1, 0), glm::vec2(0.7f, -0.7f)}) {
                 Sprite s;

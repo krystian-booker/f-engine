@@ -68,10 +68,10 @@ public:
 private:
     struct Stacks {
         std::deque<Json> undo, redo;
-        Json head;                   // the authored map after the last step, undo, redo or settle
-        std::optional<Json> saved;   // the authored map as last written to map.json
+        Json head;                    // the authored map after the last step, undo, redo or settle
+        std::optional<Json> saved;    // the authored map as last written to map.json
         const World* world = nullptr; // the world object the last edit touched
-        bool headStale = false;      // edits joined a gesture since `head` was taken
+        bool headStale = false;       // edits joined a gesture since `head` was taken
     };
     Stacks& stacksFor(World& world, bool check);
     static std::string key(const World& world);

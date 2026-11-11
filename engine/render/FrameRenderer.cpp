@@ -196,7 +196,8 @@ void FrameRenderer::render(const std::vector<WorldDraw>& draws, const Canvas& ca
         auto& scene = scenes_.acquire({sceneSize.x, sceneSize.y}, [&] { return SceneTarget(sceneSize); });
         const float aspect = static_cast<float>(outSize.x) / static_cast<float>(outSize.y);
         const auto* camera =
-            draw.camera ? &drawCameras_.update(&world, draw.target, *draw.camera, tick, draw.snapCamera) : nullptr;
+            draw.camera ? &drawCameras_.update(&world, draw.target, *draw.camera, tick, draw.snapCamera)
+                        : nullptr;
         const DrawOverride drawn(world, camera, draw.post);
         const SceneViews views(next);
         for (std::uint16_t i = 0; i < SceneViews::Count; ++i) {

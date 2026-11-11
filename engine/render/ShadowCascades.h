@@ -73,8 +73,9 @@ float lightShadowPriority(const LightSettings& light, glm::vec3 focus);
 // order). A light that does not fit in the tiles left is skipped, so a
 // cheaper spot light further down may still get one. The first form writes
 // into `slots` and uses `order` as scratch (nothing allocated once warm).
-void chooseShadowLights(const std::vector<LightShadowCandidate>& candidates, std::vector<LightShadowSlot>& slots,
-                        std::vector<std::size_t>& order, int tileBudget = LightShadowTiles);
+void chooseShadowLights(const std::vector<LightShadowCandidate>& candidates,
+                        std::vector<LightShadowSlot>& slots, std::vector<std::size_t>& order,
+                        int tileBudget = LightShadowTiles);
 std::vector<LightShadowSlot> chooseShadowLights(const std::vector<LightShadowCandidate>& candidates,
                                                 int tileBudget = LightShadowTiles);
 

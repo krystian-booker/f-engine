@@ -36,7 +36,8 @@ TEST_CASE("bloom normalisation and soft knee") {
     post.bloomThreshold = 0.8f;
     post.bloomKnee = 0.5f;
     CHECK(bloomKnee(post) == doctest::Approx(0.4f));
-    CHECK(bloomPass(0.8f, post.bloomThreshold, bloomKnee(post)) == doctest::Approx(0.4f * 0.4f / 1.6f / 0.8f).epsilon(1e-3));
+    CHECK(bloomPass(0.8f, post.bloomThreshold, bloomKnee(post)) ==
+          doctest::Approx(0.4f * 0.4f / 1.6f / 0.8f).epsilon(1e-3));
 }
 
 TEST_CASE("particles fade out as they near the camera") {
@@ -304,7 +305,7 @@ TEST_CASE("pixel_scale takes fractions from 1 to 8 and keeps whole numbers crisp
     json["post"]["pixel_scale"] = 1.5;
     const auto env = Environment::fromJson(json);
     CHECK(env.post.pixelScale == doctest::Approx(1.5f));
-    CHECK_FALSE(env.post.fxaa());     // auto antialiasing stays off below full resolution
+    CHECK_FALSE(env.post.fxaa());      // auto antialiasing stays off below full resolution
     CHECK_FALSE(env.post.pixelated()); // a fraction is filtered up
     CHECK(env.toJson()["post"]["pixel_scale"] == 1.5);
     json["post"]["pixel_scale"] = 3;

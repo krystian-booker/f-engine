@@ -93,8 +93,8 @@ void mixUntil(MiniAudio& audio, const std::function<bool()>& done, double limit 
 // The frequency (Hz) with the largest DFT magnitude in the left channel of
 // interleaved stereo, over `frames` from `start`, scanning `from`..`to` in
 // 4 Hz steps.
-double peakFrequency(const std::vector<float>& stereo, std::size_t start, std::size_t frames, double from = 100,
-                     double to = 2000) {
+double peakFrequency(const std::vector<float>& stereo, std::size_t start, std::size_t frames,
+                     double from = 100, double to = 2000) {
     double bestHertz = 0, best = -1;
     for (double hertz = from; hertz <= to; hertz += 4) {
         double re = 0, im = 0;
@@ -563,7 +563,8 @@ TEST_CASE("music cued in one tick starts together; a later tick's cue is its own
     MusicOptions first;
     first.layer = "pads";
     audio.playMusic(file, first);
-    mixUntil(audio, [&] { return audio.musicPosition("pads") > 0; }); // ticks pass: later cues form another group
+    mixUntil(audio,
+             [&] { return audio.musicPosition("pads") > 0; }); // ticks pass: later cues form another group
     MusicOptions drums, bass;
     drums.layer = "drums";
     bass.layer = "bass";

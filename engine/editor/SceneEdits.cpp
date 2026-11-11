@@ -47,13 +47,15 @@ glm::vec3 snapForFootprint(const Grid& grid, glm::vec3 point, glm::ivec2 footpri
     const int l = std::clamp(layer, 0, std::max(0, grid.layerCount() - 1));
     const glm::vec2 inside(std::clamp(snapped.x, 0.0f, static_cast<float>(grid.width()) - 0.01f),
                            std::clamp(snapped.y, 0.0f, static_cast<float>(grid.depth()) - 0.01f));
-    const float y = grid.contains(floorCell(inside.x), floorCell(inside.y), l) ? grid.heightAt(inside, l) : 0.0f;
+    const float y =
+        grid.contains(floorCell(inside.x), floorCell(inside.y), l) ? grid.heightAt(inside, l) : 0.0f;
     return {snapped.x, y, snapped.y};
 }
 
 std::string uniquePlacementId(const std::string& prefix, const std::vector<Placement>& placements) {
     const auto taken = [&](const std::string& id) {
-        return std::any_of(placements.begin(), placements.end(), [&](const Placement& p) { return p.id == id; });
+        return std::any_of(placements.begin(), placements.end(),
+                           [&](const Placement& p) { return p.id == id; });
     };
     const std::string base = prefix.empty() ? std::string("placement") : prefix;
     if (!taken(base)) {
@@ -83,9 +85,10 @@ std::string stemOf(const std::string& path) {
 }
 } // namespace
 
-std::optional<Placement> placementForAsset(AssetKind kind, const std::string& path, GridPos cell, const Grid& grid,
-                                           const std::string& defaultType, const std::vector<Placement>& existing,
-                                           const Model* model, std::optional<glm::vec3> point) {
+std::optional<Placement> placementForAsset(AssetKind kind, const std::string& path, GridPos cell,
+                                           const Grid& grid, const std::string& defaultType,
+                                           const std::vector<Placement>& existing, const Model* model,
+                                           std::optional<glm::vec3> point) {
     Placement p;
     switch (kind) {
     case AssetKind::Sprite:
@@ -96,7 +99,8 @@ std::optional<Placement> placementForAsset(AssetKind kind, const std::string& pa
         p.type = "prop";
         p.props["model"] = path;
         break;
-    default: return std::nullopt;
+    default:
+        return std::nullopt;
     }
     p.id = uniquePlacementId(stemOf(path), existing);
     p.layer = std::clamp(cell.layer, 0, std::max(0, grid.layerCount() - 1));

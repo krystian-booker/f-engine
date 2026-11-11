@@ -18,14 +18,22 @@ Selection Selection::ofEntity(const World& world, entt::entity entity) {
 
 const char* selectionKindName(Selection::Kind kind) {
     switch (kind) {
-    case Selection::Kind::Placement: return "placement";
-    case Selection::Kind::Zone: return "zone";
-    case Selection::Kind::Point: return "point";
-    case Selection::Kind::Light: return "light";
-    case Selection::Kind::Emitter: return "emitter";
-    case Selection::Kind::Collider: return "collider";
-    case Selection::Kind::Entity: return "entity";
-    case Selection::Kind::None: break;
+    case Selection::Kind::Placement:
+        return "placement";
+    case Selection::Kind::Zone:
+        return "zone";
+    case Selection::Kind::Point:
+        return "point";
+    case Selection::Kind::Light:
+        return "light";
+    case Selection::Kind::Emitter:
+        return "emitter";
+    case Selection::Kind::Collider:
+        return "collider";
+    case Selection::Kind::Entity:
+        return "entity";
+    case Selection::Kind::None:
+        break;
     }
     return "nothing";
 }
@@ -77,13 +85,20 @@ std::string entityPlacement(const World& world, entt::entity entity) {
 bool selectionValid(const World& world, const Selection& s) {
     const auto& map = world.authored();
     switch (s.kind) {
-    case Selection::Kind::None: return false;
-    case Selection::Kind::Placement: return findPlacement(map, s.id) != nullptr;
-    case Selection::Kind::Zone: return findZone(map, s.id) != nullptr;
-    case Selection::Kind::Point: return map.points.contains(s.id);
-    case Selection::Kind::Light: return s.index >= 0 && s.index < static_cast<int>(map.lights.size());
-    case Selection::Kind::Emitter: return s.index >= 0 && s.index < static_cast<int>(map.emitters.size());
-    case Selection::Kind::Collider: return s.index >= 0 && s.index < static_cast<int>(map.colliders.size());
+    case Selection::Kind::None:
+        return false;
+    case Selection::Kind::Placement:
+        return findPlacement(map, s.id) != nullptr;
+    case Selection::Kind::Zone:
+        return findZone(map, s.id) != nullptr;
+    case Selection::Kind::Point:
+        return map.points.contains(s.id);
+    case Selection::Kind::Light:
+        return s.index >= 0 && s.index < static_cast<int>(map.lights.size());
+    case Selection::Kind::Emitter:
+        return s.index >= 0 && s.index < static_cast<int>(map.emitters.size());
+    case Selection::Kind::Collider:
+        return s.index >= 0 && s.index < static_cast<int>(map.colliders.size());
     case Selection::Kind::Entity:
         return world.alive(s.entity, s.serial) && world.registry().all_of<Transform>(s.entity);
     }
@@ -103,14 +118,18 @@ std::string selectionLabel(const World& world, const Selection& s) {
             return z->id + " (" + z->type + " zone)";
         }
         return s.id;
-    case Selection::Kind::Point: return "Point " + s.id;
-    case Selection::Kind::Light: return "Light " + std::to_string(s.index);
+    case Selection::Kind::Point:
+        return "Point " + s.id;
+    case Selection::Kind::Light:
+        return "Light " + std::to_string(s.index);
     case Selection::Kind::Emitter:
         if (s.index >= 0 && s.index < static_cast<int>(map.emitters.size())) {
-            return "Emitter " + std::to_string(s.index) + " " + map.emitters[static_cast<std::size_t>(s.index)].settings.sprite;
+            return "Emitter " + std::to_string(s.index) + " " +
+                   map.emitters[static_cast<std::size_t>(s.index)].settings.sprite;
         }
         return "Emitter " + std::to_string(s.index);
-    case Selection::Kind::Collider: return "Collider " + std::to_string(s.index);
+    case Selection::Kind::Collider:
+        return "Collider " + std::to_string(s.index);
     case Selection::Kind::Entity:
         if (world.valid(s.entity)) {
             if (const auto* name = world.registry().try_get<Name>(s.entity)) {
@@ -119,7 +138,8 @@ std::string selectionLabel(const World& world, const Selection& s) {
             return "#" + std::to_string(entt::to_entity(s.entity));
         }
         return "(gone)";
-    case Selection::Kind::None: break;
+    case Selection::Kind::None:
+        break;
     }
     return "Nothing";
 }
@@ -190,7 +210,8 @@ std::optional<SelectionTransform> selectionTransform(const World& world, const S
         }
         const glm::vec2 centre = (z->min + z->max) * 0.5f;
         const int layer = std::max(0, z->layer);
-        t.position = {centre.x, map.grid.heightAt(centre, std::min(layer, map.grid.layerCount() - 1)), centre.y};
+        t.position = {centre.x, map.grid.heightAt(centre, std::min(layer, map.grid.layerCount() - 1)),
+                      centre.y};
         t.scale = {std::max(z->max.x - z->min.x, 0.01f), 1, std::max(z->max.y - z->min.y, 0.01f)};
         t.layer = z->layer;
         t.canScale = true;
@@ -212,7 +233,8 @@ std::optional<SelectionTransform> selectionTransform(const World& world, const S
         t.canScale = mesh;
         return t;
     }
-    case Selection::Kind::None: break;
+    case Selection::Kind::None:
+        break;
     }
     return std::nullopt;
 }
@@ -231,8 +253,10 @@ bool applySelectionTransform(MapData& map, const Selection& s, const SelectionTr
         return false;
     case Selection::Kind::Point:
         if (const auto found = map.points.find(s.id); found != map.points.end()) {
-            found->second.position = clampToGrid(map.grid, t.position); // a point off the grid cannot be saved
-            found->second.facing = glm::length(t.facing) > 1e-4f ? glm::normalize(t.facing) : found->second.facing;
+            found->second.position =
+                clampToGrid(map.grid, t.position); // a point off the grid cannot be saved
+            found->second.facing =
+                glm::length(t.facing) > 1e-4f ? glm::normalize(t.facing) : found->second.facing;
             found->second.layer = std::clamp(t.layer, 0, map.grid.layerCount() - 1);
             return true;
         }
@@ -260,7 +284,8 @@ bool applySelectionTransform(MapData& map, const Selection& s, const SelectionTr
         return false;
     case Selection::Kind::Zone:
         if (auto* z = findZone(map, s.id)) {
-            const glm::vec2 half(std::max(std::abs(t.scale.x), 0.01f) * 0.5f, std::max(std::abs(t.scale.z), 0.01f) * 0.5f);
+            const glm::vec2 half(std::max(std::abs(t.scale.x), 0.01f) * 0.5f,
+                                 std::max(std::abs(t.scale.z), 0.01f) * 0.5f);
             z->min = glm::vec2(t.position.x, t.position.z) - half;
             z->max = glm::vec2(t.position.x, t.position.z) + half;
             z->layer = std::clamp(t.layer, -1, map.grid.layerCount() - 1);
@@ -268,7 +293,8 @@ bool applySelectionTransform(MapData& map, const Selection& s, const SelectionTr
         }
         return false;
     case Selection::Kind::Entity:
-    case Selection::Kind::None: break;
+    case Selection::Kind::None:
+        break;
     }
     return false;
 }
@@ -290,10 +316,11 @@ std::optional<std::pair<glm::vec3, glm::vec3>> entityBounds(World& world, entt::
     }
     if (const auto* sprite = registry.try_get<Sprite>(entity)) {
         if (const auto animation = world.assets().trySprite(sprite->animation)) {
-            const auto quad = spriteQuad(*sprite, *animation, position, transform.facing, world.camera(), alpha,
-                                         animation->pixelsPerUnit);
+            const auto quad = spriteQuad(*sprite, *animation, position, transform.facing, world.camera(),
+                                         alpha, animation->pixelsPerUnit);
             glm::vec3 lo = quad.corner, hi = quad.corner;
-            for (const auto& corner : {quad.corner + quad.right, quad.corner + quad.up, quad.corner + quad.right + quad.up}) {
+            for (const auto& corner :
+                 {quad.corner + quad.right, quad.corner + quad.up, quad.corner + quad.right + quad.up}) {
                 lo = glm::min(lo, corner);
                 hi = glm::max(hi, corner);
             }
@@ -308,9 +335,12 @@ std::optional<std::pair<glm::vec3, glm::vec3>> entityBounds(World& world, entt::
 }
 } // namespace
 
-std::optional<std::pair<glm::vec3, glm::vec3>> selectionBounds(World& world, const Selection& s, double alpha) {
+std::optional<std::pair<glm::vec3, glm::vec3>> selectionBounds(World& world, const Selection& s,
+                                                               double alpha) {
     const auto& map = world.authored();
-    const auto around = [](glm::vec3 p, float r) { return std::pair(p - glm::vec3(r), p + glm::vec3(r)); };
+    const auto around = [](glm::vec3 p, float r) {
+        return std::pair(p - glm::vec3(r), p + glm::vec3(r));
+    };
     switch (s.kind) {
     case Selection::Kind::Placement: {
         const auto entity = placementEntity(world, s.id);
@@ -357,7 +387,8 @@ std::optional<std::pair<glm::vec3, glm::vec3>> selectionBounds(World& world, con
             return std::pair(glm::vec3(z->min.x, h - 0.5f, z->min.y), glm::vec3(z->max.x, h + 1, z->max.y));
         }
         return std::nullopt;
-    case Selection::Kind::None: break;
+    case Selection::Kind::None:
+        break;
     }
     return std::nullopt;
 }

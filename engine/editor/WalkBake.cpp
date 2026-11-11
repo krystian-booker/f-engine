@@ -8,16 +8,17 @@
 #include <cstdint>
 #include <fstream>
 #include <glm/gtc/matrix_transform.hpp>
-#include <sstream>
 #include <limits>
 #include <set>
+#include <sstream>
 
 namespace fe {
 const std::vector<int> MeshRaycaster::None;
 
 namespace {
 // Möller–Trumbore: distance along a ray to a triangle, if it is hit.
-std::optional<float> rayTriangle(glm::vec3 origin, glm::vec3 direction, glm::vec3 a, glm::vec3 b, glm::vec3 c) {
+std::optional<float> rayTriangle(glm::vec3 origin, glm::vec3 direction, glm::vec3 a, glm::vec3 b,
+                                 glm::vec3 c) {
     const auto e1 = b - a, e2 = c - a;
     const auto p = glm::cross(direction, e2);
     const float det = glm::dot(e1, p);
@@ -313,11 +314,16 @@ namespace {
 float bakedEdge(const BakeCell& cell, int dx, int dz) {
     const float half = cell.rise * 0.5f;
     switch (cell.ramp) {
-    case Ramp::East: return cell.height + (dx > 0 ? cell.rise : dx < 0 ? 0 : half);
-    case Ramp::West: return cell.height + (dx < 0 ? cell.rise : dx > 0 ? 0 : half);
-    case Ramp::South: return cell.height + (dz > 0 ? cell.rise : dz < 0 ? 0 : half);
-    case Ramp::North: return cell.height + (dz < 0 ? cell.rise : dz > 0 ? 0 : half);
-    case Ramp::None: break;
+    case Ramp::East:
+        return cell.height + (dx > 0 ? cell.rise : dx < 0 ? 0 : half);
+    case Ramp::West:
+        return cell.height + (dx < 0 ? cell.rise : dx > 0 ? 0 : half);
+    case Ramp::South:
+        return cell.height + (dz > 0 ? cell.rise : dz < 0 ? 0 : half);
+    case Ramp::North:
+        return cell.height + (dz < 0 ? cell.rise : dz > 0 ? 0 : half);
+    case Ramp::None:
+        break;
     }
     return cell.height;
 }
@@ -332,7 +338,8 @@ void pruneIslands(BakeResult& result, float step) {
     std::vector<int> sizes;
     std::vector<int> stack;
     for (int start = 0; start < w * d; ++start) {
-        if (component[static_cast<std::size_t>(start)] >= 0 || !result.cells[static_cast<std::size_t>(start)].walkable) {
+        if (component[static_cast<std::size_t>(start)] >= 0 ||
+            !result.cells[static_cast<std::size_t>(start)].walkable) {
             continue;
         }
         const int id = static_cast<int>(sizes.size());
@@ -406,7 +413,9 @@ BakeResult bakeWalkability(std::span<const BakePiece> scene, const Grid& grid, c
     const int n = std::clamp(options.samples, 1, 16);
     const float slopeCos = std::cos(glm::radians(std::clamp(options.maxSlopeDegrees, 0.0f, 89.0f)));
     const float heightStep = std::max(options.heightStep, 0.01f);
-    const auto rounded = [&](float value) { return std::round(value / heightStep) * heightStep; };
+    const auto rounded = [&](float value) {
+        return std::round(value / heightStep) * heightStep;
+    };
     const bool seeded = options.region && options.layer >= 0 && options.layer < grid.layerCount();
     if (seeded) {
         // Cells outside the region keep what the grid says, so island pruning
@@ -495,10 +504,12 @@ BakeResult bakeWalkability(std::span<const BakePiece> scene, const Grid& grid, c
             for (int sz = 0; sz < n; ++sz) {
                 for (int sx = 0; sx < n; ++sx) {
                     auto& s = samples[static_cast<std::size_t>(sz * n + sx)];
-                    const glm::vec2 lo(static_cast<float>(x) + static_cast<float>(sx) * quarter + QuarterShrink,
-                                       static_cast<float>(z) + static_cast<float>(sz) * quarter + QuarterShrink);
+                    const glm::vec2 lo(
+                        static_cast<float>(x) + static_cast<float>(sx) * quarter + QuarterShrink,
+                        static_cast<float>(z) + static_cast<float>(sz) * quarter + QuarterShrink);
                     const glm::vec2 hi = lo + glm::vec2(quarter - 2 * QuarterShrink);
-                    if (s.ground && mesh.obstacleIn(lo, hi, floor + 0.05f, floor + options.clearance, slopeCos)) {
+                    if (s.ground &&
+                        mesh.obstacleIn(lo, hi, floor + 0.05f, floor + options.clearance, slopeCos)) {
                         s.ground = false;
                     }
                     s.drop = !s.ground && (!s.hit || (!s.water && s.y < floor - options.step));
@@ -529,7 +540,9 @@ BakeResult bakeWalkability(std::span<const BakePiece> scene, const Grid& grid, c
             } else if (cell.coverage >= options.minCoverage) {
                 cell.walkable = true;
                 cell.partial = ground < n * n;
-                cell.confidence = std::clamp((cell.coverage - options.minCoverage) / std::max(1 - options.minCoverage, 0.01f), 0.0f, 1.0f);
+                cell.confidence = std::clamp((cell.coverage - options.minCoverage) /
+                                                 std::max(1 - options.minCoverage, 0.01f),
+                                             0.0f, 1.0f);
                 if (cell.partial) {
                     ++result.partial;
                 } else {
@@ -545,12 +558,14 @@ BakeResult bakeWalkability(std::span<const BakePiece> scene, const Grid& grid, c
                         const float qx = static_cast<float>(x) + static_cast<float>(sx) * quarter;
                         const float qz = static_cast<float>(z) + static_cast<float>(sz) * quarter;
                         quarters.push_back({z * result.width + x,
-                                            {{qx, cell.height - 0.05f, qz}, {qx + quarter, cell.height + 1.2f, qz + quarter}}});
+                                            {{qx, cell.height - 0.05f, qz},
+                                             {qx + quarter, cell.height + 1.2f, qz + quarter}}});
                     }
                 }
             } else {
                 cell.walkable = false;
-                cell.confidence = std::clamp((options.minCoverage - cell.coverage) / std::max(options.minCoverage, 0.01f), 0.0f, 1.0f);
+                cell.confidence = std::clamp(
+                    (options.minCoverage - cell.coverage) / std::max(options.minCoverage, 0.01f), 0.0f, 1.0f);
                 ++result.blocked;
             }
             // 5. Ramps: heights that climb across the cell along one axis.
@@ -579,8 +594,10 @@ BakeResult bakeWalkability(std::span<const BakePiece> scene, const Grid& grid, c
                         }
                     }
                 }
-                const float dx = nl && nr ? right / static_cast<float>(nr) - left / static_cast<float>(nl) : 0;
-                const float dz = nf && nb ? back / static_cast<float>(nb) - front / static_cast<float>(nf) : 0;
+                const float dx =
+                    nl && nr ? right / static_cast<float>(nr) - left / static_cast<float>(nl) : 0;
+                const float dz =
+                    nf && nb ? back / static_cast<float>(nb) - front / static_cast<float>(nf) : 0;
                 // The halves' means sit half a cell apart: the full rise is twice their difference.
                 const float riseX = dx * 2, riseZ = dz * 2;
                 if (std::max(std::abs(riseX), std::abs(riseZ)) >= heightStep) {
@@ -600,7 +617,8 @@ BakeResult bakeWalkability(std::span<const BakePiece> scene, const Grid& grid, c
     if (options.blockEdges) {
         for (int z = 0; z < result.depth; ++z) {
             for (int x = 0; x < result.width; ++x) {
-                if ((x != 0 && z != 0 && x != result.width - 1 && z != result.depth - 1) || !options.inRegion(x, z)) {
+                if ((x != 0 && z != 0 && x != result.width - 1 && z != result.depth - 1) ||
+                    !options.inRegion(x, z)) {
                     continue;
                 }
                 auto& cell = result.at(x, z);
@@ -668,7 +686,8 @@ int applyBake(MapData& map, const BakeResult& result, const BakeOptions& options
     if (options.region) {
         // Keep the derived boxes outside the region; the bake brings the rest.
         const glm::vec2 lo(static_cast<float>(options.region->x), static_cast<float>(options.region->y));
-        const glm::vec2 hi = lo + glm::vec2(static_cast<float>(options.region->z), static_cast<float>(options.region->w));
+        const glm::vec2 hi =
+            lo + glm::vec2(static_cast<float>(options.region->z), static_cast<float>(options.region->w));
         for (const auto& box : map.bake.colliders) {
             for (const auto& piece : cutBox(box, lo, hi)) {
                 boxes.push_back(piece);
@@ -684,7 +703,8 @@ int applyBake(MapData& map, const BakeResult& result, const BakeOptions& options
 int applyOverrides(MapData& map, std::optional<glm::ivec4> region) {
     auto& grid = map.grid;
     const auto inRegion = [&](int x, int z) {
-        return !region || (x >= region->x && z >= region->y && x < region->x + region->z && z < region->y + region->w);
+        return !region ||
+               (x >= region->x && z >= region->y && x < region->x + region->z && z < region->y + region->w);
     };
     int changed = 0;
     for (const auto& over : map.bake.overrides) {
@@ -728,8 +748,12 @@ int applyOverrides(MapData& map, std::optional<glm::ivec4> region) {
 namespace {
 void writeBrush(CellOverride& over, const GridBrush& brush) {
     switch (brush.mode) {
-    case GridBrush::Mode::Walkable: over.walkable = brush.walkable; break;
-    case GridBrush::Mode::Height: over.height = brush.height; break;
+    case GridBrush::Mode::Walkable:
+        over.walkable = brush.walkable;
+        break;
+    case GridBrush::Mode::Height:
+        over.height = brush.height;
+        break;
     case GridBrush::Mode::Ramp:
         over.ramp = brush.ramp;
         over.rise = 1;
@@ -756,7 +780,9 @@ bool covers(const CellOverride& over, GridPos cell) {
 } // namespace
 
 bool setOverride(MapData& map, GridPos cell, const GridBrush& brush) {
-    if (!map.grid.inRange(cell) || ((brush.mode == GridBrush::Mode::AddTag || brush.mode == GridBrush::Mode::RemoveTag) && brush.tag.empty())) {
+    if (!map.grid.inRange(cell) ||
+        ((brush.mode == GridBrush::Mode::AddTag || brush.mode == GridBrush::Mode::RemoveTag) &&
+         brush.tag.empty())) {
         return false;
     }
     auto& overrides = map.bake.overrides;
@@ -771,7 +797,8 @@ bool setOverride(MapData& map, GridPos cell, const GridBrush& brush) {
         }
     }
     if (!target) {
-        overrides.push_back({cell.x, cell.z, cell.layer, 1, 1, std::nullopt, std::nullopt, std::nullopt, 1, {}, {}});
+        overrides.push_back(
+            {cell.x, cell.z, cell.layer, 1, 1, std::nullopt, std::nullopt, std::nullopt, 1, {}, {}});
         target = &overrides.back();
     }
     writeBrush(*target, brush);
@@ -781,11 +808,21 @@ bool setOverride(MapData& map, GridPos cell, const GridBrush& brush) {
 
 bool setOverrideRect(MapData& map, GridPos a, GridPos b, const GridBrush& brush) {
     if (a.layer != b.layer || !map.grid.inRange(a) || !map.grid.inRange(b) ||
-        ((brush.mode == GridBrush::Mode::AddTag || brush.mode == GridBrush::Mode::RemoveTag) && brush.tag.empty())) {
+        ((brush.mode == GridBrush::Mode::AddTag || brush.mode == GridBrush::Mode::RemoveTag) &&
+         brush.tag.empty())) {
         return false;
     }
-    CellOverride over{std::min(a.x, b.x), std::min(a.z, b.z), a.layer, std::abs(a.x - b.x) + 1, std::abs(a.z - b.z) + 1,
-                      std::nullopt,       std::nullopt,       std::nullopt, 1, {}, {}};
+    CellOverride over{std::min(a.x, b.x),
+                      std::min(a.z, b.z),
+                      a.layer,
+                      std::abs(a.x - b.x) + 1,
+                      std::abs(a.z - b.z) + 1,
+                      std::nullopt,
+                      std::nullopt,
+                      std::nullopt,
+                      1,
+                      {},
+                      {}};
     writeBrush(over, brush);
     map.bake.overrides.push_back(over);
     applyOverrides(map, glm::ivec4(over.x, over.z, over.w, over.d));
@@ -901,8 +938,9 @@ std::string bakeFingerprint(const MapData& map, const std::string& geometryPath,
     std::set<std::string> models;
     for (const auto& p : map.placements) {
         if (const auto model = bakedModelOf(p)) {
-            const Json canonical = {{"id", p.id},       {"model", *model}, {"position", toJson(p.position)},
-                                    {"yaw", p.yaw},     {"scale", toJson(p.scale)}, {"layer", p.layer}};
+            const Json canonical = {
+                {"id", p.id},   {"model", *model},          {"position", toJson(p.position)},
+                {"yaw", p.yaw}, {"scale", toJson(p.scale)}, {"layer", p.layer}};
             mix(canonical.dump());
             models.insert(*model);
         }
@@ -920,7 +958,8 @@ std::string bakeFingerprint(const MapData& map, const std::string& geometryPath,
     return out;
 }
 
-std::function<std::optional<std::string>(const std::string&)> gameFileReader(const std::filesystem::path& gameRoot) {
+std::function<std::optional<std::string>(const std::string&)>
+gameFileReader(const std::filesystem::path& gameRoot) {
     return [gameRoot](const std::string& relative) -> std::optional<std::string> {
         try {
             std::ifstream in(resolveInside(gameRoot, relative), std::ios::binary);

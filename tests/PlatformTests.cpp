@@ -218,7 +218,8 @@ TEST_CASE("input labels come from the runtime's keyboard layout, else from the i
     InputState input;
     CHECK(input.label("key:Z") == "Z");
     CHECK(input.label("pad:a") == "a");
-    input.setLabeler([](const std::string& name) { return name == "key:Z" ? std::string("Y") : std::string(); });
+    input.setLabeler(
+        [](const std::string& name) { return name == "key:Z" ? std::string("Y") : std::string(); });
     CHECK(input.label("key:Z") == "Y"); // a German layout
     CHECK(input.label("key:Return") == "Return");
 }

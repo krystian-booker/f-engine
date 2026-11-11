@@ -1,9 +1,9 @@
 #include "engine/runtime/Headless.h"
-#include "engine/editor/AssetCatalog.h"
-#include "engine/editor/WalkBake.h"
 #include "engine/core/AssetCache.h"
 #include "engine/core/Log.h"
 #include "engine/core/Paths.h"
+#include "engine/editor/AssetCatalog.h"
+#include "engine/editor/WalkBake.h"
 #include "engine/runtime/Engine.h"
 #include "engine/script/Binder.h"
 #include "engine/world/World.h"
@@ -112,8 +112,8 @@ private:
     std::filesystem::path path_;
 };
 
-std::unique_ptr<Engine> headlessEngine(const std::filesystem::path& game, const std::filesystem::path& builtin,
-                                       const ScratchFolder& userData) {
+std::unique_ptr<Engine> headlessEngine(const std::filesystem::path& game,
+                                       const std::filesystem::path& builtin, const ScratchFolder& userData) {
     EngineOptions options;
     options.gameRoot = game;
     options.builtinRoot = builtin;
@@ -316,7 +316,8 @@ int runTests(const std::filesystem::path& game, const std::filesystem::path& bui
             std::cerr << error.what() << "\n";
             return 1;
         }
-        auto result = lua.invoke(sol::object(loaded.get<sol::protected_function>()), sol::as_table(modules), filter);
+        auto result =
+            lua.invoke(sol::object(loaded.get<sol::protected_function>()), sol::as_table(modules), filter);
         if (!result.valid()) {
             const sol::error error = result;
             std::cerr << error.what() << "\n";
@@ -353,8 +354,10 @@ int checkGame(const std::filesystem::path& game, const std::filesystem::path& bu
             // (a packed game has no loose files to compare, so it is skipped).
             const auto& bake = world->map().bake;
             if (!bake.fingerprint.empty() && std::filesystem::is_directory(game) &&
-                bakeFingerprint(world->map(), world->geometryPath(), gameFileReader(game)) != bake.fingerprint) {
-                std::cout << "map " << id << ": warning: the walkability bake is out of date (run --bake or press "
+                bakeFingerprint(world->map(), world->geometryPath(), gameFileReader(game)) !=
+                    bake.fingerprint) {
+                std::cout << "map " << id
+                          << ": warning: the walkability bake is out of date (run --bake or press "
                              "Bake now in the editor)\n";
             }
             engine->unloadWorld("check_" + id);
@@ -449,8 +452,9 @@ int bakeGame(const std::filesystem::path& game, const std::filesystem::path& bui
             const int changed = applyBake(map, result, options);
             map.bake.fingerprint = fingerprint;
             writeJson(file, MapData::fromJson(map.toJson()).toJson());
-            std::cout << "map " << id << ": baked, " << changed << " cell(s) changed, " << result.walkable + result.partial
-                      << " walkable, " << result.blocked << " blocked, " << map.bake.colliders.size() << " box(es)\n";
+            std::cout << "map " << id << ": baked, " << changed << " cell(s) changed, "
+                      << result.walkable + result.partial << " walkable, " << result.blocked << " blocked, "
+                      << map.bake.colliders.size() << " box(es)\n";
         } catch (const std::exception& error) {
             std::cerr << "map " << id << ": " << error.what() << "\n";
             ++problems;

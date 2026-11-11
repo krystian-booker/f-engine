@@ -40,7 +40,9 @@ public:
     // Keeps a copy of the named render target `target` drawn this frame under
     // `key`, so later frames can show it without drawing it again (the
     // editor's model thumbnails: one hidden world draw per model, once).
-    void keepTarget(const std::string& target, const std::string& key) { keepRequests_.emplace_back(target, key); }
+    void keepTarget(const std::string& target, const std::string& key) {
+        keepRequests_.emplace_back(target, key);
+    }
     [[nodiscard]] bgfx::TextureHandle keptTarget(std::string_view key) const;
     void forgetKeptTargets() { kept_.clear(); }
     // Per-draw parameters (u_params) of an entity's game sprite or mesh
@@ -49,7 +51,9 @@ public:
     void setShaderParams(const World& world, entt::entity entity, const ShaderParams& params) {
         worlds_.setShaderParams(world, entity, params);
     }
-    void clearShaderParams(const World& world, entt::entity entity) { worlds_.clearShaderParams(world, entity); }
+    void clearShaderParams(const World& world, entt::entity entity) {
+        worlds_.clearShaderParams(world, entity);
+    }
     void clearShaderParams(const World& world) { worlds_.clearShaderParams(world); }
 
 private:

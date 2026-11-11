@@ -1,6 +1,6 @@
 #pragma once
-#include "engine/core/Json.h"
 #include "engine/assets/SpriteSheetBuilder.h"
+#include "engine/core/Json.h"
 #include "engine/editor/AssetCatalog.h"
 #include "engine/editor/EditorCamera.h"
 #include "engine/editor/MapEdits.h"
@@ -19,8 +19,8 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <sol/forward.hpp>
 #include <set>
+#include <sol/forward.hpp>
 #include <string>
 #include <vector>
 
@@ -227,13 +227,15 @@ private:
     // what a field may hold, accept drops from the Assets panel and show a
     // thumbnail; each returns true when the value changed.
     bool assetPicker(const char* label, std::string& value, AssetKind kind, bool optional = false);
-    bool modulePicker(const char* label, std::string& value, const std::string& folder, bool optional = false);
+    bool modulePicker(const char* label, std::string& value, const std::string& folder,
+                      bool optional = false);
     bool mapPicker(const char* label, std::string& value, bool optional = false);
     bool pointPicker(const char* label, std::string& value, const std::string& mapId, bool optional = false);
     bool refPicker(const char* label, std::string& value, const std::string& table, bool optional = false);
     bool clipPicker(const char* label, std::string& value, const std::string& animation);
     bool choicePicker(const char* label, std::string& value, const std::vector<std::string>& candidates,
-                      const std::vector<std::string>& labels, const char* hint, bool optional, AssetKind thumbnail);
+                      const std::vector<std::string>& labels, const char* hint, bool optional,
+                      AssetKind thumbnail);
     // A sprite's first idle frame or an image, `size` points tall; false when
     // nothing could be shown (no GPU assets, or the file is missing).
     bool drawThumbnail(const std::string& path, AssetKind kind, float size);
@@ -389,7 +391,7 @@ private:
     std::size_t scriptStep_ = 0;
     std::uint64_t scriptFrame_ = 0;
     int scriptPassed_ = 0, scriptFailed_ = 0;
-    std::optional<glm::vec2> scriptMouse_; // where the script put the mouse (points)
+    std::optional<glm::vec2> scriptMouse_;                // where the script put the mouse (points)
     std::vector<std::pair<int, bool>> scriptKeyReleases_; // keys to release next frame
     std::vector<int> scriptLateReleases_;                 // modifiers to release the frame after
 };

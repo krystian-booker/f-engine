@@ -50,7 +50,6 @@ TEST_CASE("engine: world draws record rects, render targets and camera overrides
     CHECK(engine.canvas().imageSize("rt:unknown") == glm::ivec2(0));
 }
 
-
 TEST_CASE("engine: a draw's post table overrides the environment's post fields for that draw") {
     Engine engine(testEngine());
     auto& lua = engine.lua();
@@ -77,7 +76,6 @@ TEST_CASE("engine: a draw's post table overrides the environment's post fields f
     CHECK_FALSE(lua.evaluate("w:draw{post = {custom = {{shader = 'Bad Name'}}}}").ok);
 }
 
-
 TEST_CASE("engine: screen freeze, radial blur and world-only thumbnails are requests") {
     Engine engine(testEngine());
     auto& lua = engine.lua();
@@ -101,7 +99,6 @@ TEST_CASE("engine: screen freeze, radial blur and world-only thumbnails are requ
     CHECK(engine.requests().sceneCaptures[0] == engine.saves().thumbnailPath("slot1"));
 }
 
-
 TEST_CASE("engine: distort sprites and emitters are recorded for the renderer") {
     Engine engine(testEngine());
     auto& lua = engine.lua();
@@ -119,12 +116,11 @@ TEST_CASE("engine: distort sprites and emitters are recorded for the renderer") 
     CHECK_FALSE(lua.evaluate("w:spawn{position = {x = 1, z = 1}, emitter = {distort = -1}}").ok);
 }
 
-
 TEST_CASE("engine: a draw's camera override and the camera handle carry the orthographic fields") {
     Engine engine(testEngine());
     auto& lua = engine.lua();
-    REQUIRE(lua.evaluate("w = fe.world.load('main', 'arena'); c = w:camera(); c.distance = 20; c.fov = 30")
-                .ok);
+    REQUIRE(
+        lua.evaluate("w = fe.world.load('main', 'arena'); c = w:camera(); c.distance = 20; c.fov = 30").ok);
     CHECK(lua.console("c.orthographic") == "false");
     REQUIRE(lua.evaluate("c.orthographic = true").ok);
     CHECK(engine.world("main")->camera().orthographic);

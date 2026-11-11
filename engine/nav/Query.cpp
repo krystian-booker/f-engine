@@ -171,7 +171,8 @@ private:
     }
     // The passability class: no blocked tag, and one of the required tags when any are required.
     [[nodiscard]] bool tagsAllow(const GridCell& cell) const {
-        return !(cell.tags & rules_.blockedTags) && (!rules_.requiredTags || (cell.tags & rules_.requiredTags));
+        return !(cell.tags & rules_.blockedTags) &&
+               (!rules_.requiredTags || (cell.tags & rules_.requiredTags));
     }
     // One cell of the body: inside the grid, walkable unless flying, its tags
     // allowed, not occupied. Occupancy is keyed on the canonical cell, so a

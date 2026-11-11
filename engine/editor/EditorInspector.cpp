@@ -31,8 +31,9 @@ void Editor::drawInspector() {
     }
     const auto& map = w->authored();
     if (!extra_.empty()) {
-        ImGui::TextDisabled("%zu objects selected: they move, duplicate and delete together. Showing the first.",
-                            extra_.size() + 1);
+        ImGui::TextDisabled(
+            "%zu objects selected: they move, duplicate and delete together. Showing the first.",
+            extra_.size() + 1);
     }
     ImGui::Text("%s", selectionLabel(*w, selection_).c_str());
     ImGui::SameLine();
@@ -66,13 +67,26 @@ void Editor::drawInspector() {
     case Selection::Kind::Placement:
         drawPlacementForm(*w, static_cast<std::size_t>(placementIndex(map, selection_.id)));
         break;
-    case Selection::Kind::Zone: drawZoneForm(*w, static_cast<std::size_t>(zoneIndex(map, selection_.id))); break;
-    case Selection::Kind::Point: drawPointForm(*w, selection_.id); break;
-    case Selection::Kind::Light: drawLightForm(*w, static_cast<std::size_t>(selection_.index)); break;
-    case Selection::Kind::Emitter: drawEmitterForm(*w, static_cast<std::size_t>(selection_.index)); break;
-    case Selection::Kind::Collider: drawColliderForm(*w, static_cast<std::size_t>(selection_.index)); break;
-    case Selection::Kind::Entity: drawEntity(*w, selection_.entity); break;
-    case Selection::Kind::None: break;
+    case Selection::Kind::Zone:
+        drawZoneForm(*w, static_cast<std::size_t>(zoneIndex(map, selection_.id)));
+        break;
+    case Selection::Kind::Point:
+        drawPointForm(*w, selection_.id);
+        break;
+    case Selection::Kind::Light:
+        drawLightForm(*w, static_cast<std::size_t>(selection_.index));
+        break;
+    case Selection::Kind::Emitter:
+        drawEmitterForm(*w, static_cast<std::size_t>(selection_.index));
+        break;
+    case Selection::Kind::Collider:
+        drawColliderForm(*w, static_cast<std::size_t>(selection_.index));
+        break;
+    case Selection::Kind::Entity:
+        drawEntity(*w, selection_.entity);
+        break;
+    case Selection::Kind::None:
+        break;
     }
     ImGui::PopID();
 }

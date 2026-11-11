@@ -12,8 +12,8 @@ namespace fe {
 namespace {
 using namespace handleColors;
 
-void addCircle(HandleBatch& out, glm::vec3 centre, glm::vec3 axisA, glm::vec3 axisB, float radius, glm::vec4 color,
-               float thickness, int segments = 32) {
+void addCircle(HandleBatch& out, glm::vec3 centre, glm::vec3 axisA, glm::vec3 axisB, float radius,
+               glm::vec4 color, float thickness, int segments = 32) {
     glm::vec3 previous = centre + axisA * radius;
     for (int i = 1; i <= segments; ++i) {
         const float angle = glm::two_pi<float>() * static_cast<float>(i) / static_cast<float>(segments);
@@ -23,7 +23,8 @@ void addCircle(HandleBatch& out, glm::vec3 centre, glm::vec3 axisA, glm::vec3 ax
     }
 }
 
-void addCylinder(HandleBatch& out, glm::vec3 feet, float radius, float height, glm::vec4 color, float thickness) {
+void addCylinder(HandleBatch& out, glm::vec3 feet, float radius, float height, glm::vec4 color,
+                 float thickness) {
     const glm::vec3 x(1, 0, 0), z(0, 0, 1), up(0, height, 0);
     addCircle(out, feet, x, z, radius, color, thickness, 24);
     addCircle(out, feet + up, x, z, radius, color, thickness, 24);
@@ -86,21 +87,25 @@ void outlineEntity(World& world, entt::entity entity, glm::vec4 color, float thi
         addCylinder(out, position, collider->radius, collider->height, color, thickness);
         return;
     }
-    out.icons.push_back({position, HandleBatch::Icon::Shape::Diamond, color, Selection::ofEntity(world, entity)});
+    out.icons.push_back(
+        {position, HandleBatch::Icon::Shape::Diamond, color, Selection::ofEntity(world, entity)});
 }
 } // namespace
 
 void addBoxLines(HandleBatch& out, glm::vec3 min, glm::vec3 max, glm::vec4 color, float thickness) {
-    const glm::vec3 c[8] = {{min.x, min.y, min.z}, {max.x, min.y, min.z}, {max.x, min.y, max.z}, {min.x, min.y, max.z},
-                            {min.x, max.y, min.z}, {max.x, max.y, min.z}, {max.x, max.y, max.z}, {min.x, max.y, max.z}};
-    const int edges[12][2] = {{0, 1}, {1, 2}, {2, 3}, {3, 0}, {4, 5}, {5, 6}, {6, 7}, {7, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
+    const glm::vec3 c[8] = {{min.x, min.y, min.z}, {max.x, min.y, min.z}, {max.x, min.y, max.z},
+                            {min.x, min.y, max.z}, {min.x, max.y, min.z}, {max.x, max.y, min.z},
+                            {max.x, max.y, max.z}, {min.x, max.y, max.z}};
+    const int edges[12][2] = {{0, 1}, {1, 2}, {2, 3}, {3, 0}, {4, 5}, {5, 6},
+                              {6, 7}, {7, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
     for (const auto& e : edges) {
         out.lines.push_back({c[e[0]], c[e[1]], color, thickness});
     }
 }
 
-void buildHandles(World& world, const HandleOptions& options, const Selection& primary, const Selection& hovered,
-                  double alpha, HandleBatch& out, const std::vector<Selection>& extras) {
+void buildHandles(World& world, const HandleOptions& options, const Selection& primary,
+                  const Selection& hovered, double alpha, HandleBatch& out,
+                  const std::vector<Selection>& extras) {
     const auto& map = world.authored();
     // Several things can be selected at once; each is emphasised like the primary.
     const auto isSelected = [&](const Selection& self) {
@@ -115,7 +120,9 @@ void buildHandles(World& world, const HandleOptions& options, const Selection& p
         }
         return base;
     };
-    const auto th = [&](const Selection& self) { return isSelected(self) ? 2.5f : 1.0f; };
+    const auto th = [&](const Selection& self) {
+        return isSelected(self) ? 2.5f : 1.0f;
+    };
     const Selection& selected = primary;
     const auto& grid = map.grid;
     const int layers = grid.layerCount();
@@ -176,9 +183,11 @@ void buildHandles(World& world, const HandleOptions& options, const Selection& p
                 continue; // the reach is drawn for the light being looked at, not every light
             }
             if (l.type == LightType::Spot) {
-                auto axis = glm::length(l.direction) > 1e-4f ? glm::normalize(l.direction) : glm::vec3(0, -1, 0);
-                const auto side = std::abs(axis.y) < 0.99f ? glm::normalize(glm::cross(axis, glm::vec3(0, 1, 0)))
-                                                           : glm::vec3(1, 0, 0);
+                auto axis =
+                    glm::length(l.direction) > 1e-4f ? glm::normalize(l.direction) : glm::vec3(0, -1, 0);
+                const auto side = std::abs(axis.y) < 0.99f
+                                      ? glm::normalize(glm::cross(axis, glm::vec3(0, 1, 0)))
+                                      : glm::vec3(1, 0, 0);
                 const auto other = glm::cross(axis, side);
                 const float reach = std::clamp(l.radius, 0.5f, 60.0f);
                 const float spread = reach * std::tan(glm::radians(std::clamp(l.outerCone, 1.0f, 89.0f)));
@@ -186,8 +195,9 @@ void buildHandles(World& world, const HandleOptions& options, const Selection& p
                 addCircle(out, end, side, other, spread, faint, t, 24);
                 for (int k = 0; k < 8; ++k) {
                     const float angle = glm::two_pi<float>() * static_cast<float>(k) / 8;
-                    out.lines.push_back(
-                        {l.position, end + (side * std::cos(angle) + other * std::sin(angle)) * spread, faint, t});
+                    out.lines.push_back({l.position,
+                                         end + (side * std::cos(angle) + other * std::sin(angle)) * spread,
+                                         faint, t});
                 }
             } else {
                 const float r = std::clamp(l.radius, 0.1f, 60.0f);
@@ -205,7 +215,8 @@ void buildHandles(World& world, const HandleOptions& options, const Selection& p
             const float t = th(self);
             if (glm::length(e.settings.area) > 1e-4f) {
                 const auto half = glm::abs(e.settings.area) * 0.5f;
-                addBoxLines(out, e.position - half, e.position + half, glm::vec4(glm::vec3(color), color.a * 0.5f), t);
+                addBoxLines(out, e.position - half, e.position + half,
+                            glm::vec4(glm::vec3(color), color.a * 0.5f), t);
             }
             out.icons.push_back({e.position, HandleBatch::Icon::Shape::Diamond, color, self});
             if (options.labels && !e.settings.sprite.empty()) {
@@ -244,7 +255,8 @@ void buildHandles(World& world, const HandleOptions& options, const Selection& p
             if (const auto pages = p.props.find("pages"); pages != p.props.end() && pages->is_array()) {
                 for (const auto& page : *pages) {
                     if (page.is_object()) {
-                        const auto trigger = editorui::jsonString(page, "trigger", "action"); // tolerant of other types
+                        const auto trigger =
+                            editorui::jsonString(page, "trigger", "action"); // tolerant of other types
                         if (std::find(triggers.begin(), triggers.end(), trigger) == triggers.end()) {
                             triggers.push_back(trigger);
                         }
@@ -276,7 +288,8 @@ void buildHandles(World& world, const HandleOptions& options, const Selection& p
             }
             const auto self = Selection::placement(p.id);
             const auto color = em(self, PlacementColor);
-            out.icons.push_back({p.position + glm::vec3(0, 0.3f, 0), HandleBatch::Icon::Shape::Diamond, color, self});
+            out.icons.push_back(
+                {p.position + glm::vec3(0, 0.3f, 0), HandleBatch::Icon::Shape::Diamond, color, self});
             if (options.labels) {
                 out.labels.push_back({p.position + glm::vec3(0, 0.3f, 0), p.id + " (" + p.type + ")", color});
             }
@@ -309,8 +322,8 @@ void buildHandles(World& world, const HandleOptions& options, const Selection& p
             outlineEntity(world, entity, color, t, alpha, out);
             if (const auto* transform = registry.try_get<Transform>(entity);
                 transform && !registry.all_of<MeshInstance>(entity)) {
-                addFacing(out, world.interpolated(entity, alpha) + glm::vec3(0, 0.02f, 0), transform->facing, 0.6f,
-                          color, t);
+                addFacing(out, world.interpolated(entity, alpha) + glm::vec3(0, 0.02f, 0), transform->facing,
+                          0.6f, color, t);
             }
         }
     }

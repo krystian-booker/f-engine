@@ -247,13 +247,16 @@ void bindInput(Engine& engine) {
             "Raw inputs that went down this tick (for rebinding screens). Stick axes are left out.")
         .fn(
             "last_device", [&input] { return input.lastDevice(); }, "fun(): string",
-            "'keyboard', 'gamepad' or 'mouse': the kind of device used last. A key or mouse button going down, "
-            "the mouse travelling a little way, a gamepad button or a stick pushed past half way, and a gamepad "
+            "'keyboard', 'gamepad' or 'mouse': the kind of device used last. A key or mouse button going "
+            "down, "
+            "the mouse travelling a little way, a gamepad button or a stick pushed past half way, and a "
+            "gamepad "
             "being plugged in all count; releases, stick drift and a nudged mouse do not.")
         .fn(
             "device_changed", [&input] { return input.deviceChanged(); }, "fun(): boolean",
             "True on the tick fe.input.device_type() changed: the player touched the keyboard or mouse after "
-            "a gamepad, pressed a button or moved a stick on a gamepad (or plugged one in) after the keyboard, "
+            "a gamepad, pressed a button or moved a stick on a gamepad (or plugged one in) after the "
+            "keyboard, "
             "picked up a gamepad of another layout, or unplugged the one in use. Redraw button prompts then.")
         .fn(
             "label", [&input](const std::string& name) { return input.label(name); },
@@ -410,9 +413,10 @@ void bindInput(Engine& engine) {
                     static constexpr std::string_view Types[] = {"xbox", "playstation", "switch", "steamdeck",
                                                                  "generic"};
                     if (std::find(std::begin(Types), std::end(Types), description.type) == std::end(Types)) {
-                        throw std::runtime_error("feed_pad type must be xbox, playstation, switch, steamdeck or "
-                                                 "generic, got '" +
-                                                 description.type + "'");
+                        throw std::runtime_error(
+                            "feed_pad type must be xbox, playstation, switch, steamdeck or "
+                            "generic, got '" +
+                            description.type + "'");
                     }
                     description.rumble = lua::get(*options, "rumble", false);
                     description.triggerRumble = lua::get(*options, "trigger_rumble", false);
@@ -421,7 +425,8 @@ void bindInput(Engine& engine) {
                 "fun(pad: integer, spec?: {name?: string, type?: 'xbox'|'playstation'|'switch'|'steamdeck'|"
                 "'generic', rumble?: boolean, trigger_rumble?: boolean})",
                 "Connect a virtual gamepad numbered `pad` described by `spec` (name 'Virtual' of at most 64 "
-                "bytes, type 'generic' and no rumble by default), or without a spec disconnect it; fe.input.pads() "
+                "bytes, type 'generic' and no rumble by default), or without a spec disconnect it; "
+                "fe.input.pads() "
                 "changes at once and the event arrives on the next tick. Only in development builds, "
                 "--test/--check runs and --replay/--record sessions.");
     }

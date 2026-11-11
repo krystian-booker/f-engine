@@ -23,15 +23,15 @@ class AssetCache;
 // MapData::bake, which authors correct with overrides instead of painting.
 // UI-free; runs headless (fengine_headless --bake).
 struct BakeOptions {
-    int layer = 0;                  // the grid layer written
-    float minHeight = -1e9f;        // only surfaces inside this band count (a bridge deck for layer 1)
+    int layer = 0;           // the grid layer written
+    float minHeight = -1e9f; // only surfaces inside this band count (a bridge deck for layer 1)
     float maxHeight = 1e9f;
-    int samples = 4;                // rays per cell side (4 = 16 per cell, one per quarter cell)
-    float maxSlopeDegrees = 35;     // steeper surfaces are not ground (ramps qualify)
-    float clearance = 1.6f;         // head room a body needs above the ground
-    float step = 0.6f;              // a sample this far from the cell's level is not the same floor
-    float minCoverage = 0.25f;      // ground share a walkable cell needs; the rest of it gets boxes
-    float heightStep = 0.25f;       // cell heights are rounded to this
+    int samples = 4;            // rays per cell side (4 = 16 per cell, one per quarter cell)
+    float maxSlopeDegrees = 35; // steeper surfaces are not ground (ramps qualify)
+    float clearance = 1.6f;     // head room a body needs above the ground
+    float step = 0.6f;          // a sample this far from the cell's level is not the same floor
+    float minCoverage = 0.25f;  // ground share a walkable cell needs; the rest of it gets boxes
+    float heightStep = 0.25f;   // cell heights are rounded to this
     // Walkable cells no step of `step` connects to the largest walkable region
     // (roof tops, ledges without a ramp) are blocked.
     bool pruneIslands = true;
@@ -43,7 +43,8 @@ struct BakeOptions {
     bool boxDrops = true;
     std::optional<glm::ivec4> region; // cells {x, z, width, depth}; whole grid when unset
     [[nodiscard]] bool inRegion(int x, int z) const {
-        return !region || (x >= region->x && z >= region->y && x < region->x + region->z && z < region->y + region->w);
+        return !region ||
+               (x >= region->x && z >= region->y && x < region->x + region->z && z < region->y + region->w);
     }
     // The settings a map stores (MapData::bake.options): everything but the
     // height band and the region, which belong to one bake. Missing keys
@@ -53,13 +54,13 @@ struct BakeOptions {
 };
 
 struct BakeCell {
-    bool hit = false;       // any sample found a surface in the band (false: left as it was)
-    bool walkable = false;  // the verdict
-    bool partial = false;   // walkable with boxes over the quarters that are not ground
-    bool water = false;     // the surface is water
-    bool island = false;    // walkable ground nothing connects to the main floor (pruned)
-    float coverage = 0;     // share of samples that are walkable ground
-    float height = 0;       // the floor height (median of the ground samples)
+    bool hit = false;      // any sample found a surface in the band (false: left as it was)
+    bool walkable = false; // the verdict
+    bool partial = false;  // walkable with boxes over the quarters that are not ground
+    bool water = false;    // the surface is water
+    bool island = false;   // walkable ground nothing connects to the main floor (pruned)
+    float coverage = 0;    // share of samples that are walkable ground
+    float height = 0;      // the floor height (median of the ground samples)
     Ramp ramp = Ramp::None;
     float rise = 0;
     // 0 = the vote was at a threshold, 1 = unanimous; the preview colours by it.
@@ -143,11 +144,12 @@ private:
 struct BakeScene {
     std::vector<BakePiece> pieces;
     std::vector<std::shared_ptr<const Model>> models; // keeps the pieces' models alive
-    std::vector<std::string> problems;                 // placements whose model could not be loaded
+    std::vector<std::string> problems;                // placements whose model could not be loaded
 };
 [[nodiscard]] BakeScene sceneForMap(const MapData& map, AssetCache& assets, const std::string& geometryPath);
 
-[[nodiscard]] BakeResult bakeWalkability(std::span<const BakePiece> scene, const Grid& grid, const BakeOptions& options);
+[[nodiscard]] BakeResult bakeWalkability(std::span<const BakePiece> scene, const Grid& grid,
+                                         const BakeOptions& options);
 [[nodiscard]] BakeResult bakeWalkability(const Model& model, const Grid& grid, const BakeOptions& options);
 // Writes a bake into a map: grid cells of the options' layer (in the
 // region), the water tag, the derived boxes (MapData::bake.colliders; a
@@ -175,13 +177,13 @@ bool clearOverride(MapData& map, GridPos cell);
 // options, as 16 hex digits. `readFile` gives a file's bytes by its game
 // path, or nothing when it is missing. The same inputs give the same
 // fingerprint on every platform.
-[[nodiscard]] std::string bakeFingerprint(
-    const MapData& map, const std::string& geometryPath,
-    const std::function<std::optional<std::string>(const std::string&)>& readFile);
+[[nodiscard]] std::string
+bakeFingerprint(const MapData& map, const std::string& geometryPath,
+                const std::function<std::optional<std::string>(const std::string&)>& readFile);
 // A `readFile` for bakeFingerprint over a game folder: the bytes of a loose
 // file by its game path, nothing when it is missing or outside the folder.
-[[nodiscard]] std::function<std::optional<std::string>(const std::string&)> gameFileReader(
-    const std::filesystem::path& gameRoot);
+[[nodiscard]] std::function<std::optional<std::string>(const std::string&)>
+gameFileReader(const std::filesystem::path& gameRoot);
 // The map's geometry as an asset path ("maps/<id>/<geometry>").
 [[nodiscard]] std::string geometryPathOf(const MapData& map);
 // The cells a placed model's bake can change: those under its box padded by

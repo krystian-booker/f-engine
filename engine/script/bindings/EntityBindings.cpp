@@ -73,8 +73,8 @@ sol::table settingsTable(sol::state_view lua, const Json& json, std::initializer
     for (const char* key : vectors) {
         const auto found = json.find(key);
         if (found != json.end() && found->is_array() && found->size() == 3) {
-            t[key] = lua::table(lua, glm::vec3((*found)[0].get<float>(), (*found)[1].get<float>(),
-                                               (*found)[2].get<float>()));
+            t[key] = lua::table(
+                lua, glm::vec3((*found)[0].get<float>(), (*found)[1].get<float>(), (*found)[2].get<float>()));
         }
     }
     return t;
@@ -347,7 +347,8 @@ void setEmitter(const EntityRef& e, const sol::table& t) {
         onlyPaused = onlyPaused && key.get_type() == sol::type::string && key.as<std::string>() == "paused";
     });
     const auto* existing = e.find<Emitter>();
-    Emitter emitter = existing && onlyPaused ? *existing : Emitter{EmitterSettings::fromJson(lua::emitterJson(t))};
+    Emitter emitter =
+        existing && onlyPaused ? *existing : Emitter{EmitterSettings::fromJson(lua::emitterJson(t))};
     if (paused) {
         emitter.active = !*paused;
     }
@@ -355,7 +356,8 @@ void setEmitter(const EntityRef& e, const sol::table& t) {
 }
 
 sol::table emitterTable(sol::state_view lua, const Emitter& emitter) {
-    auto t = settingsTable(lua, emitter.settings.toJson(), {"velocity", "velocity_jitter", "gravity", "area"});
+    auto t =
+        settingsTable(lua, emitter.settings.toJson(), {"velocity", "velocity_jitter", "gravity", "area"});
     t["paused"] = !emitter.active;
     return t;
 }
@@ -613,12 +615,13 @@ void bindEntity(Engine& engine) {
             },
             "number", "Rotation of mesh entities about the vertical axis in degrees.")
         .property(
-            "scale", [](sol::this_state s, const EntityRef& e) { return lua::table(s, e.get<Transform>().scale); },
+            "scale",
+            [](sol::this_state s, const EntityRef& e) { return lua::table(s, e.get<Transform>().scale); },
             [](const EntityRef& e, sol::object scale) {
                 e.get<Transform>().scale =
                     scale.get_type() == sol::type::number
-                        ? glm::vec3(lua::within(lua::as<float>(scale, "scale"), -lua::VectorBound, lua::VectorBound,
-                                                "scale"))
+                        ? glm::vec3(lua::within(lua::as<float>(scale, "scale"), -lua::VectorBound,
+                                                lua::VectorBound, "scale"))
                         : lua::vec3(scale);
             },
             "Vec3", "Scale of mesh entities (set a number for a uniform scale or a vector).")
@@ -650,7 +653,8 @@ void bindEntity(Engine& engine) {
                 }
                 if (path.get_type() == sol::type::table) {
                     if (rules) {
-                        throw std::runtime_error("move_to takes either a path to follow or rules to plan with");
+                        throw std::runtime_error(
+                            "move_to takes either a path to follow or rules to plan with");
                     }
                     std::vector<Waypoint> route;
                     for (const auto& waypoint : lua::elements(path.as<sol::table>())) {
@@ -768,7 +772,8 @@ void bindEntity(Engine& engine) {
             "whose centre it covers on its layer are walkable at its height while it is there. Move it with "
             "mover{collide = false} or place(). No argument reads it (nil without one); nil removes it.")
         .method(
-            "shader_params", component<MaterialParams>("shader_params", setMaterialParams, materialParamsTable),
+            "shader_params",
+            component<MaterialParams>("shader_params", setMaterialParams, materialParamsTable),
             "fun(values?: number[]|nil): number[]?",
             "The 16 numbers a game shader (sprite or mesh `shader`) reads as `u_params[4]`: a list of up to "
             "16 numbers in order (`u_params[0].x` first; missing ones are 0), for dissolve amounts, hit "
@@ -786,32 +791,35 @@ void bindEntity(Engine& engine) {
             "fun(clip: string, restart?: boolean)", "Play a sprite clip.")
         .method(
             "mesh", component<MeshInstance>("mesh", setMesh, meshTable), "fun(settings?: table|nil): table?",
-            "Add or change a glTF mesh (props, doors, skinned characters and creatures) and return its state; "
+            "Add or change a glTF mesh (props, doors, skinned characters and creatures) and return its "
+            "state; "
             "e:mesh() reads it (nil without one) and nil removes it. Fields: `model`, `animation`, `speed`, "
             "`loop`, `playing`, `visible`, `cast_shadow`, `tint`, `blend`, `shader`.")
         .method(
             "play",
             [](const EntityRef& e, const std::string& animation, sol::object loop, sol::object fade) {
-                const float seconds =
-                    lua::within(lua::opt<float>(fade, "fade").value_or(0.0f), 0.0f, 60.0f, "mesh animation fade");
+                const float seconds = lua::within(lua::opt<float>(fade, "fade").value_or(0.0f), 0.0f, 60.0f,
+                                                  "mesh animation fade");
                 e.owner().playMesh(e.id, animation, lua::opt<bool>(loop, "loop").value_or(false), seconds);
             },
             "fun(animation: string, loop?: boolean, fade?: number)",
             "Play a mesh animation by name from its start: a glTF animation of the model's nodes or, for a "
-            "skinned model, of its skeleton. With `fade` (seconds, 0 to 60) the pose blends from the animation "
-            "playing now into the new one instead of cutting (idle to attack and back). A finished non-looping "
-            "animation emits 'anim_finished' with its name. fe.app.model_animations lists a model's animations.")
+            "skinned model, of its skeleton. With `fade` (seconds, 0 to 60) the pose blends from the "
+            "animation "
+            "playing now into the new one instead of cutting (idle to attack and back). A finished "
+            "non-looping "
+            "animation emits 'anim_finished' with its name. fe.app.model_animations lists a model's "
+            "animations.")
         .method(
             "light", component<LightSource>("light", setLight, lightTable),
             "fun(settings?: table|nil): table?",
             "Attach a light (position is an offset; `enabled = false` keeps it but turns it off) and return "
             "its state; e:light() reads it (nil without one) and nil removes it.")
-        .method(
-            "emitter", component<Emitter>("emitter", setEmitter, emitterTable),
-            "fun(settings?: table|nil): table?",
-            "Attach particles (the settings replace the previous ones) and return their state; `paused = "
-            "true|false` stops or resumes spawning, and a table with no other field keeps the settings. "
-            "e:emitter() reads it (nil without one) and nil removes the emitter.")
+        .method("emitter", component<Emitter>("emitter", setEmitter, emitterTable),
+                "fun(settings?: table|nil): table?",
+                "Attach particles (the settings replace the previous ones) and return their state; `paused = "
+                "true|false` stops or resumes spawning, and a table with no other field keeps the settings. "
+                "e:emitter() reads it (nil without one) and nil removes the emitter.")
         .method(
             "collider", component<Collider>("collider", setCollider, colliderTable),
             "fun(settings?: {radius?: number, height?: number, solid?: boolean}|nil): table?",

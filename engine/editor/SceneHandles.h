@@ -65,8 +65,9 @@ inline constexpr glm::vec4 Selected{1, 0.6f, 0.1f, 1};
 inline constexpr glm::vec4 Hovered{1, 1, 1, 0.9f};
 } // namespace handleColors
 
-void buildHandles(World& world, const HandleOptions& options, const Selection& selected, const Selection& hovered,
-                  double alpha, HandleBatch& out, const std::vector<Selection>& extras = {});
+void buildHandles(World& world, const HandleOptions& options, const Selection& selected,
+                  const Selection& hovered, double alpha, HandleBatch& out,
+                  const std::vector<Selection>& extras = {});
 // Twelve edges of a box.
 void addBoxLines(HandleBatch& out, glm::vec3 min, glm::vec3 max, glm::vec4 color, float thickness = 1);
 } // namespace fe

@@ -1,7 +1,7 @@
 #include "engine/render/WorldRenderer.h"
-#include "engine/world/Geometry.h"
 #include "engine/render/FrameMath.h"
 #include "engine/world/Animation.h"
+#include "engine/world/Geometry.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -205,7 +205,8 @@ void WorldRenderer::render(World& world, std::size_t slot, double alpha, double 
             }
         }
         const SpriteBatch::Context context{uniforms_, lighting_, gpu_.white(), gpu_.flatNormal(), info_};
-        sprites_.draw(views.spriteMask, quadList_, spriteMask_.get(), SpriteBatch::Pass::Mask, context, calls);
+        sprites_.draw(views.spriteMask, quadList_, spriteMask_.get(), SpriteBatch::Pass::Mask, context,
+                      calls);
     }
 }
 
@@ -416,10 +417,12 @@ void WorldRenderer::setPartVertices(const PartDraw& draw) const {
     }
 }
 
-int WorldRenderer::skinPart(const GpuPart& part, const Model& model, std::pair<glm::vec3, glm::vec3>& bounds) {
+int WorldRenderer::skinPart(const GpuPart& part, const Model& model,
+                            std::pair<glm::vec3, glm::vec3>& bounds) {
     const auto& source = model.parts[static_cast<std::size_t>(part.sourcePart)];
     const auto count = static_cast<std::uint32_t>(part.packed.size() / sizeof(WorldVertex));
-    if (count == 0 || count != source.vertices.size() || bgfx::getAvailTransientVertexBuffer(count, worldLayout()) < count) {
+    if (count == 0 || count != source.vertices.size() ||
+        bgfx::getAvailTransientVertexBuffer(count, worldLayout()) < count) {
         return -1;
     }
     bgfx::TransientVertexBuffer buffer;
@@ -542,8 +545,8 @@ void WorldRenderer::castShadow(std::uint16_t view, const std::vector<int>& caste
     };
     for (std::size_t first = 0; first < order_.size();) {
         std::size_t last = first + 1;
-        while (last < order_.size() &&
-               keys_[static_cast<std::size_t>(order_[last])] == keys_[static_cast<std::size_t>(order_[first])]) {
+        while (last < order_.size() && keys_[static_cast<std::size_t>(order_[last])] ==
+                                           keys_[static_cast<std::size_t>(order_[first])]) {
             ++last;
         }
         const auto count = static_cast<std::uint32_t>(last - first);
@@ -730,8 +733,8 @@ void WorldRenderer::drawMeshes(World& world, double alpha) {
                 } else if (part.skin >= 0) {
                     addPart(part, placed, mesh.tint, mesh.castShadow, mesh.blend, cache.shaderSlot, params);
                 } else {
-                    addPart(part, placed * pose_[static_cast<std::size_t>(part.node)], mesh.tint, mesh.castShadow,
-                            mesh.blend, cache.shaderSlot, params);
+                    addPart(part, placed * pose_[static_cast<std::size_t>(part.node)], mesh.tint,
+                            mesh.castShadow, mesh.blend, cache.shaderSlot, params);
                 }
             }
         }
@@ -1168,10 +1171,11 @@ void WorldRenderer::drawDistortion() {
     target_->distorted = true;
     // One draw per atlas, shader and parameter block (the order among them is
     // free: offsets add).
-    std::stable_sort(distortQuads_.begin(), distortQuads_.end(), [](const DistortQuad& a, const DistortQuad& b) {
-        return std::make_tuple(a.atlas.idx, a.program.idx, a.params) <
-               std::make_tuple(b.atlas.idx, b.program.idx, b.params);
-    });
+    std::stable_sort(distortQuads_.begin(), distortQuads_.end(),
+                     [](const DistortQuad& a, const DistortQuad& b) {
+                         return std::make_tuple(a.atlas.idx, a.program.idx, a.params) <
+                                std::make_tuple(b.atlas.idx, b.program.idx, b.params);
+                     });
     for (std::size_t first = 0; first < distortQuads_.size();) {
         std::size_t last = first;
         distortVertices_.clear();

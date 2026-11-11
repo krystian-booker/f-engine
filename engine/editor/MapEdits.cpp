@@ -50,8 +50,8 @@ void MapEditHistory::apply(World& world, const std::function<void(MapData&)>& ed
     // A gesture continues only on the world object it started on; any other
     // world starts a step, which checks the map the history left.
     const auto found = stacks_.find(key(world));
-    const bool continues = !step && found != stacks_.end() && found->second.world == &world &&
-                           !found->second.undo.empty();
+    const bool continues =
+        !step && found != stacks_.end() && found->second.world == &world && !found->second.undo.empty();
     auto& stacks = stacksFor(world, !continues);
     if (!continues) {
         stacks.undo.push_back(world.authored().toJson());
@@ -250,7 +250,8 @@ int fillRect(Grid& grid, const GridBrush& brush, GridPos a, GridPos b) {
     if (!brushProblem(grid, brush, a.layer).empty()) {
         return 0;
     }
-    const int x0 = std::min(a.x, b.x), x1 = std::max(a.x, b.x), z0 = std::min(a.z, b.z), z1 = std::max(a.z, b.z);
+    const int x0 = std::min(a.x, b.x), x1 = std::max(a.x, b.x), z0 = std::min(a.z, b.z),
+              z1 = std::max(a.z, b.z);
     int changed = 0;
     for (int z = z0; z <= z1; ++z) {
         for (int x = x0; x <= x1; ++x) {
@@ -261,7 +262,8 @@ int fillRect(Grid& grid, const GridBrush& brush, GridPos a, GridPos b) {
 }
 
 int floodFill(Grid& grid, const GridBrush& brush, GridPos start) {
-    if (!grid.inRange(start) || brush.mode == GridBrush::Mode::Ramp || !brushProblem(grid, brush, start.layer).empty()) {
+    if (!grid.inRange(start) || brush.mode == GridBrush::Mode::Ramp ||
+        !brushProblem(grid, brush, start.layer).empty()) {
         return 0;
     }
     const bool seed = grid.at(start).walkable;
@@ -373,16 +375,18 @@ Box boxForModel(const Model& model, const Placement& placement, float margin) {
     const float c = std::cos(yaw), s = std::sin(yaw);
     Box box{glm::vec3(std::numeric_limits<float>::max()), glm::vec3(std::numeric_limits<float>::lowest())};
     for (int i = 0; i < 8; ++i) {
-        const glm::vec3 corner = glm::vec3((i & 1) ? model.max.x : model.min.x, (i & 2) ? model.max.y : model.min.y,
-                                           (i & 4) ? model.max.z : model.min.z) *
-                                 placement.scale;
+        const glm::vec3 corner =
+            glm::vec3((i & 1) ? model.max.x : model.min.x, (i & 2) ? model.max.y : model.min.y,
+                      (i & 4) ? model.max.z : model.min.z) *
+            placement.scale;
         // glm::rotate about +y: x' = x cos + z sin, z' = -x sin + z cos.
         const glm::vec3 turned(corner.x * c + corner.z * s, corner.y, -corner.x * s + corner.z * c);
         const auto p = placement.position + turned;
         box.min = glm::min(box.min, p);
         box.max = glm::max(box.max, p);
     }
-    const float shrink = std::min(margin, (std::min(box.max.x - box.min.x, box.max.z - box.min.z) - BlockStep) * 0.5f);
+    const float shrink =
+        std::min(margin, (std::min(box.max.x - box.min.x, box.max.z - box.min.z) - BlockStep) * 0.5f);
     if (shrink > 0) {
         box.min.x += shrink;
         box.max.x -= shrink;

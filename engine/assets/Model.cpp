@@ -90,8 +90,8 @@ struct ImageCache {
             try {
                 result.file = resolveInside(path.parent_path(), uri);
             } catch (const std::exception&) {
-                throw std::runtime_error("glTF image '" + uri + "' lies outside the model's folder: " +
-                                         path.string());
+                throw std::runtime_error("glTF image '" + uri +
+                                         "' lies outside the model's folder: " + path.string());
             }
             result.image = std::make_shared<Image>(Image::load(result.file));
         } else {
@@ -250,9 +250,9 @@ ModelPart readPrimitive(const cgltf_primitive& primitive, ImageCache& images, co
     const auto typed = [](const cgltf_accessor* accessor, std::initializer_list<cgltf_type> allowed) {
         return !accessor || std::find(allowed.begin(), allowed.end(), accessor->type) != allowed.end();
     };
-    if (!typed(normals, {cgltf_type_vec3}) || !typed(tangents, {cgltf_type_vec4}) || !typed(uvs, {cgltf_type_vec2}) ||
-        !typed(colors, {cgltf_type_vec3, cgltf_type_vec4}) || !typed(joints, {cgltf_type_vec4}) ||
-        !typed(weights, {cgltf_type_vec4})) {
+    if (!typed(normals, {cgltf_type_vec3}) || !typed(tangents, {cgltf_type_vec4}) ||
+        !typed(uvs, {cgltf_type_vec2}) || !typed(colors, {cgltf_type_vec3, cgltf_type_vec4}) ||
+        !typed(joints, {cgltf_type_vec4}) || !typed(weights, {cgltf_type_vec4})) {
         throw std::runtime_error("A glTF vertex attribute has the wrong accessor type");
     }
     ModelPart part;
@@ -414,8 +414,9 @@ void readAnimations(const cgltf_data& data, Model& model) {
             }
         }
         // pose() composes a node's local matrix from its run of channels.
-        std::stable_sort(animation.channels.begin(), animation.channels.end(),
-                         [](const AnimationChannel& a, const AnimationChannel& b) { return a.node < b.node; });
+        std::stable_sort(
+            animation.channels.begin(), animation.channels.end(),
+            [](const AnimationChannel& a, const AnimationChannel& b) { return a.node < b.node; });
         model.animations.push_back(std::move(animation));
     }
 }
@@ -739,9 +740,15 @@ void Model::sample(int index, float time, std::vector<NodePose>& locals) const {
         const auto value = sampleChannel(channel, time);
         auto& local = locals[static_cast<std::size_t>(channel.node)];
         switch (channel.target) {
-        case AnimationChannel::Target::Translation: local.translation = glm::vec3(value); break;
-        case AnimationChannel::Target::Rotation: local.rotation = glm::quat(value.w, value.x, value.y, value.z); break;
-        case AnimationChannel::Target::Scale: local.scale = glm::vec3(value); break;
+        case AnimationChannel::Target::Translation:
+            local.translation = glm::vec3(value);
+            break;
+        case AnimationChannel::Target::Rotation:
+            local.rotation = glm::quat(value.w, value.x, value.y, value.z);
+            break;
+        case AnimationChannel::Target::Scale:
+            local.scale = glm::vec3(value);
+            break;
         }
     }
 }
@@ -769,7 +776,8 @@ void Model::blendPoses(std::vector<NodePose>& into, const std::vector<NodePose>&
     }
 }
 
-void Model::jointMatrices(int skin, const std::vector<glm::mat4>& pose, std::vector<glm::mat4>& matrices) const {
+void Model::jointMatrices(int skin, const std::vector<glm::mat4>& pose,
+                          std::vector<glm::mat4>& matrices) const {
     const auto& source = skins.at(static_cast<std::size_t>(skin));
     matrices.resize(source.joints.size());
     for (std::size_t j = 0; j < source.joints.size(); ++j) {
@@ -797,7 +805,8 @@ void skinVertices(const ModelPart& part, const std::vector<glm::mat4>& joints, s
         const auto normal = linear * source.normal;
         const auto tangent = linear * glm::vec3(source.tangent);
         vertex.normal = glm::dot(normal, normal) > 1e-12f ? glm::normalize(normal) : source.normal;
-        vertex.tangent = glm::vec4(glm::dot(tangent, tangent) > 1e-12f ? glm::normalize(tangent) : glm::vec3(source.tangent),
+        vertex.tangent = glm::vec4(glm::dot(tangent, tangent) > 1e-12f ? glm::normalize(tangent)
+                                                                       : glm::vec3(source.tangent),
                                    source.tangent.w);
     }
 }

@@ -393,7 +393,8 @@ void GpuAssets::sync() {
                  replaced(sheet.emissivePath, sheet.emissiveImage)));
     });
     std::erase_if(models_, [&](const auto& entry) {
-        return !assets_.loaded(entry.first.first) || assets_.cachedModel(entry.first.first) != entry.second->source;
+        return !assets_.loaded(entry.first.first) ||
+               assets_.cachedModel(entry.first.first) != entry.second->source;
     });
     // A texture no model part holds any more belonged to dropped models only.
     std::erase_if(modelTextures_, [](const auto& entry) { return entry.second.use_count() == 1; });
@@ -555,7 +556,8 @@ const GpuModel* GpuAssets::model(const std::string& path, bool bakeChunks) {
     auto gpu = std::make_unique<GpuModel>();
     gpu->source = source;
     auto emit = [&](const ModelPart& part, const std::vector<WorldVertex>& vertices,
-                    const std::vector<std::uint32_t>& indices, glm::vec3 min, glm::vec3 max, bool skinned = false) {
+                    const std::vector<std::uint32_t>& indices, glm::vec3 min, glm::vec3 max,
+                    bool skinned = false) {
         if (indices.empty()) {
             return;
         }
@@ -647,7 +649,8 @@ const GpuModel* GpuAssets::model(const std::string& path, bool bakeChunks) {
             }
         }
         std::vector<WorldVertex> vertices;
-        for (const auto& chunk : splitChunks(positions, flipped.empty() ? part.indices : flipped, ChunkSize)) {
+        for (const auto& chunk :
+             splitChunks(positions, flipped.empty() ? part.indices : flipped, ChunkSize)) {
             vertices.clear();
             glm::vec3 min(std::numeric_limits<float>::max()), max(-std::numeric_limits<float>::max());
             for (const auto source : chunk.vertices) {

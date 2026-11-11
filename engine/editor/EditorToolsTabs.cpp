@@ -118,7 +118,8 @@ void Editor::drawLaunchTab() {
         }
     }
     if (launchers_.empty()) {
-        ImGui::TextDisabled("Launchers come from the editor.list() and editor.launch(name) hooks of main.lua");
+        ImGui::TextDisabled(
+            "Launchers come from the editor.list() and editor.launch(name) hooks of main.lua");
     }
 }
 } // namespace fe

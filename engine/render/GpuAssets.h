@@ -176,8 +176,8 @@ private:
     std::shared_ptr<const ModelTexture> modelTexture(const ModelImage& image, bool srgb, bool mips);
     // Creates a texture from the cooked file next to `original` when it exists
     // and the GPU samples its format; records what was used in `cooked`.
-    bool uploadCooked(const std::filesystem::path& original, bool srgb, std::uint64_t flags,
-                      Texture& texture, CookedTexture& cooked);
+    bool uploadCooked(const std::filesystem::path& original, bool srgb, std::uint64_t flags, Texture& texture,
+                      CookedTexture& cooked);
     [[nodiscard]] static CookedTexture cookedState(const std::filesystem::path& original);
     AssetCache& assets_;
     std::uint64_t generation_ = 0, fileChanges_ = 0, revision_ = 0;

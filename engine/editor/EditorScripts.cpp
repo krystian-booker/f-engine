@@ -67,8 +67,8 @@ void Editor::drawScriptsPanel() {
             ImGui::TextDisabled("Every placement with a script and how it fires. Click a row to select it; "
                                 "the active page is the one its conditions pick right now.");
             if (ImGui::BeginTable("wiring", 5,
-                                  ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp |
-                                      ImGuiTableFlags_ScrollY)) {
+                                  ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                                      ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_ScrollY)) {
                 ImGui::TableSetupColumn("Object");
                 ImGui::TableSetupColumn("Type");
                 ImGui::TableSetupColumn("Trigger");
@@ -77,15 +77,16 @@ void Editor::drawScriptsPanel() {
                 ImGui::TableHeadersRow();
                 int rowId = 0;
                 const auto row = [&](const Selection& self, const std::string& name, const std::string& type,
-                                     const std::string& trigger, const std::string& script, const std::string& state,
-                                     bool active) {
+                                     const std::string& trigger, const std::string& script,
+                                     const std::string& state, bool active) {
                     ImGui::TableNextRow();
                     ImGui::TableNextColumn();
                     ImGui::PushID(rowId++);
                     if (active) {
                         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 1, 0.6f, 1));
                     }
-                    if (ImGui::Selectable(name.c_str(), isSelected(self), ImGuiSelectableFlags_SpanAllColumns)) {
+                    if (ImGui::Selectable(name.c_str(), isSelected(self),
+                                          ImGuiSelectableFlags_SpanAllColumns)) {
                         select(self);
                         frameSelection(*w, alpha_);
                     }
@@ -107,9 +108,11 @@ void Editor::drawScriptsPanel() {
                     const Json info = c.entities.contains(p.id) ? c.entities.at(p.id) : Json();
                     std::string state;
                     if (info.is_object()) {
-                        if (const auto running = info.find("running"); running != info.end() && running->is_object()) {
+                        if (const auto running = info.find("running");
+                            running != info.end() && running->is_object()) {
                             state = "running " + jsonString(*running, "name", "");
-                        } else if (const auto parallel = info.find("parallel"); parallel != info.end() && parallel->is_object()) {
+                        } else if (const auto parallel = info.find("parallel");
+                                   parallel != info.end() && parallel->is_object()) {
                             state = "parallel running";
                         } else if (jsonBool(info, "auto_done", false)) {
                             state = "auto done";
@@ -117,7 +120,8 @@ void Editor::drawScriptsPanel() {
                     } else {
                         state = "not spawned";
                     }
-                    if (const auto pages = p.props.find("pages"); pages != p.props.end() && pages->is_array()) {
+                    if (const auto pages = p.props.find("pages");
+                        pages != p.props.end() && pages->is_array()) {
                         std::size_t index = 0;
                         for (const auto& page : *pages) {
                             ++index;
@@ -127,7 +131,8 @@ void Editor::drawScriptsPanel() {
                             const auto script = jsonString(page, "script", "(none)");
                             const auto trigger = jsonString(page, "trigger", "action");
                             std::string when;
-                            if (const auto conditions = page.find("when"); conditions != page.end() && conditions->is_object()) {
+                            if (const auto conditions = page.find("when");
+                                conditions != page.end() && conditions->is_object()) {
                                 when = " when " + conditions->dump();
                             }
                             bool active = false;
@@ -135,7 +140,8 @@ void Editor::drawScriptsPanel() {
                                 for (const auto& known : jsonArray(info, "pages")) {
                                     if (jsonNumber(known, "index", 0) == static_cast<double>(index)) {
                                         active = jsonBool(known, "active", false);
-                                        if (const auto error = known.find("error"); error != known.end() && error->is_string()) {
+                                        if (const auto error = known.find("error");
+                                            error != known.end() && error->is_string()) {
                                             state = "page error: " + error->get<std::string>();
                                         }
                                     }
@@ -144,12 +150,17 @@ void Editor::drawScriptsPanel() {
                             row(self, p.id + " #" + std::to_string(index), p.type, trigger + when, script,
                                 active ? (state.empty() ? "active page" : state) : state, active);
                         }
-                    } else if (const auto script = p.props.find("script"); script != p.props.end() && script->is_string()) {
-                        row(self, p.id, p.type, jsonString(p.props, "trigger", "action"), script->get<std::string>(), state, false);
+                    } else if (const auto script = p.props.find("script");
+                               script != p.props.end() && script->is_string()) {
+                        row(self, p.id, p.type, jsonString(p.props, "trigger", "action"),
+                            script->get<std::string>(), state, false);
                     } else if (p.props.contains("map") && p.props.at("map").is_string()) {
                         row(self, p.id, p.type, jsonString(p.props, "trigger", "touch"),
-                            "warp to " + jsonString(p.props, "map", "?") + " / " + jsonString(p.props, "point", "?"), state, false);
-                    } else if (info.is_object() && (jsonBool(info, "interact", false) || jsonBool(info, "on_touch", false))) {
+                            "warp to " + jsonString(p.props, "map", "?") + " / " +
+                                jsonString(p.props, "point", "?"),
+                            state, false);
+                    } else if (info.is_object() &&
+                               (jsonBool(info, "interact", false) || jsonBool(info, "on_touch", false))) {
                         row(self, p.id, p.type, jsonBool(info, "on_touch", false) ? "touch" : "action",
                             "built-in (" + p.type + ")", state, false);
                     }
@@ -166,8 +177,8 @@ void Editor::drawScriptsPanel() {
             ImGui::SameLine();
             ImGui::TextDisabled("%zu task(s); whatever the game's editor.tasks hook reports", c.tasks.size());
             if (ImGui::BeginTable("tasks", 6,
-                                  ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp |
-                                      ImGuiTableFlags_ScrollY)) {
+                                  ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                                      ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_ScrollY)) {
                 ImGui::TableSetupColumn("Task");
                 ImGui::TableSetupColumn("Parent");
                 ImGui::TableSetupColumn("World");
@@ -194,7 +205,8 @@ void Editor::drawScriptsPanel() {
                     ImGui::PushID(static_cast<int>(jsonNumber(t, "index", 0)));
                     if (ImGui::SmallButton(ICON_FA_XMARK)) {
                         if (const auto cancel = devtool("cancel_task"); cancel != sol::lua_nil) {
-                            succeeded(engine_.lua().invoke(cancel, static_cast<int>(jsonNumber(t, "index", 0))));
+                            succeeded(
+                                engine_.lua().invoke(cancel, static_cast<int>(jsonNumber(t, "index", 0))));
                             c.fetched = {};
                         }
                     }
@@ -208,10 +220,11 @@ void Editor::drawScriptsPanel() {
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem(ICON_FA_WAVE_SQUARE " Recent events")) {
-            ImGui::TextDisabled("The last world events the field handled: touches, zone enters and exits, footsteps...");
+            ImGui::TextDisabled(
+                "The last world events the field handled: touches, zone enters and exits, footsteps...");
             if (ImGui::BeginTable("events", 4,
-                                  ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp |
-                                      ImGuiTableFlags_ScrollY)) {
+                                  ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                                      ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_ScrollY)) {
                 ImGui::TableSetupColumn("Time");
                 ImGui::TableSetupColumn("Event");
                 ImGui::TableSetupColumn("Who");

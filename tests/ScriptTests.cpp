@@ -517,7 +517,8 @@ TEST_CASE("Lua values convert to and from JSON") {
     CHECK(back.get<std::string>("name") == "x");
     // A table is an array only when its keys are exactly 1..n: a hole or an
     // extra key makes it an object, and nothing is dropped on the way.
-    host.console("holed = {1, nil, 3, x = 1}; extra = {1, 2, x = 1}; empty = {}; dense = {[1] = 'a', [2] = 'b'}");
+    host.console(
+        "holed = {1, nil, 3, x = 1}; extra = {1, 2, x = 1}; empty = {}; dense = {[1] = 'a', [2] = 'b'}");
     const auto holed = luaToJson(host.lua()["holed"]);
     CHECK(holed.is_object());
     CHECK(holed == Json({{"#1", 1}, {"#3", 3}, {"x", 1}}));
@@ -805,24 +806,16 @@ TEST_CASE("entity bindings never run metamethods of the tables they read") {
 
 TEST_CASE("world bindings never run metamethods of the tables they read") {
     HostileFixture f;
-    for (const char* code : {"w:cell(hostile)",
-                             "w:set_cell({x = 1, z = 1}, hostile)",
-                             "w:path({x = 1, z = 1}, {x = 2, z = 1}, hostile)",
-                             "w:path(hostile, hostile)",
-                             "w:path({x = 1, z = 1}, {x = 2, z = 1}, {jump = hostile})",
-                             "w:path({x = 1, z = 1}, {x = 2, z = 1}, {blocked = hostile})",
-                             "w:draw(hostile)",
-                             "w:draw{camera = hostile, post = hostile, rect = hostile}",
-                             "w:query(hostile)",
-                             "w:query{near = hostile}",
-                             "w:raycast({x = 1, y = 5, z = 1}, {x = 0, y = -1, z = 0}, hostile)",
-                             "w:raycast(hostile, hostile)",
-                             "w:burst({x = 1, z = 1}, hostile)",
-                             "w:set_environment(hostile)",
-                             "w:set_environment{sky = hostile, ambient = hostile}",
-                             "w:height_at(hostile)",
-                             "w:zones_at(hostile)",
-                             "w:area(hostile, 'diamond', 0, 1, hostile)"}) {
+    for (const char* code :
+         {"w:cell(hostile)", "w:set_cell({x = 1, z = 1}, hostile)",
+          "w:path({x = 1, z = 1}, {x = 2, z = 1}, hostile)", "w:path(hostile, hostile)",
+          "w:path({x = 1, z = 1}, {x = 2, z = 1}, {jump = hostile})",
+          "w:path({x = 1, z = 1}, {x = 2, z = 1}, {blocked = hostile})", "w:draw(hostile)",
+          "w:draw{camera = hostile, post = hostile, rect = hostile}", "w:query(hostile)",
+          "w:query{near = hostile}", "w:raycast({x = 1, y = 5, z = 1}, {x = 0, y = -1, z = 0}, hostile)",
+          "w:raycast(hostile, hostile)", "w:burst({x = 1, z = 1}, hostile)", "w:set_environment(hostile)",
+          "w:set_environment{sky = hostile, ambient = hostile}", "w:height_at(hostile)",
+          "w:zones_at(hostile)", "w:area(hostile, 'diamond', 0, 1, hostile)"}) {
         f.untouched(code);
     }
     CHECK(f.lua.console("1 + 1") == "2");
@@ -1020,11 +1013,11 @@ TEST_CASE("every entity component is set by a table, read by no argument and rem
 
 TEST_CASE("image and sprite queries raise errors for missing files") {
     TestGame game("return {}");
-    std::filesystem::copy_file(std::filesystem::path(FENGINE_BUILTIN) / ".." / "samples" / "starfall" / "sprites" /
-                                   "slime.anim.json",
+    std::filesystem::copy_file(std::filesystem::path(FENGINE_BUILTIN) / ".." / "samples" / "starfall" /
+                                   "sprites" / "slime.anim.json",
                                game.root / "slime.anim.json");
-    std::filesystem::copy_file(std::filesystem::path(FENGINE_BUILTIN) / ".." / "samples" / "starfall" / "sprites" /
-                                   "slime.png",
+    std::filesystem::copy_file(std::filesystem::path(FENGINE_BUILTIN) / ".." / "samples" / "starfall" /
+                                   "sprites" / "slime.png",
                                game.root / "slime.png");
     Engine engine(engineOptions(game.root));
     auto& lua = engine.lua();
@@ -1571,7 +1564,8 @@ TEST_CASE("component read-back returns the settings as tables without adding any
     write(game.root / "loop.ogg", "");
     Engine engine(engineOptions(game.root));
     auto& lua = engine.lua();
-    REQUIRE(lua.evaluate("w = fe.world.load('main', 'arena'); e = w:spawn{position = {x = 2.5, z = 5.5}}").ok);
+    REQUIRE(
+        lua.evaluate("w = fe.world.load('main', 'arena'); e = w:spawn{position = {x = 2.5, z = 5.5}}").ok);
     CHECK(lua.evaluate("e:mover{speed = 3, radius = 0.3, jump = {distance = 2, max_up = 1}, footprint = 2, "
                        "fly = true}")
               .ok);
@@ -1585,14 +1579,16 @@ TEST_CASE("component read-back returns the settings as tables without adding any
     CHECK(lua.console("local l = e:light{radius = 6, position = {x = 0, y = 2, z = 0}, color = '#ff0000'} "
                       "return l.radius, l.position.y, l.color[1], l.enabled") == "6.0\t2.0\t1.0\ttrue");
     CHECK(lua.console("e:light{enabled = false}.enabled, e:light().position.y") == "false\t2.0");
-    CHECK(lua.console("local p = e:emitter{rate = 7, velocity = {y = 2}} return p.rate, p.velocity.y, p.paused") ==
+    CHECK(lua.console(
+              "local p = e:emitter{rate = 7, velocity = {y = 2}} return p.rate, p.velocity.y, p.paused") ==
           "7.0\t2.0\tfalse");
     CHECK(lua.console("e:emitter{paused = true}.paused, e:emitter().rate") == "true\t7.0");
     CHECK(lua.console("local m = e:mesh{model = 'props/a.glb', speed = 2, blend = 'additive'} "
                       "return m.model, m.speed, m.blend, m.loop") == "props/a.glb\t2.0\tadditive\ttrue");
     CHECK(lua.console("local p = e:platform{size = {x = 2, z = 3}} return p.size.x, p.size.z") == "2.0\t3.0");
-    CHECK(lua.console("local a = e:audio{sound = 'loop.ogg', radius = 4} return a.sound, a.radius, a.volume") ==
-          "loop.ogg\t4.0\t1.0");
+    CHECK(
+        lua.console("local a = e:audio{sound = 'loop.ogg', radius = 4} return a.sound, a.radius, a.volume") ==
+        "loop.ogg\t4.0\t1.0");
     // Reading a component another entity lacks adds nothing to it.
     CHECK(lua.console("local o = w:spawn{position = {x = 3.5, z = 5.5}} return o:mover(), o:light(), "
                       "o:sprite(), o:collider()") == "nil\tnil\tnil\tnil");
@@ -1627,7 +1623,8 @@ TEST_CASE("move_to takes planning rules and reports cell_enter events") {
 TEST_CASE("integers stored as int raise instead of wrapping") {
     Engine engine(engineOptions());
     auto& lua = engine.lua();
-    REQUIRE(lua.evaluate("w = fe.world.load('main', 'arena'); e = w:spawn{position = {x = 2.5, z = 5.5}}").ok);
+    REQUIRE(
+        lua.evaluate("w = fe.world.load('main', 'arena'); e = w:spawn{position = {x = 2.5, z = 5.5}}").ok);
     raises(lua, "e:mover{jump = {distance = (1 << 32) + 3}}", "jump.distance must be an integer");
     CHECK(lua.console("e:mover()") == "nil");
     raises(lua, "fe.app.set_display{width = (1 << 32) + 3}", "width must be an integer");
@@ -1675,8 +1672,8 @@ TEST_CASE("binding documentation must agree with the parameters the binding read
     docs.owner("fe.x", "", false);
     docs.add({"fe.x", "ok", "fun(a: integer): integer", "", BindingDocs::Kind::Function, 1});
     docs.add({"fe.x", "unknown", "fun(a: integer): integer", "", BindingDocs::Kind::Function, -1});
-    const BindingDocs::Entry wrong{"fe.x", "wrong", "fun(a: integer): integer", "",
-                                   BindingDocs::Kind::Function, 2};
+    const BindingDocs::Entry wrong{
+        "fe.x", "wrong", "fun(a: integer): integer", "", BindingDocs::Kind::Function, 2};
 #if FENGINE_DEV
     CHECK_THROWS_WITH(docs.add(wrong), doctest::Contains("declares 1 parameter(s) but the binding reads 2"));
 #else
@@ -1832,7 +1829,8 @@ TEST_CASE("mover tag classes, launches and gravity are scriptable") {
     TestGame game("return {}");
     Engine engine(engineOptions(game.root));
     auto& lua = engine.lua();
-    REQUIRE(lua.evaluate("w = fe.world.load('main', 'arena'); e = w:spawn{position = {x = 2.5, z = 5.5}}").ok);
+    REQUIRE(
+        lua.evaluate("w = fe.world.load('main', 'arena'); e = w:spawn{position = {x = 2.5, z = 5.5}}").ok);
     CHECK(lua.console("local m = e:mover{blocked_tags = {'water'}} "
                       "return #m.blocked_tags, m.blocked_tags[1], #m.required_tags") == "1\twater\t0");
     CHECK(lua.console("local m = e:mover{fly = true, required_tags = {'water', 'deploy'}, blocked_tags = {}} "
@@ -1860,7 +1858,8 @@ TEST_CASE("mover tag classes, launches and gravity are scriptable") {
     }
     CHECK(lua.console("e:moving()") == "false");
     CHECK(lua.console("('%.2f'):format(e.position.y)") == "0.00");
-    CHECK(lua.console("local names = {} for _, ev in ipairs(w:events()) do "
-                      "if ev.type == 'jump_start' or ev.type == 'landed' then names[#names + 1] = ev.type end end "
-                      "return table.concat(names, ',')") == "jump_start,landed");
+    CHECK(lua.console(
+              "local names = {} for _, ev in ipairs(w:events()) do "
+              "if ev.type == 'jump_start' or ev.type == 'landed' then names[#names + 1] = ev.type end end "
+              "return table.concat(names, ',')") == "jump_start,landed");
 }

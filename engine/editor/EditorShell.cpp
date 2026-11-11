@@ -1,15 +1,15 @@
+#include "engine/core/Paths.h"
 #include "engine/editor/Editor.h"
 #include "engine/editor/EditorWidgets.h"
 #include "engine/editor/MapFiles.h"
-#include "engine/core/Paths.h"
 #include "engine/runtime/Engine.h"
 #include "engine/script/LuaHost.h"
 #include "engine/world/World.h"
 #include <IconsFontAwesome6.h>
+#include <algorithm>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <imgui_stdlib.h>
-#include <algorithm>
 
 namespace fe {
 using namespace editorui;
@@ -20,7 +20,8 @@ constexpr float StatusBarHeight = 26;
 
 void Editor::buildLayout(unsigned int dockspace) {
     ImGui::DockBuilderRemoveNode(dockspace);
-    ImGui::DockBuilderAddNode(dockspace, static_cast<ImGuiDockNodeFlags>(ImGuiDockNodeFlags_DockSpace) | ImGuiDockNodeFlags_PassthruCentralNode);
+    ImGui::DockBuilderAddNode(dockspace, static_cast<ImGuiDockNodeFlags>(ImGuiDockNodeFlags_DockSpace) |
+                                             ImGuiDockNodeFlags_PassthruCentralNode);
     const auto* viewport = ImGui::GetMainViewport();
     ImGui::DockBuilderSetNodeSize(dockspace, viewport->WorkSize);
     ImGuiID centre = dockspace, left, right, bottom;
@@ -54,10 +55,10 @@ void Editor::drawEditMode(const EditorFrame& frame) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    const ImGuiWindowFlags flags = ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
-                                   ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-                                   ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus |
-                                   ImGuiWindowFlags_NoBackground;
+    const ImGuiWindowFlags flags =
+        ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
+        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoBackground;
     ImGui::Begin("##fe_editor_host", nullptr, flags);
     ImGui::PopStyleVar(3);
     drawMenuBar(frame);
@@ -178,7 +179,8 @@ void Editor::respawnPreview(World& w, const std::string& id) {
         w.destroy(existing);
     }
     const auto& placements = w.authored().placements;
-    const auto found = std::find_if(placements.begin(), placements.end(), [&](const Placement& p) { return p.id == id; });
+    const auto found =
+        std::find_if(placements.begin(), placements.end(), [&](const Placement& p) { return p.id == id; });
     if (found == placements.end()) {
         return;
     }
@@ -261,7 +263,8 @@ void Editor::drawMapDialogs(World* w) {
     const auto usedBy = [&](const std::string& id) {
         const auto& users = catalog_.references("maps/" + id + "/map.json");
         if (!users.empty()) {
-            ImGui::TextColored(ImVec4(1, 0.8f, 0.4f, 1), ICON_FA_TRIANGLE_EXCLAMATION " Named by %zu place(s):", users.size());
+            ImGui::TextColored(ImVec4(1, 0.8f, 0.4f, 1),
+                               ICON_FA_TRIANGLE_EXCLAMATION " Named by %zu place(s):", users.size());
             for (std::size_t i = 0; i < users.size() && i < 8; ++i) {
                 ImGui::BulletText("%s  %s", users[i].file.c_str(), users[i].where.c_str());
             }
@@ -281,8 +284,9 @@ void Editor::drawMapDialogs(World* w) {
         if (ImGui::SmallButton("Browse...")) {
             openImportDialog(ImportQueue::Purpose::NewMapGeometry);
         }
-        ImGui::TextDisabled("A flat, walkable map with a start point in the middle. Add a Blender export as its\n"
-                            "geometry now or later (File > Import geometry), then bake walkability from it.");
+        ImGui::TextDisabled(
+            "A flat, walkable map with a start point in the middle. Add a Blender export as its\n"
+            "geometry now or later (File > Import geometry), then bake walkability from it.");
         if (!d.problem.empty()) {
             ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "%s", d.problem.c_str());
         }
@@ -292,7 +296,8 @@ void Editor::drawMapDialogs(World* w) {
         if (create) {
             try {
                 auto map = makeBlankMap(d.id, d.name, d.width, d.depth);
-                writeMap(root, map, d.geometry.empty() ? std::filesystem::path() : std::filesystem::path(d.geometry));
+                writeMap(root, map,
+                         d.geometry.empty() ? std::filesystem::path() : std::filesystem::path(d.geometry));
                 catalog_.scan();
                 const auto id = d.id;
                 close();
@@ -349,7 +354,8 @@ void Editor::drawMapDialogs(World* w) {
         const bool valid = idField() && (d.id == from || !mapExists(root, d.id));
         ImGui::InputText("Name", &d.name);
         usedBy(from);
-        ImGui::TextDisabled("Doors and props that name '%s' are not rewritten; the Assets panel lists them.", from.c_str());
+        ImGui::TextDisabled("Doors and props that name '%s' are not rewritten; the Assets panel lists them.",
+                            from.c_str());
         if (!d.problem.empty()) {
             ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "%s", d.problem.c_str());
         }
@@ -428,7 +434,8 @@ void Editor::drawMapDialogs(World* w) {
         }
         break;
     }
-    case MapDialog::Kind::None: break;
+    case MapDialog::Kind::None:
+        break;
     }
     ImGui::SameLine();
     if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
@@ -443,8 +450,9 @@ void Editor::drawMapDialogs(World* w) {
 
 void Editor::drawPlayBar() {
     const auto* viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f, viewport->WorkPos.y + 6),
-                            ImGuiCond_Always, ImVec2(0.5f, 0));
+    ImGui::SetNextWindowPos(
+        ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f, viewport->WorkPos.y + 6), ImGuiCond_Always,
+        ImVec2(0.5f, 0));
     ImGui::SetNextWindowBgAlpha(0.6f);
     const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                                    ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
@@ -767,7 +775,8 @@ void Editor::handleShortcuts(World* w) {
     } else if (ImGui::IsKeyPressed(ImGuiKey_Home, false)) {
         const auto& g = w->authored().grid;
         editorCamera_.frame({0, 0, 0}, {static_cast<float>(g.width()), 2, static_cast<float>(g.depth())});
-    } else if (ImGui::IsKeyPressed(ImGuiKey_Delete, false) || ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) {
+    } else if (ImGui::IsKeyPressed(ImGuiKey_Delete, false) ||
+               ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) {
         deleteSelection(*w);
     }
 }

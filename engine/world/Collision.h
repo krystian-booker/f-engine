@@ -1,12 +1,12 @@
 #pragma once
 #include "engine/world/Components.h"
-#include <unordered_set>
 #include "engine/world/Events.h"
 #include <functional>
 #include <optional>
 #include <set>
 #include <span>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace fe {
@@ -120,7 +120,8 @@ void updateZones(entt::registry& registry, const std::vector<Zone>& zones, Event
 // a body at any such box; a box flush with the floor is not an obstacle).
 // Routes avoid these cells (StepRules::blocked); a box that covers only a
 // corner of a cell leaves the centre free, and bodies slide along it.
-[[nodiscard]] std::unordered_set<std::int64_t> boxBlockedCells(const Grid& grid, const std::vector<Box>& boxes,
+[[nodiscard]] std::unordered_set<std::int64_t> boxBlockedCells(const Grid& grid,
+                                                               const std::vector<Box>& boxes,
                                                                float radius = 0.3f, float stepUp = 0.0f,
                                                                float bodyHeight = 1.5f);
 } // namespace fe

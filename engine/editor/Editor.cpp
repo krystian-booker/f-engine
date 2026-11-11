@@ -11,9 +11,11 @@
 #include <IconsFontAwesome6.h>
 #include <cstdlib>
 #include <imgui.h>
-#include <ImGuizmo.h>
 #include <imgui_internal.h>
 #include <imgui_stdlib.h>
+
+// ImGuizmo needs imgui.h before it: a block of its own, so include sorting leaves it here.
+#include <ImGuizmo.h>
 
 namespace fe {
 using namespace editorui;
@@ -100,7 +102,8 @@ void Editor::setMode(Mode mode) {
     } else {
         paused_ = false;
         if (const auto w = world()) {
-            std::erase_if(w->overlays(), [](const auto& overlay) { return overlay.first.starts_with("editor:"); });
+            std::erase_if(w->overlays(),
+                          [](const auto& overlay) { return overlay.first.starts_with("editor:"); });
             w->cursor().visible = false;
         }
         gridOverlayKey_.clear();
@@ -224,9 +227,10 @@ void Editor::refreshSchemas() {
         const auto parsed = Json::parse(result.get<std::string>(), nullptr, false);
         schemas_ = parsed.is_object() ? parsed : Json::object();
     }
-    log(LogLevel::Debug, "editor: schemas refreshed: " + std::to_string(jsonObject(schemas_, "entities").size()) +
-                             " placement type(s), " + std::to_string(jsonArray(schemas_, "tables").size()) +
-                             " table(s)" + (status_.empty() ? "" : "; status: " + status_));
+    log(LogLevel::Debug,
+        "editor: schemas refreshed: " + std::to_string(jsonObject(schemas_, "entities").size()) +
+            " placement type(s), " + std::to_string(jsonArray(schemas_, "tables").size()) + " table(s)" +
+            (status_.empty() ? "" : "; status: " + status_));
 }
 
 std::string Editor::defaultType(const char* group) const {
@@ -362,7 +366,8 @@ void Editor::deleteOne(World& w, const Selection& s) {
             w.destroy(s.entity);
         }
         break;
-    case Selection::Kind::None: break;
+    case Selection::Kind::None:
+        break;
     }
 }
 
@@ -379,7 +384,8 @@ void Editor::deleteSelection(World& w) {
         return a.kind != b.kind ? a.kind < b.kind : a.index > b.index;
     });
     all.erase(std::unique(all.begin(), all.end()), all.end());
-    const auto label = all.size() == 1 ? selectionLabel(w, all.front()) : std::to_string(all.size()) + " objects";
+    const auto label =
+        all.size() == 1 ? selectionLabel(w, all.front()) : std::to_string(all.size()) + " objects";
     gesture_ = false;
     for (const auto& s : all) {
         deleteOne(w, s);
@@ -519,7 +525,8 @@ void Editor::duplicateSelection(World& w) {
         break;
     }
     case Selection::Kind::Entity:
-    case Selection::Kind::None: return;
+    case Selection::Kind::None:
+        return;
     }
     gesture_ = false;
     status_ = "Duplicated as " + selectionLabel(w, selection_);
@@ -584,11 +591,11 @@ Json blankFor(const Json& spec) {
     return "";
 }
 AssetKind assetKindNamed(const std::string& kind) {
-    return kind == "sprite"  ? AssetKind::Sprite
-           : kind == "image" ? AssetKind::Image
-           : kind == "model" ? AssetKind::Model
-           : kind == "audio" ? AssetKind::Audio
-           : kind == "lut"   ? AssetKind::Lut
+    return kind == "sprite"   ? AssetKind::Sprite
+           : kind == "image"  ? AssetKind::Image
+           : kind == "model"  ? AssetKind::Model
+           : kind == "audio"  ? AssetKind::Audio
+           : kind == "lut"    ? AssetKind::Lut
            : kind == "shader" ? AssetKind::Shader
                               : AssetKind::Other;
 }
@@ -642,7 +649,8 @@ bool Editor::editValue(const char* label, const Json& spec, Json& value, int dep
             changed = true;
         }
     } else if (type == "enum" && (value.is_string() || value.is_null())) {
-        const std::string current = value.is_string() ? value.get<std::string>() : jsonString(spec, "default", {});
+        const std::string current =
+            value.is_string() ? value.get<std::string>() : jsonString(spec, "default", {});
         if (ImGui::BeginCombo(label, current.c_str())) {
             for (const auto& option : jsonArray(spec, "options")) {
                 if (!option.is_string()) {
@@ -662,10 +670,11 @@ bool Editor::editValue(const char* label, const Json& spec, Json& value, int dep
         }
         const auto of = jsonObject(spec, "of");
         const auto ofType = jsonString(of, "type", "any");
-        const bool rows = ofType == "record" || ofType == "list" || ofType == "map" || ofType == "any" ||
-                          ofType == "table";
+        const bool rows =
+            ofType == "record" || ofType == "list" || ofType == "map" || ofType == "any" || ofType == "table";
         const auto header = std::string(label) + " (" + std::to_string(value.size()) + ")";
-        if (ImGui::TreeNodeEx(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+        if (ImGui::TreeNodeEx(header.c_str(),
+                              ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
             int remove = -1, up = -1;
             for (std::size_t i = 0; i < value.size(); ++i) {
                 ImGui::PushID(static_cast<int>(i));
@@ -710,7 +719,8 @@ bool Editor::editValue(const char* label, const Json& spec, Json& value, int dep
         if (value.is_null()) {
             value = Json::object();
         }
-        if (depth == 0 || ImGui::TreeNodeEx(label, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+        if (depth == 0 ||
+            ImGui::TreeNodeEx(label, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
             const auto fields = spec.find("fields");
             changed |= editProps(fields != spec.end() ? &*fields : nullptr, value);
             if (depth != 0) {
@@ -723,7 +733,8 @@ bool Editor::editValue(const char* label, const Json& spec, Json& value, int dep
         }
         const auto of = jsonObject(spec, "of");
         const auto header = std::string(label) + " (" + std::to_string(value.size()) + ")";
-        if (ImGui::TreeNodeEx(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+        if (ImGui::TreeNodeEx(header.c_str(),
+                              ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
             std::string remove;
             for (auto& [key, child] : value.items()) {
                 ImGui::PushID(key.c_str());
@@ -790,7 +801,8 @@ bool Editor::editProps(const Json* schema, Json& props) {
             // Absent optional fields stay absent until asked for, so the
             // default applies and the file stays small.
             ImGui::TextDisabled("%s", name.c_str());
-            if (const auto doc = spec.find("doc"); doc != spec.end() && doc->is_string() && ImGui::IsItemHovered()) {
+            if (const auto doc = spec.find("doc");
+                doc != spec.end() && doc->is_string() && ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", doc->get<std::string>().c_str());
             }
             ImGui::SameLine();

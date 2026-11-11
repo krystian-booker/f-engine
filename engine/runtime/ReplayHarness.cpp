@@ -28,7 +28,8 @@ void applyPads(Engine& engine, const Json& pads) {
     for (const auto& entry : pads) {
         const int number = entry.at("pad").get<int>();
         if (number < 1 || number > 64) {
-            throw std::runtime_error("Replay pads: gamepad numbers are 1 to 64, got " + std::to_string(number));
+            throw std::runtime_error("Replay pads: gamepad numbers are 1 to 64, got " +
+                                     std::to_string(number));
         }
         if (!entry.value("connected", true)) {
             engine.input().disconnectPad(number);

@@ -98,10 +98,11 @@ void SceneLighting::prepare(World& world, double alpha, float aspect, const glm:
     }
     if (uploadedCells_ != grid_.cellTexels) {
         uploadedCells_ = grid_.cellTexels;
-        bgfx::updateTexture2D(cells_.get(), 0, 0, 0, 0, static_cast<std::uint16_t>(cellTexture.x),
-                              static_cast<std::uint16_t>(cellTexture.y),
-                              bgfx::copy(grid_.cellTexels.data(),
-                                         static_cast<std::uint32_t>(grid_.cellTexels.size() * sizeof(float))));
+        bgfx::updateTexture2D(
+            cells_.get(), 0, 0, 0, 0, static_cast<std::uint16_t>(cellTexture.x),
+            static_cast<std::uint16_t>(cellTexture.y),
+            bgfx::copy(grid_.cellTexels.data(),
+                       static_cast<std::uint32_t>(grid_.cellTexels.size() * sizeof(float))));
     }
 
     ShadowCamera view;

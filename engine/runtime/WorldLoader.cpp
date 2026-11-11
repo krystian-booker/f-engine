@@ -28,8 +28,7 @@ void WorldLoader::advanceAll() {
         }
         try {
             static_cast<void>(parse.get());
-        } catch (const std::exception&) {
-        }
+        } catch (const std::exception&) {}
         return true;
     });
 }

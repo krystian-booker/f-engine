@@ -104,8 +104,9 @@ float lightShadowPriority(const LightSettings& light, glm::vec3 focus) {
     return light.intensity * brightness / (1.0f + beyond);
 }
 
-void chooseShadowLights(const std::vector<LightShadowCandidate>& candidates, std::vector<LightShadowSlot>& slots,
-                        std::vector<std::size_t>& order, int tileBudget) {
+void chooseShadowLights(const std::vector<LightShadowCandidate>& candidates,
+                        std::vector<LightShadowSlot>& slots, std::vector<std::size_t>& order,
+                        int tileBudget) {
     order.resize(candidates.size());
     std::iota(order.begin(), order.end(), 0);
     // Ties keep candidate order (the index breaks them), without stable_sort's buffer.

@@ -78,11 +78,14 @@ void Editor::drawHierarchy() {
             // Everything below changes the lists these rows are being drawn
             // from (or replaces the world): it runs once the panel is drawn.
             if (self.kind != Selection::Kind::Entity && ImGui::MenuItem(ICON_FA_CLONE " Duplicate")) {
-                deferred = [this, w] { duplicateSelection(*w); };
+                deferred = [this, w] {
+                    duplicateSelection(*w);
+                };
             }
             if (self.kind == Selection::Kind::Point) {
                 const auto playFrom = devtool("play_from");
-                if (ImGui::MenuItem(ICON_FA_PLAY " Play from here", nullptr, false, playFrom != sol::lua_nil)) {
+                if (ImGui::MenuItem(ICON_FA_PLAY " Play from here", nullptr, false,
+                                    playFrom != sol::lua_nil)) {
                     deferred = [this, playFrom, mapId = map.id, point = self.id] {
                         if (succeeded(engine_.lua().invoke(playFrom, mapId, point))) {
                             setMode(Mode::Play);
@@ -91,7 +94,9 @@ void Editor::drawHierarchy() {
                 }
             }
             if (ImGui::MenuItem(ICON_FA_TRASH " Delete")) {
-                deferred = [this, w] { deleteSelection(*w); };
+                deferred = [this, w] {
+                    deleteSelection(*w);
+                };
             }
             ImGui::EndPopup();
         }
@@ -106,7 +111,8 @@ void Editor::drawHierarchy() {
             ImGui::SameLine();
         }
         const auto title = std::string(label) + " (" + std::to_string(count) + ")";
-        const bool openNode = ImGui::TreeNodeEx(title.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth);
+        const bool openNode = ImGui::TreeNodeEx(title.c_str(), ImGuiTreeNodeFlags_DefaultOpen |
+                                                                   ImGuiTreeNodeFlags_SpanAvailWidth);
         if (openNode) {
             body();
             ImGui::TreePop();
@@ -133,7 +139,8 @@ void Editor::drawHierarchy() {
         }
         for (const auto& [type, list] : byType) {
             const auto title = type + " (" + std::to_string(list.size()) + ")";
-            if (ImGui::TreeNodeEx(title.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+            if (ImGui::TreeNodeEx(title.c_str(),
+                                  ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
                 for (const auto* p : list) {
                     const bool spawned = placementEntity(*w, p->id) != entt::null;
                     row(Selection::placement(p->id), p->id + (spawned ? "" : "  (not spawned)"),
@@ -181,7 +188,8 @@ void Editor::drawHierarchy() {
             addCollider(*w);
         }
         if (!map.bake.colliders.empty()) {
-            ImGui::TextDisabled("%zu baked box(es) from the geometry and props (Map tab)", map.bake.colliders.size());
+            ImGui::TextDisabled("%zu baked box(es) from the geometry and props (Map tab)",
+                                map.bake.colliders.size());
         }
     });
     // Live entities that no placement made: the player, followers, spawned things.

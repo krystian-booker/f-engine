@@ -346,7 +346,8 @@ TEST_CASE("resolved markup is bounded per parse") {
 
 TEST_CASE("{size} and {b} nest: closing tags restore the enclosing style") {
     ColorPalette palette;
-    const auto glyphs = parseMarkup("{size:2}a{size:3}b{/size}c{/size}d{b}e{b}f{/b}g{/b}h{/b}i", 0xffffffff, palette);
+    const auto glyphs =
+        parseMarkup("{size:2}a{size:3}b{/size}c{/size}d{b}e{b}f{/b}g{/b}h{/b}i", 0xffffffff, palette);
     REQUIRE(glyphs.size() == 9);
     CHECK(glyphs[0].scale == doctest::Approx(2));
     CHECK(glyphs[1].scale == doctest::Approx(3));
@@ -404,8 +405,8 @@ TEST_CASE("numbers format with a language's separators") {
     CHECK(formatNumber(999, 0, "sv") == "999");
     CHECK(formatNumber(1000, 0, "tr") == "1.000");
     CHECK(formatNumber(0.125, 2, "nl") == "0,13");
-    CHECK(formatNumber(-0.001, 2, "en") == "0.00"); // no negative zero
-    CHECK(formatNumber(42, 3, "xx-YY") == "42.000");  // unknown languages format as English
+    CHECK(formatNumber(-0.001, 2, "en") == "0.00");  // no negative zero
+    CHECK(formatNumber(42, 3, "xx-YY") == "42.000"); // unknown languages format as English
     CHECK_THROWS((void)formatNumber(1, 21, "en"));
     CHECK_THROWS((void)formatNumber(std::numeric_limits<double>::infinity(), 0, "en"));
     CHECK(numberSeparators("ES").decimal == ",");

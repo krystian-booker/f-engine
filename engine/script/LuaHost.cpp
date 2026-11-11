@@ -35,7 +35,8 @@ namespace {
 const char hostKey = 0;
 
 void raiseWatchdog(lua_State* state, const LuaHost& host) {
-    luaL_error(state, "script watchdog: a frame ran longer than %f seconds (infinite loop?)", host.watchdog());
+    luaL_error(state, "script watchdog: a frame ran longer than %f seconds (infinite loop?)",
+               host.watchdog());
 }
 
 // Pattern matching, plain string.find and table.move run in C without
@@ -189,7 +190,6 @@ bool isSolMetatable(lua_State* state, int key, int value) {
     return lua_type(state, key) == LUA_TSTRING && lua_type(state, value) == LUA_TTABLE &&
            std::strncmp(lua_tostring(state, key), "sol.", 4) == 0;
 }
-
 
 } // namespace
 
@@ -453,7 +453,6 @@ sol::object LuaHost::require(const std::string& name) {
     moduleFiles_[name] = *file;
     return value;
 }
-
 
 void LuaHost::report(const std::string& message) {
     // An update that fails every tick would write (and flush) the same

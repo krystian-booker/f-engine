@@ -136,7 +136,8 @@ StepRules stepRules(LuaHost& host, World& world, const sol::object& value) {
     const auto& t = *options;
     rules.diagonal = lua::get(t, "diagonal", rules.diagonal);
     rules.ladders = lua::get(t, "ladders", rules.ladders);
-    rules.footprint = lua::within(lua::get(t, "footprint", rules.footprint), 1, MaxFootprint, "rules.footprint");
+    rules.footprint =
+        lua::within(lua::get(t, "footprint", rules.footprint), 1, MaxFootprint, "rules.footprint");
     rules.fly = lua::get(t, "fly", rules.fly);
     const float step = lua::get(t, "max_step", rules.maxUp);
     rules.maxUp = lua::get(t, "max_up", step);
@@ -276,7 +277,8 @@ void bindGrid(TypeBinder<WorldRef>& type) {
         .method(
             "wraps", [](const WorldRef& w) { return w.get().grid().wraps(); }, "fun(): boolean",
             "Whether the map is toroidal (`grid.wrap`): its east edge joins its west and its south its "
-            "north. Positions stay in [0, width) x [0, depth); use `wrap_delta` for differences between them.")
+            "north. Positions stay in [0, width) x [0, depth); use `wrap_delta` for differences between "
+            "them.")
         .method(
             "wrap_delta",
             [](sol::this_state s, const WorldRef& w, sol::object a, sol::object b) {
@@ -480,22 +482,22 @@ void bindGrid(TypeBinder<WorldRef>& type) {
 
 void bindParticles(TypeBinder<WorldRef>& type) {
     type.method(
-            "burst",
-            [](const WorldRef& w, sol::object position, sol::table settings, sol::object count) {
-                const auto parsed = EmitterSettings::fromJson(lua::emitterJson(settings));
-                w.get().burst(
-                    lua::position(position), parsed,
-                    lua::within(lua::opt<int>(count, "count").value_or(parsed.burst > 0 ? parsed.burst : 12),
-                                0, 4096, "count"));
-            },
-            "fun(position: Vec3, settings: table, count?: integer)", "One-shot particle burst (up to 4096).");
+        "burst",
+        [](const WorldRef& w, sol::object position, sol::table settings, sol::object count) {
+            const auto parsed = EmitterSettings::fromJson(lua::emitterJson(settings));
+            w.get().burst(
+                lua::position(position), parsed,
+                lua::within(lua::opt<int>(count, "count").value_or(parsed.burst > 0 ? parsed.burst : 12), 0,
+                            4096, "count"));
+        },
+        "fun(position: Vec3, settings: table, count?: integer)", "One-shot particle burst (up to 4096).");
 }
 
 // A placement as scripts read it (world:placements(), world:placement(id)).
 sol::table placementTable(sol::state_view lua, const Placement& p) {
-    return lua.create_table_with("id", p.id, "type", p.type, "position", lua::table(lua, p.position), "facing",
-                                 lua::tableXZ(lua, p.facing), "layer", p.layer, "yaw", p.yaw, "scale",
-                                 lua::table(lua, p.scale), "props", jsonToLua(lua, p.props));
+    return lua.create_table_with("id", p.id, "type", p.type, "position", lua::table(lua, p.position),
+                                 "facing", lua::tableXZ(lua, p.facing), "layer", p.layer, "yaw", p.yaw,
+                                 "scale", lua::table(lua, p.scale), "props", jsonToLua(lua, p.props));
 }
 
 void bindMapData(TypeBinder<WorldRef>& type) {
@@ -601,8 +603,8 @@ void bindMapData(TypeBinder<WorldRef>& type) {
                     "arrive_distance", t.arriveDistance, "snap_distance", t.snapDistance, "stuck_share",
                     t.stuckShare, "stuck_seconds", t.stuckSeconds, "jump_arc_base", t.jumpArcBase,
                     "jump_arc_per_unit", t.jumpArcPerUnit, "jump_arc_per_rise", t.jumpArcPerRise,
-                    "jump_minimum_seconds", t.jumpMinimumSeconds, "landing_search", t.landingSearch, "gravity",
-                    t.gravity);
+                    "jump_minimum_seconds", t.jumpMinimumSeconds, "landing_search", t.landingSearch,
+                    "gravity", t.gravity);
             },
             "fun(): {arrive_distance: number, snap_distance: number, stuck_share: number, stuck_seconds: "
             "number, jump_arc_base: number, jump_arc_per_unit: number, jump_arc_per_rise: number, "
@@ -614,14 +616,14 @@ void bindMapData(TypeBinder<WorldRef>& type) {
                 auto tuning = w.get().movementTuning();
                 tuning.arriveDistance = lua::within(lua::get(t, "arrive_distance", tuning.arriveDistance),
                                                     0.001f, 1.0f, "arrive_distance");
-                tuning.snapDistance =
-                    lua::within(lua::get(t, "snap_distance", tuning.snapDistance), 0.0f, 1.0f, "snap_distance");
+                tuning.snapDistance = lua::within(lua::get(t, "snap_distance", tuning.snapDistance), 0.0f,
+                                                  1.0f, "snap_distance");
                 tuning.stuckShare =
                     lua::within(lua::get(t, "stuck_share", tuning.stuckShare), 0.0f, 1.0f, "stuck_share");
-                tuning.stuckSeconds =
-                    lua::within(lua::get(t, "stuck_seconds", tuning.stuckSeconds), 0.05, 60.0, "stuck_seconds");
-                tuning.jumpArcBase =
-                    lua::within(lua::get(t, "jump_arc_base", tuning.jumpArcBase), 0.0f, 16.0f, "jump_arc_base");
+                tuning.stuckSeconds = lua::within(lua::get(t, "stuck_seconds", tuning.stuckSeconds), 0.05,
+                                                  60.0, "stuck_seconds");
+                tuning.jumpArcBase = lua::within(lua::get(t, "jump_arc_base", tuning.jumpArcBase), 0.0f,
+                                                 16.0f, "jump_arc_base");
                 tuning.jumpArcPerUnit = lua::within(lua::get(t, "jump_arc_per_unit", tuning.jumpArcPerUnit),
                                                     0.0f, 16.0f, "jump_arc_per_unit");
                 tuning.jumpArcPerRise = lua::within(lua::get(t, "jump_arc_per_rise", tuning.jumpArcPerRise),
@@ -631,7 +633,8 @@ void bindMapData(TypeBinder<WorldRef>& type) {
                                 "jump_minimum_seconds");
                 tuning.landingSearch = lua::within(lua::get(t, "landing_search", tuning.landingSearch), 0.0f,
                                                    16.0f, "landing_search");
-                tuning.gravity = lua::within(lua::get(t, "gravity", tuning.gravity), 0.1f, 1000.0f, "gravity");
+                tuning.gravity =
+                    lua::within(lua::get(t, "gravity", tuning.gravity), 0.1f, 1000.0f, "gravity");
                 w.get().movementTuning() = tuning;
             },
             "fun(changes: {arrive_distance?: number, snap_distance?: number, stuck_share?: number, "
@@ -949,7 +952,8 @@ void bindCamera(Engine& engine) {
                 auto& camera = c.get();
                 const float far = lua::within(lua::as<float>(v, "far"), 1.0f, 100000.0f, "far");
                 if (far <= camera.nearPlane) {
-                    throw std::runtime_error("far must be above near (" + lua::format(camera.nearPlane) + ")");
+                    throw std::runtime_error("far must be above near (" + lua::format(camera.nearPlane) +
+                                             ")");
                 }
                 camera.farPlane = far;
             },
@@ -967,8 +971,7 @@ void bindCamera(Engine& engine) {
             "view covers `ortho_height` world units vertically; distance then only sets the near and far "
             "planes. Shadows, picking, `project` and `ray` follow it.")
         .property(
-            "ortho_height",
-            [](const CameraRef& c) { return c.get().effectiveOrthoHeight(); },
+            "ortho_height", [](const CameraRef& c) { return c.get().effectiveOrthoHeight(); },
             [](const CameraRef& c, sol::object v) {
                 const auto height = lua::as<float>(v, "ortho_height");
                 c.get().orthoHeight =

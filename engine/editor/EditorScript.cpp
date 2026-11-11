@@ -40,12 +40,15 @@ using namespace editorui;
 // Results go to the log as "editor script: ...".
 namespace {
 std::map<std::string, ImGuiKey> keyNames() {
-    std::map<std::string, ImGuiKey> keys = {
-        {"F1", ImGuiKey_F1},         {"F2", ImGuiKey_F2},     {"F3", ImGuiKey_F3},       {"F4", ImGuiKey_F4},
-        {"F5", ImGuiKey_F5},         {"F6", ImGuiKey_F6},     {"Delete", ImGuiKey_Delete}, {"Backspace", ImGuiKey_Backspace},
-        {"Escape", ImGuiKey_Escape}, {"Enter", ImGuiKey_Enter}, {"Home", ImGuiKey_Home}, {"Tab", ImGuiKey_Tab},
-        {"Space", ImGuiKey_Space},   {"Up", ImGuiKey_UpArrow}, {"Down", ImGuiKey_DownArrow},
-        {"Left", ImGuiKey_LeftArrow}, {"Right", ImGuiKey_RightArrow}};
+    std::map<std::string, ImGuiKey> keys = {{"F1", ImGuiKey_F1},           {"F2", ImGuiKey_F2},
+                                            {"F3", ImGuiKey_F3},           {"F4", ImGuiKey_F4},
+                                            {"F5", ImGuiKey_F5},           {"F6", ImGuiKey_F6},
+                                            {"Delete", ImGuiKey_Delete},   {"Backspace", ImGuiKey_Backspace},
+                                            {"Escape", ImGuiKey_Escape},   {"Enter", ImGuiKey_Enter},
+                                            {"Home", ImGuiKey_Home},       {"Tab", ImGuiKey_Tab},
+                                            {"Space", ImGuiKey_Space},     {"Up", ImGuiKey_UpArrow},
+                                            {"Down", ImGuiKey_DownArrow},  {"Left", ImGuiKey_LeftArrow},
+                                            {"Right", ImGuiKey_RightArrow}};
     for (char c = 'A'; c <= 'Z'; ++c) {
         keys[std::string(1, c)] = static_cast<ImGuiKey>(ImGuiKey_A + (c - 'A'));
     }
@@ -98,8 +101,8 @@ void Editor::runScript() {
     const auto frame = scriptFrame_++;
     const auto check = [&](bool ok, const std::string& what) {
         (ok ? scriptPassed_ : scriptFailed_)++;
-        log(ok ? LogLevel::Info : LogLevel::Error,
-            std::string("editor script: ") + (ok ? "PASS " : "FAIL ") + what + " (frame " + std::to_string(frame) + ")");
+        log(ok ? LogLevel::Info : LogLevel::Error, std::string("editor script: ") + (ok ? "PASS " : "FAIL ") +
+                                                       what + " (frame " + std::to_string(frame) + ")");
     };
     static const auto keys = keyNames();
     while (scriptStep_ < script_.size()) {
@@ -108,15 +111,18 @@ void Editor::runScript() {
             break;
         }
         ++scriptStep_;
-        if (const auto mouse = step.find("mouse"); mouse != step.end() && mouse->is_array() && mouse->size() == 2) {
+        if (const auto mouse = step.find("mouse");
+            mouse != step.end() && mouse->is_array() && mouse->size() == 2) {
             scriptMouse_ = glm::vec2((*mouse)[0].get<float>(), (*mouse)[1].get<float>());
             io.AddMousePosEvent(scriptMouse_->x, scriptMouse_->y);
             io.WantSetMousePos = true;
             io.MousePos = ImVec2(scriptMouse_->x, scriptMouse_->y);
         }
         // Modifiers held around a mouse action ("ctrl": true on a click).
-        const bool holdCtrl = (step.contains("click") || step.contains("down")) && jsonBool(step, "ctrl", false);
-        const bool holdSuper = (step.contains("click") || step.contains("down")) && jsonBool(step, "super", false);
+        const bool holdCtrl =
+            (step.contains("click") || step.contains("down")) && jsonBool(step, "ctrl", false);
+        const bool holdSuper =
+            (step.contains("click") || step.contains("down")) && jsonBool(step, "super", false);
         if (holdCtrl) {
             io.AddKeyEvent(ImGuiMod_Ctrl, true);
         }
@@ -175,26 +181,32 @@ void Editor::runScript() {
         // The real OS file dialog: opened here, dismissed from outside the
         // process (a keystroke), and its callback's outcome checked.
         if (const auto purpose = jsonString(step, "open_dialog", {}); !purpose.empty()) {
-            openImportDialog(purpose == "geometry" ? ImportQueue::Purpose::Geometry : ImportQueue::Purpose::Assets);
+            openImportDialog(purpose == "geometry" ? ImportQueue::Purpose::Geometry
+                                                   : ImportQueue::Purpose::Assets);
         }
         if (jsonBool(step, "cancel_dialog", false)) {
             check(cancelNativeFileDialog(window_), "cancelled the OS file dialog");
         }
-        if (const auto count = step.find("expect_dialog_returned"); count != step.end() && count->is_number()) {
+        if (const auto count = step.find("expect_dialog_returned");
+            count != step.end() && count->is_number()) {
             std::lock_guard lock(importQueue_->mutex);
             check(importQueue_->returned == count->get<int>(),
                   "file dialog returned " + std::to_string(importQueue_->returned) + " time(s) (" +
-                      std::to_string(importQueue_->cancelled) + " cancelled, " + std::to_string(importQueue_->failed) +
-                      " failed), expected " + std::to_string(count->get<int>()));
+                      std::to_string(importQueue_->cancelled) + " cancelled, " +
+                      std::to_string(importQueue_->failed) + " failed), expected " +
+                      std::to_string(count->get<int>()));
         }
         if (const auto count = step.find("expect_missing_count"); count != step.end() && count->is_number()) {
             catalog_.scan();
             const auto have = static_cast<int>(catalog_.missing().size());
-            check(have == count->get<int>(), std::to_string(have) + " missing reference(s), expected " + std::to_string(count->get<int>()));
+            check(have == count->get<int>(), std::to_string(have) + " missing reference(s), expected " +
+                                                 std::to_string(count->get<int>()));
         }
-        if (const auto count = step.find("expect_selection_count"); count != step.end() && count->is_number()) {
+        if (const auto count = step.find("expect_selection_count");
+            count != step.end() && count->is_number()) {
             const auto have = static_cast<int>(extra_.size()) + (selection_.empty() ? 0 : 1);
-            check(have == count->get<int>(), std::to_string(have) + " selected, expected " + std::to_string(count->get<int>()));
+            check(have == count->get<int>(),
+                  std::to_string(have) + " selected, expected " + std::to_string(count->get<int>()));
         }
         if (const auto name = jsonString(step, "key", {}); !name.empty()) {
             const auto found = keys.find(name);
@@ -246,7 +258,8 @@ void Editor::runScript() {
             check(label.find(text) != std::string::npos, "selection '" + label + "' contains '" + text + "'");
         }
         if (const auto text = jsonString(step, "expect_status", {}); !text.empty()) {
-            check(status_.find(text) != std::string::npos, "status '" + status_ + "' contains '" + text + "'");
+            check(status_.find(text) != std::string::npos,
+                  "status '" + status_ + "' contains '" + text + "'");
         }
         if (const auto text = jsonString(step, "expect_mode", {}); !text.empty()) {
             const auto mode = !open_ ? "closed" : mode_ == Mode::Play ? "play" : "edit";
@@ -257,8 +270,8 @@ void Editor::runScript() {
         }
         if (jsonBool(step, "quit", false) || scriptStep_ == script_.size()) {
             log(scriptFailed_ ? LogLevel::Error : LogLevel::Info,
-                "editor script: " + std::to_string(scriptPassed_) + " passed, " + std::to_string(scriptFailed_) +
-                    " failed");
+                "editor script: " + std::to_string(scriptPassed_) + " passed, " +
+                    std::to_string(scriptFailed_) + " failed");
             if (jsonBool(step, "quit", false)) {
                 engine_.requests().quit = true;
             }
@@ -271,6 +284,7 @@ void Editor::runScript() {
             key = static_cast<int>(ImGuiKey_None);
         }
     }
-    std::erase_if(scriptKeyReleases_, [](const auto& entry) { return entry.first == static_cast<int>(ImGuiKey_None); });
+    std::erase_if(scriptKeyReleases_,
+                  [](const auto& entry) { return entry.first == static_cast<int>(ImGuiKey_None); });
 }
 } // namespace fe

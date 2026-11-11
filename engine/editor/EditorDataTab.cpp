@@ -4,8 +4,8 @@
 #include "engine/runtime/Engine.h"
 #include "engine/script/LuaHost.h"
 #include "engine/world/World.h"
-#include <imgui.h>
 #include <algorithm>
+#include <imgui.h>
 #include <imgui_stdlib.h>
 
 namespace fe {
@@ -34,7 +34,8 @@ void Editor::saveTable(const Json& table) {
         // No game check: the one rule the editor itself relies on.
         for (std::size_t i = 0; i < dataDocument_.size(); ++i) {
             if (jsonString(dataDocument_[i], "id", {}).empty()) {
-                dataProblems_.push_back("record " + std::to_string(i + 1) + ": every record needs a string id");
+                dataProblems_.push_back("record " + std::to_string(i + 1) +
+                                        ": every record needs a string id");
             }
         }
     }

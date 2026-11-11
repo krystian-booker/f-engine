@@ -848,7 +848,6 @@ TEST_CASE("the engine skips paused worlds and scales their time") {
               .find("non-negative") != std::string::npos);
 }
 
-
 namespace {
 std::vector<WorldEvent::Kind> kinds(const std::vector<WorldEvent>& events) {
     std::vector<WorldEvent::Kind> result;
@@ -1265,7 +1264,6 @@ TEST_CASE("sprites and meshes name game shaders by validated names") {
     CHECK(world.registry().get<MeshInstance>(entity).shader == "glint");
 }
 
-
 namespace {
 std::vector<GridPos> cellsEntered(const std::vector<WorldEvent>& events, entt::entity who) {
     std::vector<GridPos> cells;
@@ -1414,7 +1412,8 @@ TEST_CASE("platform carry stops at static boxes and only moves this tick's rider
     s.world.moveTo(raft, centre(6, 1, 0.2f), false);
     s.step(400);
     CHECK(registry.get<Transform>(raft).position.x == doctest::Approx(6.5f).epsilon(0.01));
-    CHECK(registry.get<Transform>(rider).position.x == doctest::Approx(3.8f).epsilon(0.01)); // held at the box
+    CHECK(registry.get<Transform>(rider).position.x ==
+          doctest::Approx(3.8f).epsilon(0.01)); // held at the box
     // A rider that steps ashore in the tick the raft leaves is not dragged along.
     Scratch q("raft-ashore", grid);
     auto& r2 = q.world.registry();
@@ -1802,7 +1801,8 @@ TEST_CASE("launches fly ballistic arcs under gravity, fall, and land with events
     s.step(12);
     REQUIRE(t.position.y > 0.3f);
     s.world.launch(e, {0, 2, 0});
-    CHECK(kinds(s.world.takeEvents()) == std::vector{WorldEvent::Kind::JumpStart, WorldEvent::Kind::JumpStart});
+    CHECK(kinds(s.world.takeEvents()) ==
+          std::vector{WorldEvent::Kind::JumpStart, WorldEvent::Kind::JumpStart});
     const float x = t.position.x;
     s.step(60);
     CHECK(t.position.x == doctest::Approx(x));
@@ -1820,8 +1820,8 @@ TEST_CASE("launches fly ballistic arcs under gravity, fall, and land with events
 
 TEST_CASE("launched bodies stop at boxes, cliff faces and the grid's edge and drop straight down") {
     Json grid = flatGrid(12, 4);
-    grid["layers"][0]["height"] = {"0 0 0 0 0 0 0 0 2 2 2 2", "0 0 0 0 0 0 0 0 2 2 2 2", "0 0 0 0 0 0 0 0 2 2 2 2",
-                                   "0 0 0 0 0 0 0 0 2 2 2 2"};
+    grid["layers"][0]["height"] = {"0 0 0 0 0 0 0 0 2 2 2 2", "0 0 0 0 0 0 0 0 2 2 2 2",
+                                   "0 0 0 0 0 0 0 0 2 2 2 2", "0 0 0 0 0 0 0 0 2 2 2 2"};
     Scratch s("launch-walls", grid);
     s.world.map().colliders.push_back({{4, 0, 0}, {5, 3, 1}});
     s.world.rebuildStatic();

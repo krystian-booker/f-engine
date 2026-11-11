@@ -8,12 +8,12 @@
 
 namespace fe {
 namespace {
-constexpr float SubStep = 0.05f;             // longest collision-checked move
-constexpr float MinimumJumpSeconds = 0.05f;  // shortest arc jump() accepts
-constexpr float LandingSearchStep = 0.25f;   // ring spacing when a landing is blocked
-constexpr int LandingSearchAngles = 16;      // spots per ring
-constexpr float PlatformBoardHeight = 0.2f;  // how far above or below a platform's top a rider's feet may be
-constexpr int MaxAttachmentDepth = 64;       // longest parent chain followed before giving up
+constexpr float SubStep = 0.05f;            // longest collision-checked move
+constexpr float MinimumJumpSeconds = 0.05f; // shortest arc jump() accepts
+constexpr float LandingSearchStep = 0.25f;  // ring spacing when a landing is blocked
+constexpr int LandingSearchAngles = 16;     // spots per ring
+constexpr float PlatformBoardHeight = 0.2f; // how far above or below a platform's top a rider's feet may be
+constexpr int MaxAttachmentDepth = 64;      // longest parent chain followed before giving up
 
 glm::vec2 cellCentre(int x, int z) {
     return {static_cast<float>(x) + 0.5f, static_cast<float>(z) + 0.5f};
@@ -338,7 +338,8 @@ void MovementSystem::launch(entt::entity entity, glm::vec3 velocity) {
     events_.push({WorldEvent::Kind::JumpStart, entity, entt::null, {}});
 }
 
-MovementSystem::Surface MovementSystem::groundUnder(glm::vec2 position, const Body& body, float height) const {
+MovementSystem::Surface MovementSystem::groundUnder(glm::vec2 position, const Body& body,
+                                                    float height) const {
     std::optional<Surface> best;
     for (int l = 0; l < grid_.layerCount(); ++l) {
         const float surface = grid_.heightAt(position, l);
@@ -397,10 +398,9 @@ void MovementSystem::advanceLaunch(entt::entity entity, float dt) {
             const glm::vec3 probe(to.x, y1, to.y);
             const bool blocked =
                 !grid_.contains(floorCell(to.x), floorCell(to.y)) ||
-                (body.collide &&
-                 (grid_.heightAt(to, 0) > std::max(y0, y1) + mover.maxStep + 1e-4f ||
-                  collision_.blockedByBox(probe, body.radius, body.height) ||
-                  collision_.blocksMove(entity, start, probe, body.radius, body.height)));
+                (body.collide && (grid_.heightAt(to, 0) > std::max(y0, y1) + mover.maxStep + 1e-4f ||
+                                  collision_.blockedByBox(probe, body.radius, body.height) ||
+                                  collision_.blocksMove(entity, start, probe, body.radius, body.height)));
             if (blocked) {
                 flight.velocity.x = flight.velocity.z = 0;
                 horizontal = glm::vec2(0);
@@ -458,7 +458,8 @@ void MovementSystem::finishJump(entt::entity entity, bool interrupted) {
             const float rest = restY(mover, here, l);
             const float gap = std::abs(rest - transform.position.y);
             if ((!ground || gap < nearest) && supported(here, body, l) &&
-                (!body.collide || !collision_.blockedByBox({here.x, rest, here.y}, body.radius, body.height))) {
+                (!body.collide ||
+                 !collision_.blockedByBox({here.x, rest, here.y}, body.radius, body.height))) {
                 ground = l;
                 nearest = gap;
             }
@@ -543,7 +544,8 @@ bool MovementSystem::canOccupy(entt::entity entity, glm::vec3 position, int laye
 
 bool MovementSystem::supported(glm::vec2 p, const Body& body, int layer) const {
     const auto stands = [&](int on) {
-        return grid_.canStand(p, body.radius, on, body.footprint, body.fly, body.blockedTags, body.requiredTags);
+        return grid_.canStand(p, body.radius, on, body.footprint, body.fly, body.blockedTags,
+                              body.requiredTags);
     };
     if (stands(layer)) {
         return true;
@@ -661,8 +663,8 @@ void MovementSystem::advanceClimb(entt::entity entity, float dt) {
         const float distance = glm::length(offset);
         const float reach = std::max(speed, 0.01f) * budget;
         const glm::vec2 level(offset.x, offset.z);
-        transform.facing = glm::length(level) > 1e-4f && std::abs(offset.y) < 1e-4f ? glm::normalize(level)
-                                                                                    : climb.facing;
+        transform.facing =
+            glm::length(level) > 1e-4f && std::abs(offset.y) < 1e-4f ? glm::normalize(level) : climb.facing;
         if (distance > reach) {
             transform.position += offset / distance * reach;
             break;
@@ -803,7 +805,7 @@ void MovementSystem::update(double dt) {
                     const auto centre = cellCentre(to.x, to.z);
                     const glm::vec3 end{centre.x, grid_.heightAt(centre, to.layer), centre.y};
                     auto climb = mover.fly || std::as_const(grid_).at(to).walkable ? climbTo(entity, to, end)
-                                                                                    : std::nullopt;
+                                                                                   : std::nullopt;
                     if (climb) {
                         // A route being followed waits on the ladder and goes on from its end.
                         std::optional<Mover::Route> route;

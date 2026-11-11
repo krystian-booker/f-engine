@@ -26,8 +26,7 @@ struct WorldEvent {
     WorldEvent() = default;
     WorldEvent(Kind kind, entt::entity a = entt::null, entt::entity b = entt::null, std::string name = {},
                GridPos cell = {})
-        : kind(kind), a(a), b(b), name(std::move(name)), cell(cell) {
-    }
+        : kind(kind), a(a), b(b), name(std::move(name)), cell(cell) {}
     Kind kind{};
     entt::entity a = entt::null, b = entt::null;
     std::string name; // animation event name, clip, or zone id

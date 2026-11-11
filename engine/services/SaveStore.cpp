@@ -207,8 +207,7 @@ void SaveStore::write(const std::string& slot, const Json& data, const Json& met
     backend_->write(key(slot), document, true);
     // The sidecar follows the slot; list() trusts it only while the sizes agree.
     try {
-        backend_->write(metaKey(slot), Json{{"meta", meta}, {"size", document.size()}}.dump(2) + "\n",
-                        false);
+        backend_->write(metaKey(slot), Json{{"meta", meta}, {"size", document.size()}}.dump(2) + "\n", false);
     } catch (const std::exception& error) {
         log(LogLevel::Warning, "Save '" + slot + "' was written but its summary was not: " + error.what());
     }

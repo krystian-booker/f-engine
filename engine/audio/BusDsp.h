@@ -159,7 +159,8 @@ private:
     static constexpr float LimiterCeiling = 0.95f, LimiterAttack = 0.001f, LimiterRelease = 0.2f;
     static constexpr float CompressorAttack = 0.005f, CompressorRelease = 0.25f;
     std::atomic<bool> compressor_{false};
-    std::atomic<float> compressorThreshold_{-24}, compressorRatio_{3}, compressorMakeup_{6}, compressorGain_{1};
+    std::atomic<float> compressorThreshold_{-24}, compressorRatio_{3}, compressorMakeup_{6},
+        compressorGain_{1};
     float envelope_ = 0;
     static constexpr std::uint32_t Chunk = 32;
     static constexpr double MinGlide = 0.005;

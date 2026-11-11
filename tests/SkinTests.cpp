@@ -5,9 +5,9 @@
 #include <doctest/doctest.h>
 #include <filesystem>
 #include <fstream>
+#include <glm/gtc/matrix_transform.hpp>
 #include <iterator>
 #include <string>
-#include <glm/gtc/matrix_transform.hpp>
 
 using namespace fe;
 
@@ -131,7 +131,8 @@ TEST_CASE("a mesh crossfades into a new animation and reports its end") {
     for (int i = 0; i < 60 && !finished; ++i) {
         engine.tick(1.0 / 60.0);
         for (const auto& event : world->takeEvents()) {
-            finished = finished || (event.kind == WorldEvent::Kind::AnimationFinished && event.name == "attack");
+            finished =
+                finished || (event.kind == WorldEvent::Kind::AnimationFinished && event.name == "attack");
         }
     }
     CHECK(finished);

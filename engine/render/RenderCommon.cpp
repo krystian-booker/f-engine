@@ -167,8 +167,8 @@ bgfx::FrameBufferHandle SceneTarget::distortionTarget() {
 bgfx::FrameBufferHandle SceneTarget::spriteMaskTarget() {
     if (!spriteMaskBuffer.valid()) {
         spriteMask = Texture(bgfx::createTexture2D(static_cast<std::uint16_t>(size.x),
-            static_cast<std::uint16_t>(size.y), false, 1, bgfx::TextureFormat::RGBA8,
-            BGFX_TEXTURE_RT | PointClamp));
+                                                   static_cast<std::uint16_t>(size.y), false, 1,
+                                                   bgfx::TextureFormat::RGBA8, BGFX_TEXTURE_RT | PointClamp));
         const bgfx::TextureHandle attachments[] = {spriteMask.get(), depth.get()};
         spriteMaskBuffer = Framebuffer(bgfx::createFrameBuffer(2, attachments, false));
     }
