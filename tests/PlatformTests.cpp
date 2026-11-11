@@ -137,6 +137,92 @@ TEST_CASE("numbered gamepads' sticks are analog and report their pad's layout") 
     CHECK(input.pads().empty());
 }
 
+TEST_CASE("the device in use follows deliberate input, not releases, drift or a nudged mouse") {
+    InputState input;
+    input.tick(1.0 / 60);
+    CHECK(input.deviceType() == "keyboard");
+    CHECK_FALSE(input.deviceChanged());
+
+    // Plugging a gamepad in switches to it, reported on the next tick only.
+    input.connectPad({1, "Xbox Wireless Controller", "xbox", true, false});
+    CHECK(input.deviceType() == "xbox");
+    input.tick(1.0 / 60);
+    CHECK(input.deviceChanged());
+    input.tick(1.0 / 60);
+    CHECK_FALSE(input.deviceChanged());
+
+    // A key going down switches to the keyboard; letting it go later does not switch back.
+    input.feed("key:Z", 1);
+    input.tick(1.0 / 60);
+    CHECK(input.deviceType() == "keyboard");
+    CHECK(input.deviceChanged());
+    input.feed("pad1:a", 1);
+    CHECK(input.deviceType() == "xbox");
+    input.feed("key:Z", 0);
+    CHECK(input.deviceType() == "xbox");
+
+    // A stick resting off-centre (drift) below half way never takes the prompts...
+    input.feed("key:X", 1);
+    CHECK(input.deviceType() == "keyboard");
+    for (int i = 0; i < 20; ++i) {
+        input.feed("pad1:leftx", 0.34f + 0.01f * static_cast<float>(i % 3));
+    }
+    CHECK(input.deviceType() == "keyboard");
+    // ...a real push does, once: held there, it doesn't fight a later key press.
+    input.feed("pad1:leftx", 0.8f);
+    CHECK(input.deviceType() == "xbox");
+    input.feed("key:X", 1);
+    input.feed("pad1:leftx", 0.82f);
+    input.feed("pad1:leftx", 0.79f);
+    CHECK(input.deviceType() == "keyboard");
+    // Back at rest and pushed again, it switches again.
+    input.feed("pad1:leftx", 0.0f);
+    input.feed("pad1:leftx", 0.9f);
+    CHECK(input.deviceType() == "xbox");
+
+    // A nudged mouse does not take over from a gamepad; moving it away does.
+    input.feedMouse({100, 100});
+    input.feed("pad1:b", 1);
+    CHECK(input.lastDevice() == "gamepad");
+    for (int i = 0; i < 30; ++i) {
+        input.feedMouse({100.0f + static_cast<float>(i % 2), 100.0f});
+    }
+    CHECK(input.lastDevice() == "gamepad");
+    input.feedMouse({140, 100});
+    CHECK(input.lastDevice() == "mouse");
+    CHECK(input.deviceType() == "keyboard");
+}
+
+TEST_CASE("unplugging the gamepad in use falls back to another gamepad, then to the keyboard") {
+    InputState input;
+    input.connectPad({1, "Xbox Wireless Controller", "xbox", true, false});
+    input.connectPad({2, "DualSense Wireless Controller", "playstation", true, true});
+    CHECK(input.deviceType() == "playstation"); // the one plugged in last
+    input.feed("pad1:a", 1);
+    CHECK(input.deviceType() == "xbox");
+    input.disconnectPad(2); // not the one in use: nothing changes
+    CHECK(input.deviceType() == "xbox");
+    input.connectPad({2, "DualSense Wireless Controller", "playstation", true, true});
+    input.disconnectPad(2); // the one in use: the other pad takes over
+    CHECK(input.deviceType() == "xbox");
+    CHECK(input.deviceName() == "Xbox Wireless Controller");
+    input.tick(1.0 / 60);
+    input.disconnectPad(1);
+    CHECK(input.lastDevice() == "keyboard");
+    CHECK(input.deviceType() == "keyboard");
+    input.tick(1.0 / 60);
+    CHECK(input.deviceChanged());
+}
+
+TEST_CASE("input labels come from the runtime's keyboard layout, else from the input's name") {
+    InputState input;
+    CHECK(input.label("key:Z") == "Z");
+    CHECK(input.label("pad:a") == "a");
+    input.setLabeler([](const std::string& name) { return name == "key:Z" ? std::string("Y") : std::string(); });
+    CHECK(input.label("key:Z") == "Y"); // a German layout
+    CHECK(input.label("key:Return") == "Return");
+}
+
 TEST_CASE("text, devices and rumble are scriptable") {
     Engine engine(options());
     engine.input().connectPad({1, "Xbox Wireless Controller", "xbox", true, false});
@@ -153,6 +239,8 @@ TEST_CASE("text, devices and rumble are scriptable") {
     CHECK(failure(engine, "fe.input.text_begin(nil, 'email')").find("Unknown text kind") !=
           std::string::npos);
 
+    CHECK(run(engine, "fe.input.device_type()") == "xbox"); // plugging a gamepad in is picking it up
+    run(engine, "fe.input.feed('key:Z', 1)");
     CHECK(run(engine, "fe.input.device_type()") == "keyboard");
     run(engine, "fe.input.feed('pad1:a', 1)");
     CHECK(run(engine, "fe.input.device_type(), fe.input.device_name()") == "xbox\tXbox Wireless Controller");

@@ -1,6 +1,8 @@
 #pragma once
 #include <deque>
 #include <glm/glm.hpp>
+#include <functional>
+#include <set>
 #include <map>
 #include <optional>
 #include <string>
@@ -82,8 +84,19 @@ public:
     void usePad(int number);
     // pads() changes at once; the event is published by the next tick() (at
     // most 64 wait, further ones are dropped) and reported to the recorder.
+    // Connecting a gamepad makes it the device in use; disconnecting the one
+    // in use falls back to another gamepad, else to the keyboard.
     void connectPad(Pad pad);
     void disconnectPad(int number);
+    // The device prompts are drawn for (deviceType()) changed with this tick's
+    // input: keyboard to a gamepad, a gamepad of another layout, or back.
+    [[nodiscard]] bool deviceChanged() const { return deviceChanged_; }
+    // What is printed on a raw input for the player: for 'key:<scancode
+    // name>' the key's label under the current keyboard layout when the
+    // runtime supplies one (setLabeler; 'key:Z' reads 'Y' on a German
+    // keyboard), otherwise the part after the colon.
+    [[nodiscard]] std::string label(const std::string& input) const;
+    void setLabeler(std::function<std::string(const std::string&)> labeler) { labeler_ = std::move(labeler); }
     [[nodiscard]] const std::map<int, Pad>& pads() const { return pads_; }
     // Gamepads connected or disconnected since the last tick, in order.
     [[nodiscard]] const std::vector<PadEvent>& padEvents() const { return padEvents_; }
@@ -162,6 +175,17 @@ private:
     std::map<std::string, std::deque<float>> pending_;
     std::vector<std::string> pressedInputs_;
     std::string lastDevice_ = "keyboard", deviceName_, deviceType_ = "generic";
+    // Device switching (feed, feedMouse): a gamepad control switches when it
+    // rises past DeviceSwitchOn and can switch again once it has fallen to
+    // DeviceSwitchOff; the mouse takes over from a gamepad after travelling
+    // MouseSwitchDistance canvas pixels from mouseAnchor_.
+    static constexpr float DeviceSwitchOn = 0.5f, DeviceSwitchOff = 0.25f, MouseSwitchDistance = 12.0f;
+    std::set<std::string> engagedPadInputs_;
+    glm::vec2 mouseAnchor_{0};
+    int activePad_ = 0; // number of the gamepad in use; 0 = none known
+    std::string shownDevice_ = "keyboard";
+    bool deviceChanged_ = false;
+    std::function<std::string(const std::string&)> labeler_;
     std::map<int, Pad> pads_;
     std::vector<PadEvent> pendingPads_, padEvents_;
     std::size_t recordedPads_ = 0; // leading pendingPads_ the recorder has seen

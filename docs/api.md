@@ -176,7 +176,9 @@ Action-mapped input. Raw inputs are named 'key:<scancode name>' ('key:Z', 'key:R
 | `axis` | `fun(axis: string): number` | Axis value -1..1. |
 | `raw` | `fun(input: string): number` | Raw input value. |
 | `pressed_inputs` | `fun(): string[]` | Raw inputs that went down this tick (for rebinding screens). Stick axes are left out. |
-| `last_device` | `fun(): string` | 'keyboard', 'gamepad' or 'mouse': the kind of device used last. |
+| `last_device` | `fun(): string` | 'keyboard', 'gamepad' or 'mouse': the kind of device used last. A key or mouse button going down, the mouse travelling a little way, a gamepad button or a stick pushed past half way, and a gamepad being plugged in all count; releases, stick drift and a nudged mouse do not. |
+| `device_changed` | `fun(): boolean` | True on the tick fe.input.device_type() changed: the player touched the keyboard or mouse after a gamepad, pressed a button or moved a stick on a gamepad (or plugged one in) after the keyboard, picked up a gamepad of another layout, or unplugged the one in use. Redraw button prompts then. |
+| `label` | `fun(input: string): string` | What is printed on a raw input, for prompts and rebinding screens: a key's label under the player's keyboard layout ('key:Z' reads 'Y' on a German keyboard; the scancode name in headless runs and replays), otherwise the part after the colon ('pad:a' reads 'a'). |
 | `device_type` | `fun(pad?: integer): 'keyboard'/'xbox'/'playstation'/'switch'/'steamdeck'/'generic'/nil` | Button layout for prompts: 'keyboard' while the keyboard or mouse was used last, otherwise the layout of the gamepad used last. With a gamepad number, that gamepad's layout (nil when it is not connected). |
 | `device_name` | `fun(pad?: integer): string?` | Model name of the gamepad used last, or of gamepad `pad` (nil when it is not connected). |
 | `pads` | `fun(): {number: integer, name: string, type: string, rumble: boolean, trigger_rumble: boolean}[]` | Connected gamepads by number, with their layout and whether they can rumble. |

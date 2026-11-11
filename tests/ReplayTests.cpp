@@ -228,7 +228,7 @@ TEST_CASE("recorded inputs replay in the order they happened; the object form st
     CHECK(engine->input().raw("key:X") == 1);
     CHECK(engine->input().raw("pad:a") == 1);
     replay.apply(2, *engine);
-    CHECK(engine->input().lastDevice() == "keyboard");
+    CHECK(engine->input().lastDevice() == "gamepad"); // releases never switch the device
 
     // A sorted object feeds in key order (key:X before pad:a).
     auto other = fixtureEngine();

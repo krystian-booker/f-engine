@@ -85,7 +85,9 @@ TEST_CASE("each gamepad has its own namespace and pad: combines them") {
     Fixture f;
     f.device(SDL_EVENT_GAMEPAD_ADDED, 11);
     f.device(SDL_EVENT_GAMEPAD_ADDED, 22);
-    CHECK(f.state.lastDevice() == "keyboard"); // connecting a pad is not using it
+    CHECK(f.state.lastDevice() == "gamepad"); // plugging a pad in is picking it up
+    f.state.feed("key:Z", 1);
+    CHECK(f.state.lastDevice() == "keyboard");
     f.pad(11, SDL_GAMEPAD_BUTTON_SOUTH, true);
     f.pad(22, SDL_GAMEPAD_BUTTON_SOUTH, true);
     CHECK(f.state.lastDevice() == "gamepad");
