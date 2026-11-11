@@ -555,15 +555,28 @@ void bindMapData(TypeBinder<WorldRef>& type) {
                 sol::state_view lua(s);
                 auto out = lua.create_table();
                 for (const auto& z : w.get().map().zones) {
-                    out.add(lua.create_table_with("id", z.id, "type", z.type, "min", lua::tableXZ(lua, z.min),
-                                                  "max", lua::tableXZ(lua, z.max), "layer", z.layer, "props",
-                                                  jsonToLua(lua, z.props)));
+                    auto zone =
+                        lua.create_table_with("id", z.id, "type", z.type, "min", lua::tableXZ(lua, z.min),
+                                              "max", lua::tableXZ(lua, z.max), "layer", z.layer, "shape",
+                                              zoneShapeName(z.shape), "props", jsonToLua(lua, z.props));
+                    if (z.shape == ZoneShape::Polygon) {
+                        auto points = lua.create_table();
+                        for (const auto& point : z.points) {
+                            points.add(lua::tableXZ(lua, point));
+                        }
+                        zone["points"] = points;
+                    }
+                    out.add(zone);
                 }
                 return out;
             },
-            "fun(): {id: string, type: string, min: {x: number, z: number}, max: {x: number, z: number}, "
-            "layer: integer, props: table}[]",
-            "Authored zones (camera regions, trigger areas, anything a game defines).")
+            "fun(): {id: string, type: string, shape: 'box'|'ellipse'|'polygon', min: {x: number, z: "
+            "number}, "
+            "max: {x: number, z: number}, points?: {x: number, z: number}[], layer: integer, props: table}[]",
+            "Authored zones (camera regions, trigger areas, anything a game defines). A zone is a box "
+            "(`min` to `max`), the ellipse inscribed in that box, or a polygon whose corners are `points` "
+            "(`min` and `max` are then its bounds). Entities with a mover or a collider entering and leaving "
+            "one are reported by world:events() as zone_enter and zone_exit, with the zone's id as `name`.")
         .method(
             "zones_at",
             [](sol::this_state s, const WorldRef& w, sol::object position, sol::object layerArg) {

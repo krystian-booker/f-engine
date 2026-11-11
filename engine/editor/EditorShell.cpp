@@ -42,12 +42,9 @@ void Editor::buildLayout(unsigned int dockspace) {
 }
 
 void Editor::drawEditMode(const EditorFrame& frame) {
-    if (handles_.triggerBadges.empty()) {
-        handles_.triggerBadges = {{"action", ICON_FA_COMMENT " talk"},
-                                  {"touch", ICON_FA_SHOE_PRINTS " touch"},
-                                  {"auto", ICON_FA_BOLT " auto"},
-                                  {"parallel", ICON_FA_REPEAT " loop"}};
-    }
+    handles_.schemas = &schemas_;
+    handles_.scriptBadge = ICON_FA_SCROLL;
+    handles_.mapBadge = ICON_FA_DOOR_OPEN;
     const auto* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
@@ -616,17 +613,7 @@ void Editor::drawMenuBar(const EditorFrame& /*frame*/) {
         ImGui::MenuItem("Triggers (non-solid colliders)", "", &handles_.triggers);
         ImGui::MenuItem("Unspawned placements", "", &handles_.placements);
         ImGui::MenuItem("Labels", "", &handles_.labels);
-        bool badges = !handles_.triggerBadges.empty();
-        if (ImGui::MenuItem("Script badges (talk, touch, auto, loop)", "", &badges)) {
-            if (!badges) {
-                handles_.triggerBadges.clear();
-            } else {
-                handles_.triggerBadges = {{"action", ICON_FA_COMMENT " talk"},
-                                          {"touch", ICON_FA_SHOE_PRINTS " touch"},
-                                          {"auto", ICON_FA_BOLT " auto"},
-                                          {"parallel", ICON_FA_REPEAT " loop"}};
-            }
-        }
+        ImGui::MenuItem("Link badges (scripts, doors)", "", &handles_.linkBadges);
         ImGui::Separator();
         ImGui::MenuItem("Game camera", "", &gameCamera_);
         bool ortho = editorCamera_.camera.orthographic;

@@ -447,6 +447,10 @@ std::string editProblem(const std::vector<Zone>& zones, const Zone& zone, std::s
             return "Zone ids must be unique and not empty";
         }
     }
+    if (zone.shape == ZoneShape::Polygon &&
+        (zone.points.size() < 3 || zone.points.size() > Zone::MaxPoints)) {
+        return "A polygon zone needs 3 to 64 corners";
+    }
     return {};
 }
 
@@ -468,7 +472,8 @@ std::vector<GridPos> zoneCells(const Zone& zone, const Grid& grid, int fallbackL
     for (int z = std::max(0, floorCell(zone.min.y)); z < std::min(grid.depth(), ceilCell(zone.max.y)); ++z) {
         for (int x = std::max(0, floorCell(zone.min.x)); x < std::min(grid.width(), ceilCell(zone.max.x));
              ++x) {
-            if (grid.inRange(x, z, layer)) {
+            const glm::vec3 centre(static_cast<float>(x) + 0.5f, 0, static_cast<float>(z) + 0.5f);
+            if (grid.inRange(x, z, layer) && zone.contains(centre, zone.layer < 0 ? -1 : layer)) {
                 cells.push_back({x, z, layer});
             }
         }

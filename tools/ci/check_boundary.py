@@ -27,7 +27,7 @@ ALLOWED_LITERALS = {
 }
 # Third-party APIs whose names contain the words (JSON iteration, ImGui,
 # the exponential function) are not game vocabulary.
-THIRD_PARTY = re.compile(r"\.items\(\)|ImGui::\w+|std::exp\b")
+THIRD_PARTY = re.compile(r"(?:\.|->)items\(\)|ImGui::\w+|std::exp\b")
 RAW_STRING = re.compile(r'R"([^()\\ ]{0,16})\(')
 
 

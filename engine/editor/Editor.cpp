@@ -3,6 +3,7 @@
 #include "engine/core/Paths.h"
 #include "engine/editor/EditorWidgets.h"
 #include "engine/editor/MapFiles.h"
+#include "engine/editor/PropLinks.h"
 #include "engine/editor/SceneEdits.h"
 #include "engine/render/FrameRenderer.h"
 #include "engine/runtime/Engine.h"
@@ -217,16 +218,22 @@ bool Editor::succeeded(const sol::protected_function_result& result) {
 
 void Editor::refreshSchemas() {
     schemasFetched_ = Clock::now();
-    schemas_ = Json::object();
+    // A game that describes nothing still gets forms: the editor's own
+    // minimal description (PropLinks.h), replaced by the game's as a whole.
+    schemas_ = defaultSchemas();
     const auto describe = devtool("describe");
     if (describe == sol::lua_nil) {
+        catalog_.setSchemas(schemas_);
         return;
     }
     const auto result = engine_.lua().invoke(describe);
     if (succeeded(result) && result.get_type() == sol::type::string) {
         const auto parsed = Json::parse(result.get<std::string>(), nullptr, false);
-        schemas_ = parsed.is_object() ? parsed : Json::object();
+        if (parsed.is_object()) {
+            schemas_ = parsed;
+        }
     }
+    catalog_.setSchemas(schemas_);
     log(LogLevel::Debug,
         "editor: schemas refreshed: " + std::to_string(jsonObject(schemas_, "entities").size()) +
             " placement type(s), " + std::to_string(jsonArray(schemas_, "tables").size()) + " table(s)" +
@@ -234,10 +241,15 @@ void Editor::refreshSchemas() {
 }
 
 std::string Editor::defaultType(const char* group) const {
-    const auto types = jsonObject(schemas_, group);
     const auto preferred = jsonString(jsonObject(schemas_, "defaults"), group, {});
     if (!preferred.empty()) {
         return preferred;
+    }
+    // "models": the placement type a dropped model becomes; a game that
+    // names none gets its default placement type for models too.
+    const auto types = jsonObject(schemas_, std::string_view(group) == "models" ? "entities" : group);
+    if (std::string_view(group) == "models") {
+        return defaultType("entities");
     }
     return types.empty() ? std::string{} : types.begin().key();
 }
@@ -614,7 +626,8 @@ bool Editor::editValue(const char* label, const Json& spec, Json& value, int dep
         }
     } else if (type == "module" && (value.is_string() || value.is_null())) {
         std::string text = value.is_string() ? value.get<std::string>() : std::string{};
-        if (modulePicker(label, text, jsonString(spec, "folder", ""), optional)) {
+        if (modulePicker(label, text, jsonString(spec, "folder", ""), optional,
+                         jsonString(spec, "template", ""), scriptSuggestion_)) {
             value = text;
             changed = true;
         }

@@ -43,7 +43,7 @@ Drag a sprite (a little character picture) or a model from **Assets** onto the g
 
 A prop model should have its origin at the centre of its base and a footprint of whole cells (a 4 x 3 house, a 1 x 1 tree, a 2-cell fence); the bake reads its visible mesh, or, when the model has a node with the custom property `{"collision": true}` (usually hidden with `"visible": false`), that node alone: a box over a house's walls, a trunk under a tree's crown, a slope under stairs. Make collision pieces at least a quarter of a cell thick. A prop with `solid` off is decoration bodies walk through.
 
-Points (where the player can appear), zones (areas the game reacts to; the sample's change the camera), lights, particle emitters and collider boxes are added from the **Hierarchy** or the Map menu and edited the same way. They are drawn as handles in the Scene; View toggles each kind. Cells can carry tags too, painted with the brush under **Fix walkability by hand**; in the sample a tag such as `encounter:plains` marks where random battles happen, and `water`, `forest` and `mountain` decide where its vehicles can go.
+Points (where the player can appear), zones (areas the game reacts to: a box, an ellipse or a polygon whose corners you edit in the Inspector; the sample's change the camera or run a script), lights, particle emitters and collider boxes are added from the **Hierarchy** or the Map menu and edited the same way. They are drawn as handles in the Scene; View toggles each kind. Cells can carry tags too, painted with the brush under **Fix walkability by hand**; in the sample a tag such as `encounter:plains` marks where random battles happen, and `water`, `forest` and `mountain` decide where its vehicles can go.
 
 ## Give an NPC something to do
 
@@ -68,7 +68,11 @@ end
 
 To make someone say something else later, test a flag in the script (`if state.flag("guardian_defeated") then ...`). A `chest` has an item and a count, a `sign` a text, a `symbol` (an enemy you can see) a troop. Doors are placements of type `door`: pick the target map and type the name of one of its points; walking onto the door's cell warps there.
 
-The **Scripts** tab lists every scripted thing on the map and the tasks the game is running, and badges over the placements in the Scene say how each one fires (talk, touch).
+A zone can run a script too. Add a zone, give it the type `event`, set its **Shape** (a polygon's corners are listed under it: drag the numbers, `+` adds a corner after one, `x` removes it; the gizmo moves and stretches the whole outline) and pick or create its script the same way. In the sample it runs when the party walks in (`on = exit` for walking out), every time or only `once`.
+
+Next to an empty script field, **New script** writes a starter script named after the object into the folder the game chose (`events/<id>.lua` in the sample) and picks it; **Open script** hands an existing one to your system's editor. Saved edits to a script apply at once while the game runs.
+
+The **Scripts** tab lists everything on the map that is wired to a script or to another map, with the tasks the game is running, and badges over the placements and zones in the Scene show the same links.
 
 ## Bring in art and sound
 

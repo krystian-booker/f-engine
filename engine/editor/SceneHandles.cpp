@@ -1,5 +1,6 @@
 #include "engine/editor/SceneHandles.h"
 #include "engine/editor/MapEdits.h"
+#include "engine/editor/PropLinks.h"
 #include "engine/world/Animation.h"
 #include "engine/world/Geometry.h"
 #include "engine/world/World.h"
@@ -135,9 +136,9 @@ void buildHandles(World& world, const HandleOptions& options, const Selection& p
             const auto color = em(self, ZoneColor);
             const float t = th(self);
             const float lift = 0.05f;
-            const glm::vec2 corners[4] = {z.min, {z.max.x, z.min.y}, z.max, {z.min.x, z.max.y}};
-            for (int i = 0; i < 4; ++i) {
-                const auto a = corners[i], b = corners[(i + 1) % 4];
+            const auto corners = z.outline();
+            for (std::size_t i = 0; i < corners.size(); ++i) {
+                const auto a = corners[i], b = corners[(i + 1) % corners.size()];
                 // Follow the ground: split long edges so they ride ramps and steps.
                 const int steps = std::max(1, static_cast<int>(std::ceil(glm::length(b - a))));
                 for (int s = 0; s < steps; ++s) {
@@ -248,37 +249,36 @@ void buildHandles(World& world, const HandleOptions& options, const Selection& p
                         em(self, TriggerColor), th(self));
         }
     }
-    if (!options.triggerBadges.empty()) {
-        // What fires each scripted placement: pages, or the script shorthand.
-        for (const auto& p : map.placements) {
-            std::vector<std::string> triggers;
-            if (const auto pages = p.props.find("pages"); pages != p.props.end() && pages->is_array()) {
-                for (const auto& page : *pages) {
-                    if (page.is_object()) {
-                        const auto trigger =
-                            editorui::jsonString(page, "trigger", "action"); // tolerant of other types
-                        if (std::find(triggers.begin(), triggers.end(), trigger) == triggers.end()) {
-                            triggers.push_back(trigger);
-                        }
-                    }
-                }
-            } else if (p.props.contains("script")) {
-                triggers.push_back(editorui::jsonString(p.props, "trigger", "action"));
-            } else if (p.props.contains("map") && p.props.at("map").is_string()) {
-                triggers.push_back(editorui::jsonString(p.props, "trigger", "touch"));
-            }
-            if (triggers.empty()) {
-                continue;
-            }
+    if (options.linkBadges && options.schemas) {
+        // What each placement and zone is wired to, as the game's schemas tell it.
+        const auto badgeOf = [&](const Json* fields, const Json& props) {
             std::string badge;
-            for (const auto& trigger : triggers) {
-                const auto found = options.triggerBadges.find(trigger);
-                badge += (found != options.triggerBadges.end() ? found->second : trigger) + " ";
+            for (const auto& link : propLinks(fields, props)) {
+                badge += (link.kind == PropLink::Kind::Script ? options.scriptBadge + " " + link.value
+                                                              : options.mapBadge + " " + link.value) +
+                         "  ";
+            }
+            return badge;
+        };
+        for (const auto& p : map.placements) {
+            const auto badge = badgeOf(typeFields(*options.schemas, "entities", p.type), p.props);
+            if (badge.empty()) {
+                continue;
             }
             const auto entity = placementEntity(world, p.id);
             auto position = entity != entt::null ? world.interpolated(entity, alpha) : p.position;
             position.y += 1.25f;
             out.labels.push_back({position, badge, glm::vec4(0.95f, 0.95f, 1, 0.9f)});
+        }
+        for (const auto& z : map.zones) {
+            const auto badge = badgeOf(typeFields(*options.schemas, "zones", z.type), z.props);
+            if (badge.empty()) {
+                continue;
+            }
+            const auto centre = (z.min + z.max) * 0.5f;
+            out.labels.push_back({{centre.x, heightAt(centre, z.layer) + 0.6f, centre.y},
+                                  badge,
+                                  glm::vec4(0.95f, 0.95f, 1, 0.9f)});
         }
     }
     if (options.placements) {

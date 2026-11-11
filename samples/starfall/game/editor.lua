@@ -16,7 +16,18 @@ end
 
 local sprite = { type = "asset", asset = "sprite", optional = true }
 local model = { type = "asset", asset = "model", optional = true }
-local script = { type = "module", folder = "events", optional = true }
+-- A field typed "module" is a script to the editor: it badges the object in
+-- the Scene, lists it in the Scripts panel, and its "New script" button writes
+-- this template to events/<id>.lua.
+local script = { type = "module", folder = "events", optional = true, template = [[
+local dialogue = require("game.dialogue")
+
+-- Runs as an event: the player waits until it returns.
+-- context = { entity, zone, player, world, field }
+return function(context)
+  dialogue.say(nil, "...")
+end
+]] }
 
 --- Forms for placements, zones, map properties and data tables, as JSON text.
 function editor.describe()
@@ -40,6 +51,8 @@ function editor.describe()
     },
     zones = {
       camera = fields { distance = { type = "number", optional = true }, pitch = { type = "number", optional = true } },
+      event = fields { script = script, on = { type = "enum", options = { "enter", "exit" }, default = "enter" },
+        once = { type = "boolean", default = false } },
     },
     schemas = {
       map_props = fields { music = { type = "asset", asset = "audio", optional = true },
@@ -58,7 +71,8 @@ function editor.describe()
       { name = "shops", file = "data/shops.json" },
       { name = "statuses", file = "data/statuses.json" },
     },
-    defaults = { entities = "npc", zones = "camera" },
+    -- New placements, new zones, and what a model dropped into the Scene becomes.
+    defaults = { entities = "npc", zones = "event", models = "prop" },
   }
 end
 
@@ -81,6 +95,41 @@ function editor.placement_changed(world_name, id)
     local entity = field.world:find(id)
     if entity then entity:destroy() end
   end
+end
+
+local function entity_state(world, id)
+  local entity = world:find(id)
+  if not entity then
+    local zone = field.zones[id]
+    if zone and zone.type == "event" and zone.props.once then
+      return { state = state.flag("zone:" .. world.map_id .. "/" .. id) and "done" or "armed" }
+    end
+    return zone and {} or { state = "not spawned" }
+  end
+  local d = entity:data()
+  local info = { state = "spawned", type = d.type }
+  if d.label then info.action = d.label end
+  if d.wander then info.state = entity:moving() and "wandering" or "waiting" end
+  if d.type == "chest" then
+    info.state = state.data.opened[world.map_id .. "/" .. id] and "opened" or "closed"
+  end
+  return info
+end
+
+--- What the game knows of one placement or zone right now, as JSON text of
+--- an object (the Inspector shows it as it is; the Scripts panel its `state`).
+function editor.inspect_entity(id, world_name)
+  if not field.world or field.world.name ~= world_name or not state.data then return "{}" end
+  return fe.json.encode(entity_state(field.world, id))
+end
+
+--- The same for every placement and zone of the map: {id = info}.
+function editor.inspect_entities(world_name)
+  if not field.world or field.world.name ~= world_name or not state.data then return "{}" end
+  local out = {}
+  for _, placement in ipairs(field.world:placements()) do out[placement.id] = entity_state(field.world, placement.id) end
+  for id in pairs(field.zones) do out[id] = entity_state(field.world, id) end
+  return fe.json.encode(out)
 end
 
 --- Running tasks for the Scripts panel, as JSON text.

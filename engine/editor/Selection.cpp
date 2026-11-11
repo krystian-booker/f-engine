@@ -286,8 +286,13 @@ bool applySelectionTransform(MapData& map, const Selection& s, const SelectionTr
         if (auto* z = findZone(map, s.id)) {
             const glm::vec2 half(std::max(std::abs(t.scale.x), 0.01f) * 0.5f,
                                  std::max(std::abs(t.scale.z), 0.01f) * 0.5f);
+            const glm::vec2 oldMin = z->min, oldSize = glm::max(z->max - z->min, glm::vec2(1e-4f));
             z->min = glm::vec2(t.position.x, t.position.z) - half;
             z->max = glm::vec2(t.position.x, t.position.z) + half;
+            // A polygon's corners keep their place within the bounds as these move and stretch.
+            for (auto& point : z->points) {
+                point = z->min + (point - oldMin) / oldSize * (z->max - z->min);
+            }
             z->layer = std::clamp(t.layer, -1, map.grid.layerCount() - 1);
             return true;
         }

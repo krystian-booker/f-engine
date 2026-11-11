@@ -8,6 +8,7 @@
 #include "engine/runtime/Engine.h"
 #include "engine/script/LuaHost.h"
 #include <IconsFontAwesome6.h>
+#include <SDL3/SDL.h>
 #include <algorithm>
 #include <imgui.h>
 #include <imgui_stdlib.h>
@@ -199,9 +200,57 @@ bool Editor::assetPicker(const char* label, std::string& value, AssetKind kind, 
                                                                               : kind);
 }
 
-bool Editor::modulePicker(const char* label, std::string& value, const std::string& folder, bool optional) {
+bool Editor::modulePicker(const char* label, std::string& value, const std::string& folder, bool optional,
+                          const std::string& scriptTemplate, const std::string& suggestion) {
     const auto candidates = catalog_.modules(folder);
-    return choicePicker(label, value, candidates, candidates, "(pick a module)", optional, AssetKind::Other);
+    bool changed =
+        choicePicker(label, value, candidates, candidates, "(pick a module)", optional, AssetKind::Other);
+    const auto fileOf = [&](const std::string& module) {
+        auto relative = module;
+        std::replace(relative.begin(), relative.end(), '.', '/');
+        return relative + ".lua";
+    };
+    ImGui::PushID(label);
+    if (value.empty()) {
+        // A script of its own for this object: <folder>/<suggestion>.lua, written from the game's
+        // template for the field (the `template` of its spec) and picked at once.
+        if (ImGui::SmallButton(ICON_FA_PLUS " New script")) {
+            auto name = suggestion.empty() ? std::string("script") : suggestion;
+            for (auto& c : name) {
+                c = std::isalnum(static_cast<unsigned char>(c)) ? static_cast<char>(std::tolower(c)) : '_';
+            }
+            auto module = folder.empty() ? name : folder + "." + name;
+            for (int n = 2; std::find(candidates.begin(), candidates.end(), module) != candidates.end();
+                 ++n) {
+                module = (folder.empty() ? name : folder + "." + name) + std::to_string(n);
+            }
+            try {
+                const auto file = resolveInside(engine_.lua().gameRoot(), fileOf(module));
+                std::filesystem::create_directories(file.parent_path());
+                writeTextAtomic(file, scriptTemplate.empty() ? std::string("return function()\nend\n")
+                                                             : scriptTemplate);
+                catalog_.scan();
+                value = module;
+                changed = true;
+                status_ = "Created " + fileOf(module);
+            } catch (const std::exception& error) {
+                status_ = std::string("Cannot create the script: ") + error.what();
+            }
+        }
+    } else if (ImGui::SmallButton(ICON_FA_ARROW_UP_RIGHT_FROM_SQUARE " Open script")) {
+        try {
+            const auto file = resolveInside(engine_.lua().gameRoot(), fileOf(value));
+            if (!isFile(file)) {
+                status_ = fileOf(value) + " does not exist";
+            } else if (!SDL_OpenURL(("file://" + file.string()).c_str())) {
+                status_ = std::string("Cannot open the script: ") + SDL_GetError();
+            }
+        } catch (const std::exception& error) {
+            status_ = error.what();
+        }
+    }
+    ImGui::PopID();
+    return changed;
 }
 
 bool Editor::mapPicker(const char* label, std::string& value, bool optional) {

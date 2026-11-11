@@ -134,9 +134,6 @@ const std::string* bakedModelOf(const Placement& placement) {
     if (solid != placement.props.end() && solid->is_boolean() && !solid->get<bool>()) {
         return nullptr;
     }
-    if (placement.props.contains("pages")) {
-        return nullptr;
-    }
     return &model->get_ref<const std::string&>();
 }
 

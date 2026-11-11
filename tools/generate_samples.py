@@ -792,12 +792,16 @@ def starfall():
         {"id": "wisp_symbol", "type": "symbol", "position": [4.5, 0, 9.5], "props": {"troop": "wisps",
                                                                                       "sprite": "sprites/wisp.anim.json"}},
     ]
+    # A polygon zone across the cave before the dais: walking into it runs a script, once.
+    zones = [{"id": "drake_warning", "type": "event", "shape": "polygon", "min": [3, 8], "max": [13, 10.5],
+              "points": [[4, 10.5], [12, 10.5], [13, 9], [10, 8], [6, 8], [3, 9]],
+              "props": {"script": "events.warning", "once": True}}]
     write_map(folder, "grotto", "Crystal Grotto", grid, scene, {
         "ambient": [.16, .2, .32], "sun_color": [.3, .4, .6], "sun_direction": [-.3, -1, -.2], "fog_color": [.06, .09, .16],
         "fog_density": .03, "sky": {"mode": "color", "horizon": [.04, .05, .1]},
         "weather": {"kind": "dust", "intensity": .8, "color": [.6, .8, 1, .6]},
         "post": {"bloom_strength": .55, "focus": .5, "focus_range": .2, "lut": "ui/grotto.cube"}},
-        {"entry": {"position": [8, 0, 14.4], "facing": [0, -1]}}, lights=lights, placements=placements,
+        {"entry": {"position": [8, 0, 14.4], "facing": [0, -1]}}, lights=lights, placements=placements, zones=zones,
         props={"music": "grotto", "battle_stage": "battle_cave", "camera": {"pitch": 46, "distance": 17, "fov": 30}},
         overrides=[walkable_override(7, 15, 2, 1)])  # the exit on the edge ring
 

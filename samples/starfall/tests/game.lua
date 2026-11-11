@@ -205,6 +205,40 @@ return {
     fe.save.delete("slot1")
   end,
 
+  ["walking into an event zone runs its script, once"] = function(t)
+    new_game(t)
+    field.start("grotto", "entry")
+    local zone = field.zones.drake_warning
+    t.eq(zone.shape, "polygon")
+    t.eq(zone.type, "event")
+    t.ok(not state.flag("zone:grotto/drake_warning"))
+    fe.input.feed("key:Up", 1)
+    t.wait_until(function() return field.locked > 0 end, 600, "the zone never fired")
+    fe.input.feed("key:Up", 0)
+    mash(t, function() return field.locked == 0 and scenes.top() == field.scene end)
+    t.ok(state.flag("zone:grotto/drake_warning"))
+    t.ok(field.player.position.z < 10.6)
+    -- Out and in again: it has had its say.
+    field.player:place({ x = 8, z = 13.5 })
+    t.tick(3)
+    fe.input.feed("key:Up", 1)
+    t.tick(90)
+    fe.input.feed("key:Up", 0)
+    t.eq(field.locked, 0)
+  end,
+
+  ["the editor hooks describe the game's types and report live state"] = function(t)
+    new_game(t)
+    local editor = require("main").editor
+    local described = fe.json.decode(editor.describe())
+    t.eq(described.zones.event.fields.script.type, "module")
+    t.eq(described.defaults.models, "prop")
+    local info = fe.json.decode(editor.inspect_entity("town_chest", "field"))
+    t.eq(info.state, "closed")
+    local all = fe.json.decode(editor.inspect_entities("field"))
+    t.eq(all.elder.action, "Talk")
+  end,
+
   ["button prompts follow the device in use"] = function(t)
     press(t, "key:Down")
     t.eq(input.device(), "keyboard")

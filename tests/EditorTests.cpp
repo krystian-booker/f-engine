@@ -1,5 +1,6 @@
 #include "engine/assets/Model.h"
 #include "engine/editor/MapEdits.h"
+#include "engine/editor/PropLinks.h"
 #include "engine/world/Components.h"
 #include "engine/world/World.h"
 #include <array>
@@ -759,9 +760,11 @@ TEST_CASE("scene edits snap to cells, make placements for dropped assets and mov
     CHECK(sprite->props.at("sprite") == "sprites/chest.anim.json");
     CHECK(sprite->position == cellCentre(grid, {4, 5, 0}));
     const auto model =
-        placementForAsset(AssetKind::Model, "fx/Crate-01.glb", {1, 1, 0}, grid, "npc", existing);
+        placementForAsset(AssetKind::Model, "fx/Crate-01.glb", {1, 1, 0}, grid, "prop", existing);
     REQUIRE(model);
-    CHECK(model->type == "prop");
+    CHECK(model->type == "prop"); // the type the game names for models
+    CHECK(placementForAsset(AssetKind::Model, "fx/Crate-01.glb", {1, 1, 0}, grid, "", existing)->type ==
+          "object");
     CHECK(model->id == "crate_01");
     CHECK(model->props.at("model") == "fx/Crate-01.glb");
     CHECK(model->position == cellCentre(grid, {1, 1, 0}));
@@ -1322,13 +1325,14 @@ TEST_CASE("a placed model bakes through its position, yaw and scale") {
     CHECK_FALSE(result.at(5, 4).walkable);
     CHECK(result.at(6, 4).walkable);
     CHECK(result.at(4, 2).walkable);
-    // Decoration and scripted props stay out of the bake.
+    // Decoration stays out of the bake, and that is the only prop that says so:
+    // what else a placement carries (a script, say) is the game's business.
     p.props["solid"] = false;
     CHECK(bakedModelOf(p) == nullptr);
     p.props.erase("solid");
-    p.props["pages"] = Json::array();
-    CHECK(bakedModelOf(p) == nullptr);
-    p.props.erase("pages");
+    p.props["script"] = "events.crate";
+    CHECK(bakedModelOf(p) != nullptr);
+    p.props.erase("script");
     p.props["model"] = 3;
     CHECK(bakedModelOf(p) == nullptr);
 }
@@ -1728,4 +1732,85 @@ TEST_CASE("a snapped draw camera shows its new values at once instead of interpo
     const auto& snapped = cameras.update(&world, "", c, 7, true);
     CHECK(snapped.focus(0).x == doctest::Approx(20));
     CHECK(snapped.focus(1).x == doctest::Approx(20));
+}
+
+TEST_CASE("links come from the game's schemas, not from prop names") {
+    const auto schemas = Json::parse(R"json({
+      "entities": {
+        "talker": {"fields": {"behaviour": {"type": "module", "folder": "events", "label": "on talk"},
+                              "leads_to": {"type": "map_id"},
+                              "steps": {"type": "list", "of": {"type": "record", "fields": {
+                                  "run": {"type": "module"}}}}}},
+        "crate": {"fields": {"script": {"type": "string"}}}
+      },
+      "zones": {"tripwire": {"fields": {"on_enter": {"type": "module"}}}}
+    })json");
+    const Json props = {{"behaviour", "events.elder"},
+                        {"leads_to", "grotto"},
+                        {"steps", {{{"run", "events.one"}}, {{"run", "events.two"}}}},
+                        {"script", "ignored.because.untyped"}};
+    const auto links = propLinks(typeFields(schemas, "entities", "talker"), props);
+    REQUIRE(links.size() == 4);
+    CHECK(links[0].kind == PropLink::Kind::Script);
+    CHECK(links[0].field == "behaviour");
+    CHECK(links[0].value == "events.elder");
+    CHECK(links[0].label == "on talk");
+    CHECK(links[1].kind == PropLink::Kind::Map);
+    CHECK(links[1].value == "grotto");
+    CHECK(links[2].field == "steps/1/run");
+    CHECK(links[3].value == "events.two");
+    // A prop called `script` is nothing special unless the game types it as one.
+    CHECK(propLinks(typeFields(schemas, "entities", "crate"), {{"script", "events.elder"}}).empty());
+    CHECK(propLinks(typeFields(schemas, "entities", "unknown"), props).empty());
+    CHECK(propLinks(typeFields(schemas, "zones", "tripwire"), {{"on_enter", "events.trap"}}).size() == 1);
+    // A game that describes nothing gets one placement and one zone type with a script field.
+    CHECK(propLinks(typeFields(defaultSchemas(), "entities", "object"), {{"script", "hello"}}).size() == 1);
+    CHECK(propLinks(typeFields(defaultSchemas(), "zones", "area"), {{"script", "hello"}}).size() == 1);
+}
+
+TEST_CASE("zones are boxes, ellipses or polygons, and survive a save") {
+    auto map = makeBlankMap("shapes", "Shapes", 12, 12);
+    Zone box{"box", "area", {1, 1}, {5, 3}, -1, Json::object()};
+    Zone ellipse = box;
+    ellipse.id = "ellipse";
+    ellipse.shape = ZoneShape::Ellipse;
+    Zone polygon;
+    polygon.id = "wedge";
+    polygon.type = "area";
+    polygon.shape = ZoneShape::Polygon;
+    polygon.points = {{6, 6}, {10, 6}, {6, 10}}; // a right triangle
+    polygon.fitBounds();
+    CHECK(polygon.min == glm::vec2(6, 6));
+    CHECK(polygon.max == glm::vec2(10, 10));
+    // The corner of the box is inside the box and outside its ellipse.
+    CHECK(box.contains({1.1f, 0, 1.1f}, 0));
+    CHECK_FALSE(ellipse.contains({1.1f, 0, 1.1f}, 0));
+    CHECK(ellipse.contains({3, 0, 2}, 0));
+    // Inside the triangle, and inside its bounds but beyond the long side.
+    CHECK(polygon.contains({7, 0, 7}, 0));
+    CHECK_FALSE(polygon.contains({9.5f, 0, 9.5f}, 0));
+    CHECK_FALSE(polygon.contains({5.5f, 0, 7}, 0));
+    map.zones = {box, ellipse, polygon};
+    const auto loaded = MapData::fromJson(map.toJson());
+    REQUIRE(loaded.zones.size() == 3);
+    CHECK(loaded.zones[0].shape == ZoneShape::Box);
+    CHECK_FALSE(map.toJson().at("zones")[0].contains("shape")); // the default is not written
+    CHECK(loaded.zones[1].shape == ZoneShape::Ellipse);
+    CHECK(loaded.zones[2].shape == ZoneShape::Polygon);
+    CHECK(loaded.zones[2].points == polygon.points);
+    CHECK(loaded.zones[2].max == glm::vec2(10, 10));
+    // Moving and stretching a polygon by its bounds carries its corners along.
+    SelectionTransform transform; // the triangle's bounds: centre (8, 8), 4 x 4
+    transform.position = {9, 0, 8};
+    transform.scale = {8, 1, 4};
+    transform.layer = -1;
+    REQUIRE(applySelectionTransform(map, Selection::zone("wedge"), transform));
+    CHECK(map.zones[2].points[0] == glm::vec2(5, 6));
+    CHECK(map.zones[2].points[1] == glm::vec2(13, 6));
+    // A polygon of two corners is refused.
+    auto json = map.toJson();
+    json["zones"][2]["points"] = Json::array({Json::array({1, 1}), Json::array({2, 2})});
+    CHECK_THROWS(MapData::fromJson(json));
+    json["zones"][2]["shape"] = "star";
+    CHECK_THROWS(MapData::fromJson(json));
 }

@@ -71,8 +71,8 @@ struct EditorFrame {
 // EditorToolsTabs.cpp. Everything it edits is generic engine data with forms
 // generated from the schemas the game declares; game-specific actions are
 // optional hooks the game's entry module offers in its `editor` table
-// (describe, play_from, placement_changed, inspect_entity, run_page, tasks,
-// cancel_task, recent_events, validate_table, task_count, list, launch; see
+// (describe, play_from, placement_changed, inspect_entity, inspect_entities,
+// tasks, cancel_task, recent_events, validate_table, task_count, list, launch; see
 // docs/editor.md). Without them the editor still opens, previews, edits and
 // saves maps on its own.
 //
@@ -227,8 +227,10 @@ private:
     // what a field may hold, accept drops from the Assets panel and show a
     // thumbnail; each returns true when the value changed.
     bool assetPicker(const char* label, std::string& value, AssetKind kind, bool optional = false);
-    bool modulePicker(const char* label, std::string& value, const std::string& folder,
-                      bool optional = false);
+    // Besides picking: "New script" writes `scriptTemplate` (the field spec's `template`) to a
+    // new module named after `suggestion` in `folder`, and "Open script" hands the file to the OS.
+    bool modulePicker(const char* label, std::string& value, const std::string& folder, bool optional = false,
+                      const std::string& scriptTemplate = {}, const std::string& suggestion = {});
     bool mapPicker(const char* label, std::string& value, bool optional = false);
     bool pointPicker(const char* label, std::string& value, const std::string& mapId, bool optional = false);
     bool refPicker(const char* label, std::string& value, const std::string& table, bool optional = false);
@@ -300,6 +302,9 @@ private:
     unsigned int dockspaceId_ = 0;
     std::string worldName_, status_, layoutFile_;
     Json schemas_ = Json::object();
+    // The id of the placement or zone whose form is being drawn: what a
+    // script created from that form is named after.
+    std::string scriptSuggestion_;
     // Grid brush and overlays (rebuilt only when what they show changes)
     GridBrush brush_;
     int brushRadius_ = 0, layer_ = 0;

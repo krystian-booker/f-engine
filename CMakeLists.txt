@@ -141,6 +141,7 @@ add_library(fengine_core STATIC
   engine/editor/SceneEdits.cpp
   engine/editor/WalkBake.cpp
   engine/editor/MapFiles.cpp
+  engine/editor/PropLinks.cpp
   engine/assets/SpriteSheetBuilder.cpp
 )
 target_include_directories(fengine_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")

@@ -18,6 +18,13 @@
 ---   symbol      an enemy in sight: touching it starts `troop`
 ---   vehicle     a strider or the skiff, once the party owns it
 ---   emitter, sound   particles and a looping positional sound
+---
+--- Zones (boxes, ellipses or polygons drawn in the editor) work the same way
+--- through `field.zone_types`:
+---
+---   camera      pulls the camera to `distance` and `pitch` while the party is inside
+---   event       runs `script` when the party walks in (or out: `on = "exit"`),
+---               every time or only `once`
 local audio = require("game.audio")
 local data = require("game.data")
 local dialogue = require("game.dialogue")
@@ -27,7 +34,8 @@ local task = require("game.task")
 local ui = require("game.ui")
 
 local field = {
-  world = nil, player = nil, locked = 0, epoch = 0, scene = {}, types = {}, hint = nil,
+  world = nil, player = nil, locked = 0, epoch = 0, scene = {}, types = {}, zone_types = {}, zones = {},
+  hint = nil,
   settings = { walk = 3.2, run = 5.0, reach = 1.1, danger_low = 60, danger_high = 110 },
   vehicles = {
     strider = { name = "Strider", speed = 6.5, mover = { fly = true, blocked_tags = { "water", "mountain" } },
@@ -67,13 +75,13 @@ local function spawn(world, placement, spec)
 end
 
 --- Run an event script: a module returning `function(context)`.
-local function run_script(module, entity)
+local function run_script(module, entity, zone)
   local ok, script = pcall(require, module)
   if not ok or type(script) ~= "function" then
     fe.log.error("event script '" .. tostring(module) .. "': " .. tostring(ok and "must return a function" or script))
     return
   end
-  script({ entity = entity, player = field.player, world = field.world, field = field })
+  script({ entity = entity, zone = zone, player = field.player, world = field.world, field = field })
 end
 
 function field.types.prop(world, placement)
@@ -188,6 +196,17 @@ function field.types.sound(world, placement)
   return spawn(world, placement, { audio = { sound = props.sound, radius = props.radius, volume = props.volume } })
 end
 
+--- An event zone: its script runs as an event when the party crosses its edge.
+function field.zone_types.event(zone, entering)
+  local props = zone.props
+  if not props.script or (props.on == "exit") == entering then return end
+  local key = "zone:" .. field.world.map_id .. "/" .. zone.id
+  if props.once and state.flag(key) then return end
+  if props.once then state.set_flag(key) end
+  field.player:stop()
+  field.event(function() run_script(props.script, nil, zone) end, "zone " .. zone.id)
+end
+
 --- Spawn (or respawn) the entity of one placement of the loaded map.
 function field.spawn_placement(world, placement)
   local existing = world:find(placement.id)
@@ -275,6 +294,8 @@ function field.start(map, point, position)
   local facing = at and at.facing or { x = 0, z = 1 }
   local spot = position or (at and at.position) or { x = 1.5, z = 1.5 }
   for _, placement in ipairs(world:placements()) do field.spawn_placement(world, placement) end
+  field.zones = {}
+  for _, zone in ipairs(world:zones()) do field.zones[zone.id] = zone end
   spawn_player(world, spot, facing, at and at.layer or 0)
   state.data.map, state.data.point = map, point
   place_camera(true)
@@ -480,6 +501,11 @@ function field.scene:post_update()
           end
         end
       end
+    elseif (event.type == "zone_enter" or event.type == "zone_exit") and event.a == field.player
+        and field.locked == 0 then
+      local zone = field.zones[event.name]
+      local handle = zone and field.zone_types[zone.type]
+      if handle then handle(zone, event.type == "zone_enter") end
     elseif event.type == "contact_begin" and field.locked == 0 then
       local other = event.a == field.player and event.b or event.b == field.player and event.a or nil
       local touch = other and other:valid() and other:data().touch

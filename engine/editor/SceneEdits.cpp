@@ -92,11 +92,11 @@ std::optional<Placement> placementForAsset(AssetKind kind, const std::string& pa
     Placement p;
     switch (kind) {
     case AssetKind::Sprite:
-        p.type = defaultType.empty() ? "prop" : defaultType;
+        p.type = defaultType.empty() ? "object" : defaultType;
         p.props["sprite"] = path;
         break;
     case AssetKind::Model:
-        p.type = "prop";
+        p.type = defaultType.empty() ? "object" : defaultType;
         p.props["model"] = path;
         break;
     default:

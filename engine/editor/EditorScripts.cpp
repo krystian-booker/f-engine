@@ -1,5 +1,6 @@
 #include "engine/editor/Editor.h"
 #include "engine/editor/EditorWidgets.h"
+#include "engine/editor/PropLinks.h"
 #include "engine/runtime/Engine.h"
 #include "engine/script/LuaHost.h"
 #include "engine/world/World.h"
@@ -19,18 +20,6 @@ struct ScriptsCache {
 ScriptsCache& cache() {
     static ScriptsCache c;
     return c;
-}
-const char* triggerIcon(const std::string& trigger) {
-    if (trigger == "touch") {
-        return ICON_FA_SHOE_PRINTS;
-    }
-    if (trigger == "auto") {
-        return ICON_FA_BOLT;
-    }
-    if (trigger == "parallel") {
-        return ICON_FA_REPEAT;
-    }
-    return ICON_FA_COMMENT;
 }
 } // namespace
 
@@ -64,109 +53,56 @@ void Editor::drawScriptsPanel() {
     const auto& map = w->authored();
     if (ImGui::BeginTabBar("scripts")) {
         if (ImGui::BeginTabItem(ICON_FA_DIAGRAM_PROJECT " Scene wiring")) {
-            ImGui::TextDisabled("Every placement with a script and how it fires. Click a row to select it; "
-                                "the active page is the one its conditions pick right now.");
+            ImGui::TextDisabled("What the placements and zones of this map are wired to: every field the "
+                                "game's schemas type as a script or a map. Click a row to select it.");
             if (ImGui::BeginTable("wiring", 5,
                                   ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
                                       ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_ScrollY)) {
                 ImGui::TableSetupColumn("Object");
                 ImGui::TableSetupColumn("Type");
-                ImGui::TableSetupColumn("Trigger");
-                ImGui::TableSetupColumn("Script");
+                ImGui::TableSetupColumn("Field");
+                ImGui::TableSetupColumn("Links to");
                 ImGui::TableSetupColumn("State");
                 ImGui::TableHeadersRow();
                 int rowId = 0;
                 const auto row = [&](const Selection& self, const std::string& name, const std::string& type,
-                                     const std::string& trigger, const std::string& script,
-                                     const std::string& state, bool active) {
+                                     const PropLink& link, const std::string& state) {
                     ImGui::TableNextRow();
                     ImGui::TableNextColumn();
                     ImGui::PushID(rowId++);
-                    if (active) {
-                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 1, 0.6f, 1));
-                    }
                     if (ImGui::Selectable(name.c_str(), isSelected(self),
                                           ImGuiSelectableFlags_SpanAllColumns)) {
                         select(self);
                         frameSelection(*w, alpha_);
                     }
-                    if (active) {
-                        ImGui::PopStyleColor();
-                    }
                     ImGui::PopID();
                     ImGui::TableNextColumn();
                     ImGui::TextUnformatted(type.c_str());
                     ImGui::TableNextColumn();
-                    ImGui::Text("%s %s", triggerIcon(trigger), trigger.c_str());
+                    ImGui::TextUnformatted(link.field.c_str());
                     ImGui::TableNextColumn();
-                    ImGui::TextUnformatted(script.c_str());
+                    ImGui::Text("%s %s",
+                                link.kind == PropLink::Kind::Script ? ICON_FA_SCROLL : ICON_FA_DOOR_OPEN,
+                                link.value.c_str());
                     ImGui::TableNextColumn();
                     ImGui::TextUnformatted(state.c_str());
                 };
+                // The game's word on each object, when its inspect_entities
+                // hook gives one: {id: {state = "..."}}.
+                const auto stateOf = [&](const std::string& id) {
+                    const auto info = c.entities.find(id);
+                    return info != c.entities.end() && info->is_object() ? jsonString(*info, "state", "")
+                                                                         : std::string();
+                };
                 for (const auto& p : map.placements) {
-                    const auto self = Selection::placement(p.id);
-                    const Json info = c.entities.contains(p.id) ? c.entities.at(p.id) : Json();
-                    std::string state;
-                    if (info.is_object()) {
-                        if (const auto running = info.find("running");
-                            running != info.end() && running->is_object()) {
-                            state = "running " + jsonString(*running, "name", "");
-                        } else if (const auto parallel = info.find("parallel");
-                                   parallel != info.end() && parallel->is_object()) {
-                            state = "parallel running";
-                        } else if (jsonBool(info, "auto_done", false)) {
-                            state = "auto done";
-                        }
-                    } else {
-                        state = "not spawned";
-                    }
-                    if (const auto pages = p.props.find("pages");
-                        pages != p.props.end() && pages->is_array()) {
-                        std::size_t index = 0;
-                        for (const auto& page : *pages) {
-                            ++index;
-                            if (!page.is_object()) {
-                                continue;
-                            }
-                            const auto script = jsonString(page, "script", "(none)");
-                            const auto trigger = jsonString(page, "trigger", "action");
-                            std::string when;
-                            if (const auto conditions = page.find("when");
-                                conditions != page.end() && conditions->is_object()) {
-                                when = " when " + conditions->dump();
-                            }
-                            bool active = false;
-                            if (info.is_object()) {
-                                for (const auto& known : jsonArray(info, "pages")) {
-                                    if (jsonNumber(known, "index", 0) == static_cast<double>(index)) {
-                                        active = jsonBool(known, "active", false);
-                                        if (const auto error = known.find("error");
-                                            error != known.end() && error->is_string()) {
-                                            state = "page error: " + error->get<std::string>();
-                                        }
-                                    }
-                                }
-                            }
-                            row(self, p.id + " #" + std::to_string(index), p.type, trigger + when, script,
-                                active ? (state.empty() ? "active page" : state) : state, active);
-                        }
-                    } else if (const auto script = p.props.find("script");
-                               script != p.props.end() && script->is_string()) {
-                        row(self, p.id, p.type, jsonString(p.props, "trigger", "action"),
-                            script->get<std::string>(), state, false);
-                    } else if (p.props.contains("map") && p.props.at("map").is_string()) {
-                        row(self, p.id, p.type, jsonString(p.props, "trigger", "touch"),
-                            "warp to " + jsonString(p.props, "map", "?") + " / " +
-                                jsonString(p.props, "point", "?"),
-                            state, false);
-                    } else if (info.is_object() &&
-                               (jsonBool(info, "interact", false) || jsonBool(info, "on_touch", false))) {
-                        row(self, p.id, p.type, jsonBool(info, "on_touch", false) ? "touch" : "action",
-                            "built-in (" + p.type + ")", state, false);
+                    for (const auto& link : propLinks(typeFields(schemas_, "entities", p.type), p.props)) {
+                        row(Selection::placement(p.id), p.id, p.type, link, stateOf(p.id));
                     }
                 }
                 for (const auto& z : map.zones) {
-                    row(Selection::zone(z.id), z.id, "zone", "enter / exit", z.type + " handler", "", false);
+                    for (const auto& link : propLinks(typeFields(schemas_, "zones", z.type), z.props)) {
+                        row(Selection::zone(z.id), z.id, z.type + " zone", link, stateOf(z.id));
+                    }
                 }
                 ImGui::EndTable();
             }

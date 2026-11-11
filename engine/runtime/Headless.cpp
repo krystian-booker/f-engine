@@ -380,16 +380,6 @@ int checkGame(const std::filesystem::path& game, const std::filesystem::path& bu
             }
         }
     }
-    {
-        // Every file, module, map and audio id that maps, data tables and
-        // sprites name must exist.
-        AssetCatalog catalog(game, builtin);
-        catalog.scan();
-        for (const auto& [target, user] : catalog.missing()) {
-            std::cerr << "missing " << target << " (named by " << user.file << " at " << user.where << ")\n";
-            ++problems;
-        }
-    }
     if (!engine->start()) {
         ++problems;
     } else {
@@ -404,6 +394,39 @@ int checkGame(const std::filesystem::path& game, const std::filesystem::path& bu
         }
         engine->tick(1.0 / 60.0);
         engine->draw(1.0);
+    }
+    {
+        // Every file, module, map and audio id that maps, data tables and
+        // sprites name must exist. Which props of a placement or a zone are
+        // scripts and maps is the game's to say (its editor.describe hook).
+        AssetCatalog catalog(game, builtin);
+        if (engine->hasMain()) {
+            try {
+                const auto main = engine->lua().require(engine->config().entry);
+                if (main.get_type() == sol::type::table) {
+                    const auto hooks = main.as<sol::table>().raw_get<sol::object>("editor");
+                    if (hooks.get_type() == sol::type::table) {
+                        const sol::object describe = hooks.as<sol::table>().raw_get<sol::object>("describe");
+                        if (describe.get_type() == sol::type::function) {
+                            const auto result = engine->lua().invoke(describe);
+                            if (result.valid() && result.get_type() == sol::type::string) {
+                                const auto parsed = Json::parse(result.get<std::string>(), nullptr, false);
+                                if (parsed.is_object()) {
+                                    catalog.setSchemas(parsed);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (const std::exception&) {
+                // The entry module's own errors are counted below.
+            }
+        }
+        catalog.scan();
+        for (const auto& [target, user] : catalog.missing()) {
+            std::cerr << "missing " << target << " (named by " << user.file << " at " << user.where << ")\n";
+            ++problems;
+        }
     }
     problems += static_cast<int>(engine->lua().errors().size());
     std::cout << (problems ? "FAILED: " : "OK: ") << problems << " problem(s)\n";

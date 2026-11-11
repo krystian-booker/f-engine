@@ -584,6 +584,22 @@ MapData MapData::fromJson(const Json& j) {
         zone.max = jsonVec2(z.at("max"));
         zone.layer = z.value("layer", -1);
         zone.props = z.value("props", Json::object());
+        const auto shape = z.value("shape", std::string("box"));
+        if (shape == "ellipse") {
+            zone.shape = ZoneShape::Ellipse;
+        } else if (shape == "polygon") {
+            zone.shape = ZoneShape::Polygon;
+            for (const auto& point : z.value("points", Json::array())) {
+                zone.points.push_back(jsonVec2(point));
+            }
+            if (zone.points.size() < 3 || zone.points.size() > Zone::MaxPoints) {
+                throw std::runtime_error("Zone '" + zone.id + "' needs 3 to 64 points for its polygon");
+            }
+            zone.fitBounds();
+        } else if (shape != "box") {
+            throw std::runtime_error("Zone '" + zone.id + "' has the unknown shape '" + shape +
+                                     "' (box, ellipse or polygon)");
+        }
         if (zone.min.x > zone.max.x || zone.min.y > zone.max.y) {
             throw std::runtime_error("Zone '" + zone.id + "' has min greater than max");
         }
@@ -686,12 +702,20 @@ Json MapData::toJson() const {
         placementsJson.push_back(std::move(out));
     }
     for (const auto& z : zones) {
-        zonesJson.push_back({{"id", z.id},
-                             {"type", z.type},
-                             {"min", fe::toJson(z.min)},
-                             {"max", fe::toJson(z.max)},
-                             {"layer", z.layer},
-                             {"props", z.props}});
+        Json out = {
+            {"id", z.id},       {"type", z.type},  {"min", fe::toJson(z.min)}, {"max", fe::toJson(z.max)},
+            {"layer", z.layer}, {"props", z.props}};
+        if (z.shape != ZoneShape::Box) { // written only when not the default
+            out["shape"] = zoneShapeName(z.shape);
+        }
+        if (z.shape == ZoneShape::Polygon) {
+            auto points = Json::array();
+            for (const auto& point : z.points) {
+                points.push_back(fe::toJson(point));
+            }
+            out["points"] = std::move(points);
+        }
+        zonesJson.push_back(std::move(out));
     }
     for (const auto& l : lights) {
         lightsJson.push_back(l.toJson());
@@ -754,5 +778,68 @@ Json MapData::toJson() const {
                        {"overrides", overrides}};
     }
     return out;
+}
+const char* zoneShapeName(ZoneShape shape) {
+    return shape == ZoneShape::Ellipse ? "ellipse" : shape == ZoneShape::Polygon ? "polygon" : "box";
+}
+
+bool Zone::contains(glm::vec3 p, int l) const {
+    if ((layer >= 0 && layer != l) || p.x < min.x || p.x > max.x || p.z < min.y || p.z > max.y) {
+        return false;
+    }
+    switch (shape) {
+    case ZoneShape::Box:
+        return true;
+    case ZoneShape::Ellipse: {
+        const glm::vec2 radius = (max - min) * 0.5f;
+        if (radius.x <= 0 || radius.y <= 0) {
+            return true; // degenerate: a line or a point, which the bounds test covered
+        }
+        const glm::vec2 d = (glm::vec2(p.x, p.z) - (min + max) * 0.5f) / radius;
+        return glm::dot(d, d) <= 1.0f;
+    }
+    case ZoneShape::Polygon: {
+        // Even-odd rule: a ray towards +x crosses the outline an odd number of times.
+        bool inside = false;
+        for (std::size_t i = 0, j = points.size() - 1; i < points.size(); j = i++) {
+            const auto a = points[i], b = points[j];
+            if ((a.y > p.z) != (b.y > p.z) && p.x < (b.x - a.x) * (p.z - a.y) / (b.y - a.y) + a.x) {
+                inside = !inside;
+            }
+        }
+        return inside;
+    }
+    }
+    return false;
+}
+
+std::vector<glm::vec2> Zone::outline(int segments) const {
+    switch (shape) {
+    case ZoneShape::Polygon:
+        return points;
+    case ZoneShape::Ellipse: {
+        std::vector<glm::vec2> corners;
+        const glm::vec2 centre = (min + max) * 0.5f, radius = (max - min) * 0.5f;
+        for (int i = 0; i < segments; ++i) {
+            const float angle = glm::two_pi<float>() * static_cast<float>(i) / static_cast<float>(segments);
+            corners.push_back(centre + radius * glm::vec2(std::cos(angle), std::sin(angle)));
+        }
+        return corners;
+    }
+    case ZoneShape::Box:
+        break;
+    }
+    return {min, {max.x, min.y}, max, {min.x, max.y}};
+}
+
+void Zone::fitBounds() {
+    if (shape != ZoneShape::Polygon || points.empty()) {
+        return;
+    }
+    min = max = points.front();
+    for (const auto& point : points) {
+        min = glm::min(min, point);
+        max = glm::max(max, point);
+    }
 }
 } // namespace fe

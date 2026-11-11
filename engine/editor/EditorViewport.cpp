@@ -420,7 +420,8 @@ void Editor::acceptViewportDrop(World& w, double alpha) {
         }
         const auto model = kind == AssetKind::Model ? engine_.assets().tryModel(path) : nullptr;
         const auto placement =
-            placementForAsset(kind, path, hit->cell, w.authored().grid, defaultType("entities"),
+            placementForAsset(kind, path, hit->cell, w.authored().grid,
+                              defaultType(kind == AssetKind::Model ? "models" : "entities"),
                               w.authored().placements, model.get(), hit->point);
         if (!placement) {
             status_ = "Only sprites (.anim.json) and models (.glb) can be placed in the scene";

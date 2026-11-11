@@ -878,8 +878,8 @@ World.placements = nil
 ---@type fun(self: World, id: string): {id: string, type: string, position: Vec3, facing: {x: number, z: number}, layer: integer, yaw: number, scale: Vec3, props: table}|nil
 World.placement = nil
 
---- Authored zones (camera regions, trigger areas, anything a game defines).
----@type fun(self: World): {id: string, type: string, min: {x: number, z: number}, max: {x: number, z: number}, layer: integer, props: table}[]
+--- Authored zones (camera regions, trigger areas, anything a game defines). A zone is a box (`min` to `max`), the ellipse inscribed in that box, or a polygon whose corners are `points` (`min` and `max` are then its bounds). Entities with a mover or a collider entering and leaving one are reported by world:events() as zone_enter and zone_exit, with the zone's id as `name`.
+---@type fun(self: World): {id: string, type: string, shape: 'box'|'ellipse'|'polygon', min: {x: number, z: number}, max: {x: number, z: number}, points?: {x: number, z: number}[], layer: integer, props: table}[]
 World.zones = nil
 
 --- Zones containing a position.
