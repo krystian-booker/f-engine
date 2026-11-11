@@ -175,12 +175,12 @@ sol::table displayTable(sol::state_view lua, const DisplayState& display) {
     return out;
 }
 
-// A path inside the game folder, or inside lualib/fe for '@fe/...' ('@fe/'
+// A path inside the game folder, or inside the engine's builtin folder for '@fe/...' ('@fe/'
 // alone is that folder).
 std::filesystem::path gameFile(const LuaHost& host, const std::string& path) {
     if (path.starts_with("@fe/")) {
         const auto rest = path.substr(4);
-        return resolveInside(host.libraryRoot() / "fe", rest.empty() ? "." : rest);
+        return resolveInside(host.builtinRoot(), rest.empty() ? "." : rest);
     }
     return resolveInside(host.gameRoot(), path);
 }
@@ -280,8 +280,8 @@ void bindDev(Engine& engine) {
             },
             "fun(world: string): 'ok'|'pending'",
             "Ask the development editor whether the game may leave a world's map: 'ok' (also without an "
-            "editor), or 'pending' while it asks about unsaved edits; then poll leave_map_result. The field's "
-            "warp does this, so a door or a zone never discards map edits.")
+            "editor), or 'pending' while it asks about unsaved edits; then poll leave_map_result. Call "
+            "it before unloading a map the player walks out of, so a door or a zone never discards map edits.")
         .fn(
             "leave_map_result",
             [&engine]() -> sol::optional<std::string> {
@@ -455,7 +455,7 @@ void bindData(Engine& engine) {
                 }
             },
             "fun(path: string): any",
-            "Read and parse a JSON file inside the game folder ('@fe/' for lualib).");
+            "Read and parse a JSON file inside the game folder ('@fe/' for builtin).");
     ModuleBinder(host, engine.docs(), "fe.fs", "Read-only access to files inside the game folder.")
         .fn(
             "read", [&host](const std::string& path) { return readFile(gameFile(host, path)); },
@@ -483,7 +483,7 @@ void bindData(Engine& engine) {
                 return out;
             },
             "fun(folder: string): string[]",
-            "Sorted entries of a folder inside the game folder ('@fe/' for lualib, like read and exists); "
+            "Sorted entries of a folder inside the game folder ('@fe/' for builtin, like read and exists); "
             "folders end with '/'.")
         .fn(
             "user_list",
@@ -631,7 +631,7 @@ void bindApp(Engine& engine) {
             "Change display settings; omitted fields stay. fullscreen = true means 'borderless' (a desktop-"
             "sized window); 'exclusive' switches the monitor to the display mode closest to width x height. "
             "Applied after the frame; fe.app.display() shows the request until then. The engine does not "
-            "store these: keep them in the player's settings (fe.config) and apply them at start.")
+            "store these: keep them in the player's settings (fe.save.write_config) and apply them at start.")
         .fn(
             "locale", [&engine] { return engine.locale(); }, "fun(): string",
             "The player's preferred language and region as a BCP 47 tag, such as 'en-US' or 'ja' (from the "
@@ -694,7 +694,7 @@ void bindApp(Engine& engine) {
             "tag (default fe.app.locale()), of which the language subtag chooses from a built-in table (en, "
             "de, fr, es, it, pt, ja, zh, ko, ru, pl, nl, sv, tr; others format as English; languages that "
             "group with a space use a no-break space). `decimals` (0 to 20) is 0 for a whole number and 2 "
-            "otherwise by default; the number is rounded to it. fe.i18n.number uses the current language.")
+            "otherwise by default; the number is rounded to it.")
         .fn(
             "capture",
             [&engine](const std::string& path) {

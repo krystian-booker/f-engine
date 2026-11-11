@@ -48,7 +48,7 @@ struct AudioId {
 // archives) through engine/core/Paths.h, so it runs headless.
 class AssetCatalog {
 public:
-    AssetCatalog(std::filesystem::path gameRoot, std::filesystem::path libraryRoot);
+    AssetCatalog(std::filesystem::path gameRoot, std::filesystem::path builtinRoot);
     // Reads the folder again. Cheap enough to call after the file watcher
     // reports a change; the revision moves when the result differs.
     void scan();
@@ -82,7 +82,7 @@ private:
     void indexMap(const std::string& path);
     void indexData(const std::string& path);
     void indexSprite(const std::string& path);
-    std::filesystem::path gameRoot_, libraryRoot_;
+    std::filesystem::path gameRoot_, builtinRoot_;
     std::vector<AssetEntry> entries_;
     std::map<std::string, std::vector<AssetReference>, std::less<>> references_;
     std::vector<MapInfo> maps_;

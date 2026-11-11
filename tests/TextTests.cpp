@@ -42,7 +42,7 @@ TEST_CASE("markup round trips through toMarkup") {
 }
 
 TEST_CASE("layout wraps words and pagination splits pages") {
-    AssetCache assets(FENGINE_TEST_GAME, FENGINE_LUALIB);
+    AssetCache assets(FENGINE_TEST_GAME, FENGINE_BUILTIN);
     assets.defineFont("default", {{"files", {"@fe/assets/fonts/pixel.fnt"}}});
     TextSystem text(assets);
     TextOptions options;
@@ -254,7 +254,7 @@ TEST_CASE("ruby readings sit centred above their base and reveal with it") {
 }
 
 TEST_CASE("bold uses the bold face or draws twice; effects reach canvas quads") {
-    AssetCache assets(FENGINE_TEST_GAME, FENGINE_LUALIB);
+    AssetCache assets(FENGINE_TEST_GAME, FENGINE_BUILTIN);
     assets.defineFont("default", {{"files", {"@fe/assets/fonts/pixel.fnt"}}});
     TextSystem text(assets);
     Canvas canvas(text, 320, 180);
@@ -304,7 +304,7 @@ TEST_CASE("CJK text breaks between characters following kinsoku rules") {
 }
 
 TEST_CASE("pagination keeps sizes, ruby and instant speed") {
-    AssetCache assets(FENGINE_TEST_GAME, FENGINE_LUALIB);
+    AssetCache assets(FENGINE_TEST_GAME, FENGINE_BUILTIN);
     assets.defineFont("default", {{"files", {"@fe/assets/fonts/pixel.fnt"}}});
     TextSystem text(assets);
     TextOptions options;

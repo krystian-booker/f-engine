@@ -31,10 +31,10 @@ namespace fe {
 class AssetCache {
 public:
     static constexpr std::size_t DefaultBudget = std::size_t{512} << 20;
-    // Paths beginning with "@fe/" resolve inside lualib/fe (shared fonts and
+    // Paths beginning with "@fe/" resolve inside the builtin folder (shared fonts and
     // UI art), "user://" ones inside the per-user data folder (read only,
     // e.g. save thumbnails), all others inside the game folder.
-    AssetCache(std::filesystem::path root, std::filesystem::path libraryRoot,
+    AssetCache(std::filesystem::path root, std::filesystem::path builtinRoot,
                std::filesystem::path userRoot = {}, std::size_t budget = DefaultBudget);
     ~AssetCache();
     AssetCache(const AssetCache&) = delete;
@@ -109,7 +109,7 @@ private:
     void touch(const std::string& path) { lastUse_[path] = ++useCounter_; }
     bool erase(const std::string& path);
     void worker();
-    std::filesystem::path root_, libraryRoot_, userRoot_;
+    std::filesystem::path root_, builtinRoot_, userRoot_;
     std::map<std::string, Stamp> userStamps_;
     std::map<std::string, std::shared_ptr<const Model>> models_;
     std::map<std::string, std::shared_ptr<const SpriteAnimation>> sprites_;

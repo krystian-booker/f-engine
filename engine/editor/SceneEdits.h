@@ -28,7 +28,7 @@ struct Model;
 // "chest2"...); the prefix itself when free.
 [[nodiscard]] std::string uniquePlacementId(const std::string& prefix, const std::vector<Placement>& placements);
 // The placement to make when an asset is dropped on a cell: a sprite becomes
-// the game's default placement type (`defaultType`, from fe.devtools) with
+// the game's default placement type (`defaultType`, from the game's editor.describe hook) with
 // `props.sprite`, a model a "prop" with `props.model`. A model given with the
 // drop `point` snaps by its footprint (snapForFootprint); otherwise the
 // placement stands at the cell's centre. Nullopt for assets that cannot stand

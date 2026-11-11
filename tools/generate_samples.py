@@ -609,7 +609,7 @@ def vale():
 
 def fixture():
     """A small arena used by the engine's own C++ and Lua tests."""
-    root = REPO / "lualib" / "tests" / "game"
+    root = REPO / "tests" / "game"
     grid = GridBuilder(12, 10, layers=2)
     scene = Diorama()
     grid.fill(0, 0, 12, 1, walk=False)
@@ -1095,8 +1095,8 @@ def backdrop(path, color, peaks, seed):
 # --------------------------------------------------------------------------- engine UI art
 
 def engine():
-    """Default UI art shipped in lualib/fe/assets/ui (window skin, cursor, emotes)."""
-    root = REPO / "lualib" / "fe" / "assets" / "ui"
+    """Default UI art shipped in builtin/assets/ui (window skin, cursor, emotes)."""
+    root = REPO / "builtin" / "assets" / "ui"
     skin = Canvas(24, 24)
     for y in range(24):
         for x in range(24):

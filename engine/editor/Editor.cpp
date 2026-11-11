@@ -19,7 +19,7 @@ namespace fe {
 using namespace editorui;
 
 Editor::Editor(Engine& engine)
-    : engine_(engine), catalog_(engine.lua().gameRoot(), engine.lua().libraryRoot()),
+    : engine_(engine), catalog_(engine.lua().gameRoot(), engine.lua().builtinRoot()),
       importQueue_(std::make_shared<ImportQueue>()) {
     // For screenshots and tests: the folder the Assets panel opens on.
     if (const char* folder = std::getenv("FENGINE_EDITOR_ASSET_FOLDER")) {
@@ -180,16 +180,25 @@ std::shared_ptr<World> Editor::world() {
 }
 
 sol::object Editor::devtool(const char* name) {
+    // The game's editor hooks: the `editor` table of its entry module, read
+    // raw (no metamethod of the game's runs here). A game without the table,
+    // or without this hook, simply doesn't offer that action.
+    if (!engine_.hasMain()) {
+        return sol::lua_nil;
+    }
     try {
-        const auto module = engine_.lua().require("fe.devtools");
+        const auto module = engine_.lua().require(engine_.config().entry);
         if (module.get_type() == sol::type::table) {
-            sol::object fn = module.as<sol::table>()[name];
-            if (fn.get_type() == sol::type::function) {
-                return fn;
+            const auto hooks = module.as<sol::table>().raw_get<sol::object>("editor");
+            if (hooks.get_type() == sol::type::table) {
+                sol::object fn = hooks.as<sol::table>().raw_get<sol::object>(name);
+                if (fn.get_type() == sol::type::function) {
+                    return fn;
+                }
             }
         }
-    } catch (const std::exception& error) {
-        status_ = error.what();
+    } catch (const std::exception&) {
+        // The entry module failed to load; the error overlay already says so.
     }
     return sol::lua_nil;
 }
@@ -291,7 +300,12 @@ void Editor::placementChanged(World& w, const std::string& id) {
     }
     const auto hook = devtool("placement_changed");
     if (hook == sol::lua_nil) {
-        status_ = "Placement edited; it respawns when the map is saved (fe.devtools.placement_changed is undefined)";
+        if (w.name() == PreviewWorld) {
+            respawnPreview(w, id); // the editor's own stand-in for a map no game code is running
+        } else {
+            status_ = "Placement edited; the game shows it when the map loads again (its main.lua has no "
+                      "editor.placement_changed hook)";
+        }
         return;
     }
     // The call-out may replace or destroy entities; nothing here holds one.

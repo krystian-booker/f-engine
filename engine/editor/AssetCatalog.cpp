@@ -102,14 +102,14 @@ AssetKind assetKindOf(std::string_view path) {
     return AssetKind::Other;
 }
 
-AssetCatalog::AssetCatalog(std::filesystem::path gameRoot, std::filesystem::path libraryRoot)
-    : gameRoot_(std::move(gameRoot)), libraryRoot_(std::move(libraryRoot)) {
+AssetCatalog::AssetCatalog(std::filesystem::path gameRoot, std::filesystem::path builtinRoot)
+    : gameRoot_(std::move(gameRoot)), builtinRoot_(std::move(builtinRoot)) {
 }
 
 bool AssetCatalog::exists(std::string_view path) const {
     try {
         if (path.starts_with("@fe/")) {
-            return !libraryRoot_.empty() && isFile(resolveInside(libraryRoot_ / "fe", path.substr(4)));
+            return !builtinRoot_.empty() && isFile(resolveInside(builtinRoot_, path.substr(4)));
         }
         return isFile(resolveInside(gameRoot_, path));
     } catch (const std::exception&) {
@@ -148,10 +148,10 @@ void AssetCatalog::scan() {
     } catch (const std::exception& error) {
         log(LogLevel::Warning, std::string("Asset catalog: ") + error.what());
     }
-    // The kit's own assets (default sprites and the like), as "@fe/assets/...".
-    if (!libraryRoot_.empty()) {
+    // The engine's own assets (default font, input glyphs and the like), as "@fe/assets/...".
+    if (!builtinRoot_.empty()) {
         try {
-            const auto folder = libraryRoot_ / "fe" / "assets";
+            const auto folder = builtinRoot_ / "assets";
             if (isFolder(folder)) {
                 for (const auto& relative : listFilesBelow(folder)) {
                     AssetEntry entry;
@@ -317,7 +317,7 @@ void AssetCatalog::indexData(const std::string& path) {
 
 std::filesystem::path AssetCatalog::fileOf(const std::string& path) const {
     if (path.starts_with("@fe/")) {
-        return libraryRoot_ / "fe" / path.substr(4);
+        return builtinRoot_ / path.substr(4);
     }
     return gameRoot_ / path;
 }
@@ -377,7 +377,7 @@ std::vector<std::pair<std::string, AssetReference>> AssetCatalog::missing() cons
         bool found;
         if (target.starts_with("audio:")) {
             const auto id = target.substr(6);
-            // A path-like id names a file directly (fe.sound's rule).
+            // A path-like id names a file directly (the convention of data/audio.json).
             found = id.find('/') != std::string::npos || id.find('.') != std::string::npos ? exists(id)
                                                                                            : audioIds.contains(id);
         } else {

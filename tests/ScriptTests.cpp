@@ -24,7 +24,7 @@ struct Folders {
     std::filesystem::path game = root / "game", lib = root / "lib";
     Folders() {
         std::filesystem::remove_all(root);
-        write(lib / "fe" / "init.lua", "return {}");
+        write(lib / "assets" / "weather.json", "{}");
         write(lib / "shared.lua", "return {who = 'library'}");
         write(lib / "only_lib.lua", "return {who = 'library'}");
         write(game / "shared.lua", "return {who = 'game'}");
@@ -64,7 +64,7 @@ public:
 EngineOptions engineOptions(const std::filesystem::path& game = FENGINE_TEST_GAME) {
     EngineOptions options;
     options.gameRoot = game;
-    options.libraryRoot = FENGINE_LUALIB;
+    options.builtinRoot = FENGINE_BUILTIN;
     options.userData = std::filesystem::temp_directory_path() / "fengine-engine-test";
     options.seed = 99;
     return options;
@@ -77,13 +77,13 @@ std::string pairsOrder(LuaHost& host) {
 }
 } // namespace
 
-TEST_CASE("require searches the game before the library and caches") {
+TEST_CASE("require searches only the game folder and caches") {
     Folders f;
     LuaHost host(f.game, f.lib, false);
     sol::table shared = host.require("shared");
     CHECK(shared.get<std::string>("who") == "game");
-    sol::table only = host.require("only_lib");
-    CHECK(only.get<std::string>("who") == "library");
+    // The engine ships no Lua: a module in the builtin folder is not a module.
+    CHECK_THROWS(host.require("only_lib"));
     CHECK(host.require("shared") == shared);
     CHECK_THROWS(host.require("../escape"));
     CHECK_THROWS(host.require("missing"));
@@ -481,24 +481,6 @@ TEST_CASE("hot reload follows a module that now requires a different module") {
     CHECK(host.console("user.name(), user.dep == require('dep_b'), require('dep_a').name") == "b\ttrue\ta");
 }
 
-TEST_CASE("reloading stateful kits keeps their state") {
-    Engine engine(engineOptions());
-    auto& lua = engine.lua();
-    REQUIRE(
-        lua.evaluate("task = require('fe.task'); state = require('fe.state'); scene = require('fe.scene'); "
-                     "done = false; task.spawn(function() task.wait(0.1); done = true end); "
-                     "state.set_flag('met', true); scene.push({name = 'probe'})")
-            .ok);
-    const auto lib = std::filesystem::path(FENGINE_LUALIB) / "fe";
-    for (const char* file : {"task.lua", "state.lua", "scene.lua"}) {
-        CHECK(lua.reloadFile(lib / file));
-    }
-    CHECK(lua.errors().empty());
-    CHECK(lua.console("task.count(), state.flag('met'), scene.top().name") == "1\ttrue\tprobe");
-    lua.evaluate("for i = 1, 10 do task.update(1 / 60) end");
-    CHECK(lua.console("done, task.count()") == "true\t0");
-}
-
 TEST_CASE("the development watchdog stops runaway scripts") {
     Folders f;
     LuaHost host(f.game, f.lib, true);
@@ -518,9 +500,9 @@ TEST_CASE("the headless test runner gives every test the whole watchdog limit") 
     // Three tests of 0.2 s each: together, but not one by one, over the limit.
     write(game.root / "tests" / "slow.lua",
           "return {a = " + spin("0.2") + ", b = " + spin("0.2") + ", c = " + spin("0.2") + "}");
-    CHECK(runTests(game.root, FENGINE_LUALIB, "", 0.5) == 0);
+    CHECK(runTests(game.root, FENGINE_BUILTIN, "", 0.5) == 0);
     write(game.root / "tests" / "slow.lua", "return {runaway = " + spin("5") + "}");
-    CHECK(runTests(game.root, FENGINE_LUALIB, "", 0.5) == 1);
+    CHECK(runTests(game.root, FENGINE_BUILTIN, "", 0.5) == 1);
 }
 
 TEST_CASE("Lua values convert to and from JSON") {
@@ -1038,10 +1020,10 @@ TEST_CASE("every entity component is set by a table, read by no argument and rem
 
 TEST_CASE("image and sprite queries raise errors for missing files") {
     TestGame game("return {}");
-    std::filesystem::copy_file(std::filesystem::path(FENGINE_LUALIB) / ".." / "samples" / "vale" / "sprites" /
+    std::filesystem::copy_file(std::filesystem::path(FENGINE_BUILTIN) / ".." / "samples" / "starfall" / "sprites" /
                                    "slime.anim.json",
                                game.root / "slime.anim.json");
-    std::filesystem::copy_file(std::filesystem::path(FENGINE_LUALIB) / ".." / "samples" / "vale" / "sprites" /
+    std::filesystem::copy_file(std::filesystem::path(FENGINE_BUILTIN) / ".." / "samples" / "starfall" / "sprites" /
                                    "slime.png",
                                game.root / "slime.png");
     Engine engine(engineOptions(game.root));

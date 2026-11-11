@@ -193,9 +193,9 @@ bool isSolMetatable(lua_State* state, int key, int value) {
 
 } // namespace
 
-LuaHost::LuaHost(std::filesystem::path gameRoot, std::filesystem::path libraryRoot, bool development)
+LuaHost::LuaHost(std::filesystem::path gameRoot, std::filesystem::path builtinRoot, bool development)
     : gameRoot_(std::filesystem::weakly_canonical(gameRoot)),
-      libraryRoot_(std::filesystem::weakly_canonical(libraryRoot)), start_(std::chrono::steady_clock::now()),
+      builtinRoot_(std::filesystem::weakly_canonical(builtinRoot)), start_(std::chrono::steady_clock::now()),
       frameStart_(start_) {
     lua_ = std::make_unique<sol::state>();
     lua_pushlightuserdata(lua_->lua_state(), this);
@@ -233,7 +233,7 @@ LuaHost::LuaHost(std::filesystem::path gameRoot, std::filesystem::path libraryRo
     handler_ = sol::make_object(*lua_, tracebackHandler).as<sol::function>();
     fe_ = lua_->create_named_table("fe");
     // The module cache is a registry reference only: scripts cannot reach it
-    // (a script that could would split a kit's state in two).
+    // (a script that could would split a module's state in two).
     loaded_ = lua_->create_table();
     lua_->set_function("require", [this](const std::string& name) { return require(name); });
     lua_pushliteral(lua_->lua_state(), "");
@@ -390,22 +390,17 @@ std::optional<std::filesystem::path> LuaHost::resolve(const std::string& name) c
     }
     std::string relative = name;
     std::replace(relative.begin(), relative.end(), '.', '/');
-    for (const auto& root : {gameRoot_, libraryRoot_}) {
-        for (const auto& candidate : {root / (relative + ".lua"), root / relative / "init.lua"}) {
-            if (isFile(candidate)) {
-                return candidate;
-            }
+    // Only the game folder: the engine ships no Lua modules of its own.
+    for (const auto& candidate : {gameRoot_ / (relative + ".lua"), gameRoot_ / relative / "init.lua"}) {
+        if (isFile(candidate)) {
+            return candidate;
         }
     }
     return std::nullopt;
 }
 
 std::string LuaHost::chunkName(const std::filesystem::path& file) const {
-    auto relative = relativeTo(gameRoot_, file);
-    if (relative.empty()) {
-        relative = "lualib/" + relativeTo(libraryRoot_, file);
-    }
-    return "@" + relative;
+    return "@" + relativeTo(gameRoot_, file);
 }
 
 sol::object LuaHost::load(const std::string& name, const std::filesystem::path& file) {
@@ -444,7 +439,7 @@ sol::object LuaHost::require(const std::string& name) {
     }
     const auto file = resolve(name);
     if (!file) {
-        throw std::runtime_error("Module '" + name + "' not found in the game folder or lualib");
+        throw std::runtime_error("Module '" + name + "' not found in the game folder");
     }
     // The entry lives only while the module loads, whatever the outcome.
     const auto loading = loading_.emplace(name, 1).first;

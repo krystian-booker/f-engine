@@ -69,8 +69,12 @@ struct EditorFrame {
 // with the per-kind forms in EditorMapObjects.cpp and EditorWorldTab.cpp),
 // EditorMapTab.cpp (the Map panel), EditorDataTab.cpp and
 // EditorToolsTabs.cpp. Everything it edits is generic engine data with forms
-// generated from the schemas scripts declare; game-specific actions are
-// fe.devtools functions the editor calls.
+// generated from the schemas the game declares; game-specific actions are
+// optional hooks the game's entry module offers in its `editor` table
+// (describe, play_from, placement_changed, inspect_entity, run_page, tasks,
+// cancel_task, recent_events, validate_table, task_count, list, launch; see
+// docs/editor.md). Without them the editor still opens, previews, edits and
+// saves maps on its own.
 //
 // Map edits change a world's authored map and its live map together; Save
 // writes the authored map, so run-time changes scripts make never reach the
@@ -134,7 +138,7 @@ private:
     void edit(World& world, const std::function<void(MapData&)>& change);
     void undo(World& world, bool forward);
     void saveMap(World& world);
-    // An fe.devtools function, or nil when the game doesn't define it.
+    // A hook of the entry module's `editor` table, or nil when the game doesn't define it.
     sol::object devtool(const char* name);
     // True when a Lua call succeeded; otherwise its error goes to the status line.
     bool succeeded(const sol::protected_function_result& result);
@@ -150,7 +154,7 @@ private:
     void setMode(Mode mode);
     void select(const Selection& selection);
     // After an authored placement changed (not just moved): respawn its
-    // entity through fe.devtools.placement_changed, or note that a save will.
+    // entity through the game's editor.placement_changed hook (or the preview).
     void placementChanged(World& world, const std::string& id);
     // Respawns every placement that differs between two maps (undo, redo).
     void placementsChanged(World& world, const MapData& before);
@@ -169,6 +173,11 @@ private:
     // Runs `action` now, or after the unsaved-edits prompt when the map has edits.
     void confirmDiscard(World* world, const char* what, std::function<void()> action);
     void openMap(const std::string& id);
+    // The fallback of openMap for a game without an `editor.play_from` hook.
+    void openPreview(const std::string& id);
+    void respawnPreview(World& w, const std::string& id);
+    // The world openPreview loads maps into.
+    static constexpr const char* PreviewWorld = "editor_preview";
     void newMap();
     void drawPlayBar();
     void drawMenuBar(const EditorFrame& frame);

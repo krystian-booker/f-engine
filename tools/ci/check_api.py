@@ -2,7 +2,7 @@
 """Fail when the committed API stubs/docs differ from the C++ bindings.
 
 Usage: check_api.py <fengine_headless> [--update]
---update rewrites lualib/types/fengine.d.lua and docs/api.md in place.
+--update rewrites builtin/types/fengine.d.lua and docs/api.md in place.
 
 The engine itself checks each binding's LuaLS signature against the
 parameters its C++ reads (BindingDocs::add): a development build throws at
@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-TARGETS = {"fengine.d.lua": ROOT / "lualib" / "types" / "fengine.d.lua", "api.md": ROOT / "docs" / "api.md"}
+TARGETS = {"fengine.d.lua": ROOT / "builtin" / "types" / "fengine.d.lua", "api.md": ROOT / "docs" / "api.md"}
 
 
 def main():

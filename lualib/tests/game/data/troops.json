@@ -1,6 +1,0 @@
-[
-  {"id": "slimes", "members": [{"enemy": "slime"}, {"enemy": "slime"}]},
-  {"id": "golem", "members": [{"enemy": "golem"}], "escapable": false},
-  {"id": "wisps", "members": [{"enemy": "wisp"}, {"enemy": "wisp"}]},
-  {"id": "brute", "members": [{"enemy": "brute"}], "escapable": false}
-]

@@ -27,7 +27,7 @@ struct Scratch {
     AssetCache assets;
     World world;
     Scratch(const std::string& name, const Json& grid, const std::map<std::string, std::string>& files = {})
-        : root(prepare(name, files)), assets(root, FENGINE_LUALIB),
+        : root(prepare(name, files)), assets(root, FENGINE_BUILTIN),
           world("scratch", MapData::fromJson({{"format", 2}, {"id", "scratch"}, {"grid", grid}}), assets, 3) {
     }
     static std::filesystem::path prepare(const std::string& name,
@@ -48,7 +48,7 @@ struct Scratch {
     }
 };
 struct Fixture {
-    AssetCache assets{FENGINE_TEST_GAME, FENGINE_LUALIB};
+    AssetCache assets{FENGINE_TEST_GAME, FENGINE_BUILTIN};
     World world{"test", MapData::load(std::filesystem::path(FENGINE_TEST_GAME) / "maps/arena/map.json"),
                 assets, 7};
 
@@ -307,7 +307,7 @@ TEST_CASE("can_occupy sees colliders added, moved and removed during the script 
 TEST_CASE("can_occupy sees a collider grown during the script update") {
     EngineOptions options;
     options.gameRoot = FENGINE_TEST_GAME;
-    options.libraryRoot = FENGINE_LUALIB;
+    options.builtinRoot = FENGINE_BUILTIN;
     options.userData = std::filesystem::temp_directory_path() / "fengine-world-collider-grow";
     Engine engine(std::move(options));
     REQUIRE(engine.start());
@@ -476,7 +476,7 @@ TEST_CASE("a wide mover descends a rise-1 ramp through its directed link on a pl
 }
 
 TEST_CASE("static boxes come from the map's authored and baked lists") {
-    AssetCache assets{FENGINE_TEST_GAME, FENGINE_LUALIB};
+    AssetCache assets{FENGINE_TEST_GAME, FENGINE_BUILTIN};
     auto map = MapData::load(std::filesystem::path(FENGINE_TEST_GAME) / "maps/arena/map.json");
     map.colliders.push_back({{2, 0, 6}, {3, 1, 7}});
     map.bake.colliders.push_back({{4, 0, 6}, {5, 1, 7}});
@@ -496,7 +496,7 @@ TEST_CASE("walkers climb onto the arena bridge deck and back down along the plan
     // The arena's directed link at (6, 7) joins the ground to a deck one unit
     // up on layer 1 (cells 6..8 of row 7).
     const auto game = std::filesystem::path(FENGINE_TEST_GAME);
-    AssetCache assets(game, FENGINE_LUALIB);
+    AssetCache assets(game, FENGINE_BUILTIN);
     World world("arena", MapData::load(game / "maps/arena/map.json"), assets, 1);
     const auto e = world.spawn("", {2.5f, 0, 7.5f});
     world.registry().emplace<Mover>(e);
@@ -820,7 +820,7 @@ TEST_CASE("maps reject tilt-shift focus outside 0..1 and negative weather intens
 TEST_CASE("the engine skips paused worlds and scales their time") {
     EngineOptions options;
     options.gameRoot = FENGINE_TEST_GAME;
-    options.libraryRoot = FENGINE_LUALIB;
+    options.builtinRoot = FENGINE_BUILTIN;
     options.userData = std::filesystem::temp_directory_path() / "fengine-world-pause";
     options.seed = 5;
     Engine engine(std::move(options));
@@ -1124,7 +1124,7 @@ TEST_CASE("editor edits to map emitters and colliders apply without a reload") {
 TEST_CASE("Lua opts into diagonal gap jumps and raycasts through triggers") {
     EngineOptions options;
     options.gameRoot = FENGINE_TEST_GAME;
-    options.libraryRoot = FENGINE_LUALIB;
+    options.builtinRoot = FENGINE_BUILTIN;
     options.userData = std::filesystem::temp_directory_path() / "fengine-world-diagonal-lua";
     options.seed = 5;
     Engine engine(std::move(options));
@@ -1154,7 +1154,7 @@ TEST_CASE("Lua opts into diagonal gap jumps and raycasts through triggers") {
 TEST_CASE("Lua sees jump and climb marks, cost callbacks, routes and raycasts") {
     EngineOptions options;
     options.gameRoot = FENGINE_TEST_GAME;
-    options.libraryRoot = FENGINE_LUALIB;
+    options.builtinRoot = FENGINE_BUILTIN;
     options.userData = std::filesystem::temp_directory_path() / "fengine-world-nav-lua";
     options.seed = 5;
     Engine engine(std::move(options));
@@ -1232,7 +1232,7 @@ TEST_CASE("Lua path rules can leave ladders out") {
           "kind": "ladder"}]}})"}});
     EngineOptions options;
     options.gameRoot = game;
-    options.libraryRoot = FENGINE_LUALIB;
+    options.builtinRoot = FENGINE_BUILTIN;
     options.userData = game / "user";
     Engine engine(std::move(options));
     REQUIRE(engine.start());
@@ -1247,7 +1247,7 @@ TEST_CASE("Lua path rules can leave ladders out") {
 TEST_CASE("sprites and meshes name game shaders by validated names") {
     EngineOptions options;
     options.gameRoot = FENGINE_TEST_GAME;
-    options.libraryRoot = FENGINE_LUALIB;
+    options.builtinRoot = FENGINE_BUILTIN;
     options.userData = std::filesystem::temp_directory_path() / "fengine-world-shader-names";
     Engine engine(std::move(options));
     REQUIRE(engine.start());

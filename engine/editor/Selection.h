@@ -46,7 +46,7 @@ struct Selection {
 [[nodiscard]] Zone* findZone(MapData& map, std::string_view id);
 [[nodiscard]] int zoneIndex(const MapData& map, std::string_view id);
 
-// The spawned entity of an authored placement (fe.field names entities by
+// The spawned entity of an authored placement (games name entities by
 // their placement id), or null. The reverse: the placement id of an entity,
 // or empty when no authored placement has its name.
 [[nodiscard]] entt::entity placementEntity(const World& world, std::string_view id);

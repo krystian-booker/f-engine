@@ -10,7 +10,7 @@ namespace fe {
 using namespace editorui;
 
 namespace {
-// Results of fe.devtools calls, refreshed a few times a second.
+// Results of the game's editor hooks, refreshed a few times a second.
 struct ScriptsCache {
     std::chrono::steady_clock::time_point fetched{};
     Json tasks = Json::array(), entities = Json::object(), events = Json::array();
@@ -164,7 +164,7 @@ void Editor::drawScriptsPanel() {
         if (ImGui::BeginTabItem(ICON_FA_GEARS " Running tasks")) {
             ImGui::Checkbox("Show helper tasks", &c.showHelpers);
             ImGui::SameLine();
-            ImGui::TextDisabled("%zu task(s); scripts, cutscenes, routines and the kits' own work", c.tasks.size());
+            ImGui::TextDisabled("%zu task(s); whatever the game's editor.tasks hook reports", c.tasks.size());
             if (ImGui::BeginTable("tasks", 6,
                                   ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp |
                                       ImGuiTableFlags_ScrollY)) {

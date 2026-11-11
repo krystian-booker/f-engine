@@ -357,7 +357,7 @@ Json ReplayRecorder::toJson(std::uint64_t lastTick) const {
     return {{"seed", seed_}, {"commands", std::move(commands)}};
 }
 
-int runHeadlessReplay(const std::filesystem::path& game, const std::filesystem::path& lualib,
+int runHeadlessReplay(const std::filesystem::path& game, const std::filesystem::path& builtin,
                       const std::filesystem::path& file, std::filesystem::path userData,
                       std::optional<std::uint64_t> seed) {
     ReplayHarness replay(file);
@@ -371,7 +371,7 @@ int runHeadlessReplay(const std::filesystem::path& game, const std::filesystem::
     {
         EngineOptions options;
         options.gameRoot = game;
-        options.libraryRoot = lualib;
+        options.builtinRoot = builtin;
         options.userData = userData;
         options.development = true;
         options.testHooks = true;

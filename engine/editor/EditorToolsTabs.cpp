@@ -67,16 +67,12 @@ void Editor::drawProfilerTab(double frameMilliseconds, std::uint32_t drawCalls) 
     const auto now = Clock::now();
     if (now - profiled_ > std::chrono::milliseconds(500)) {
         profiled_ = now;
-        taskCount_ = "?";
-        try {
-            const auto module = engine_.lua().require("fe.task");
-            const sol::object count = module.as<sol::table>()["count"];
+        taskCount_ = "-";
+        if (const auto count = devtool("task_count"); count != sol::lua_nil) {
             const auto result = engine_.lua().invoke(count);
-            if (result.valid()) {
+            if (result.valid() && result.get_type() == sol::type::number) {
                 taskCount_ = std::to_string(result.get<long long>());
             }
-        } catch (const std::exception&) {
-            taskCount_ = "-";
         }
     }
     ImGui::Text("Frame %.2f ms (%.0f fps)", frameMilliseconds,
@@ -122,7 +118,7 @@ void Editor::drawLaunchTab() {
         }
     }
     if (launchers_.empty()) {
-        ImGui::TextDisabled("Register launchers with require('fe.devtools').register(name, fn)");
+        ImGui::TextDisabled("Launchers come from the editor.list() and editor.launch(name) hooks of main.lua");
     }
 }
 } // namespace fe

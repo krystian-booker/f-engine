@@ -39,10 +39,10 @@ if(FENGINE_BUILD_RUNTIME)
   endforeach()
 endif()
 
-# Layout: bin/ (executables, shaders), bin/lualib (engine Lua library),
+# Layout: bin/ (executables, shaders), bin/builtin (engine assets: default font, glyphs, weather presets),
 # games/ (samples), licenses/, share/doc/fengine.
 install(TARGETS fengine_headless RUNTIME DESTINATION bin)
-install(DIRECTORY "${PROJECT_SOURCE_DIR}/lualib/" DESTINATION bin/lualib
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/builtin/" DESTINATION bin/builtin
   PATTERN "tests" EXCLUDE)
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/samples/" DESTINATION games
   PATTERN "replays" EXCLUDE PATTERN "tests" EXCLUDE)

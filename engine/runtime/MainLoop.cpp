@@ -23,7 +23,7 @@ namespace {
 using Clock = std::chrono::steady_clock;
 
 #if FENGINE_DEV
-// Development hot reload: game files, lualib, compiled shaders, and shader
+// Development hot reload: game files, builtin, compiled shaders, and shader
 // sources when running from the build tree (rebuilt in the background).
 class Reloader {
 public:
@@ -32,7 +32,7 @@ public:
     static constexpr std::size_t EntriesPerPoll = 512;
     Reloader(const RuntimeOptions& options, const std::filesystem::path& shaderRoot)
         : game_(std::filesystem::weakly_canonical(options.game), EntriesPerPoll),
-          library_(options.lualib, EntriesPerPoll), shaders_(shaderRoot, EntriesPerPoll) {
+          library_(options.builtin, EntriesPerPoll), shaders_(shaderRoot, EntriesPerPoll) {
 #ifdef FENGINE_SHADER_SOURCE_DIR
         std::error_code ec;
         if (std::filesystem::equivalent(shaderRoot, FENGINE_SHADER_DIR, ec)) {
@@ -301,7 +301,7 @@ private:
     EngineOptions engineOptions() {
         EngineOptions engine;
         engine.gameRoot = options_.game;
-        engine.libraryRoot = options_.lualib;
+        engine.builtinRoot = options_.builtin;
         engine.userData = options_.userData;
         engine.development = FENGINE_DEV != 0;
         engine.seed = sessionSeed(options_, replay_);

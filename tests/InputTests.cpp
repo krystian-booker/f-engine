@@ -9,7 +9,7 @@ using namespace fe;
 
 namespace {
 struct Fixture {
-    AssetCache assets{FENGINE_TEST_GAME, FENGINE_LUALIB};
+    AssetCache assets{FENGINE_TEST_GAME, FENGINE_BUILTIN};
     TextSystem text{assets};
     Canvas canvas{text, 320, 180};
     InputState state;

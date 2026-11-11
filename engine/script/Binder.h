@@ -13,7 +13,7 @@
 
 namespace fe {
 // Documentation for every binding, written out as LuaLS annotations
-// (lualib/types/fengine.d.lua) and Markdown (docs/api.md), so editor
+// (builtin/types/fengine.d.lua) and Markdown (docs/api.md), so editor
 // autocomplete and docs always match the registered functions.
 class BindingDocs {
 public:

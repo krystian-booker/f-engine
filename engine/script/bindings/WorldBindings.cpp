@@ -377,7 +377,7 @@ void bindGrid(TypeBinder<WorldRef>& type) {
             "with diagonal = true the diagonals, over up to `distance` unwalkable, blocked-tag or sunken "
             "cells), ladders (default true; false never climbs ladder links), cost = fun(from, to, base): "
             "number|false (per step; false = impassable; the two cell tables are reused between calls; it "
-            "runs under a C call, inside the search, so it must not yield: a task.wait in it raises "
+            "runs under a C call, inside the search, so it must not yield: a coroutine.yield in it raises "
             "'attempt to yield across a C-call boundary'). "
             "Layer changes follow links and ladders the way movers do; steps that jump or climb a ladder are "
             "marked `jump`/`climb`. The search expands at most 200000 cells; when it stops there before "
@@ -784,7 +784,7 @@ void bindEntities(TypeBinder<WorldRef>& type) {
             "Entities with a tag and/or within a radius (XZ distance from `near`). With `fields` the result "
             "is a struct of arrays instead of a list of handles: `n` entities and one array per requested "
             "field (`entity` handles, `x`, `y`, `z` positions, `layer`, `id`, `cell_x`, `cell_z`), so a HUD "
-            "or a kit reads two hundred positions a tick with a handful of tables rather than a "
+            "or a game system reads two hundred positions a tick with a handful of tables rather than a "
             "handle and a table per entity.")
         .method(
             "events",

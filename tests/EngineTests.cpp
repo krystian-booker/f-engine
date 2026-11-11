@@ -13,7 +13,7 @@ namespace {
 EngineOptions testEngine() {
     EngineOptions options;
     options.gameRoot = FENGINE_TEST_GAME;
-    options.libraryRoot = FENGINE_LUALIB;
+    options.builtinRoot = FENGINE_BUILTIN;
     options.userData = std::filesystem::temp_directory_path() / "fengine-engine-test";
     options.seed = 7;
     return options;

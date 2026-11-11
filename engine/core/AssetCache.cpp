@@ -71,10 +71,10 @@ std::size_t decodedBytes(const SpriteAnimation& sprite) {
     return bytes;
 }
 
-AssetCache::AssetCache(std::filesystem::path root, std::filesystem::path libraryRoot,
+AssetCache::AssetCache(std::filesystem::path root, std::filesystem::path builtinRoot,
                        std::filesystem::path userRoot, std::size_t budget)
     : root_(std::filesystem::weakly_canonical(root)),
-      libraryRoot_(std::filesystem::weakly_canonical(libraryRoot)),
+      builtinRoot_(std::filesystem::weakly_canonical(builtinRoot)),
       userRoot_(userRoot.empty() ? userRoot : std::filesystem::weakly_canonical(userRoot)), budget_(budget),
       thread_([this] { worker(); }) {
 }
@@ -90,7 +90,7 @@ AssetCache::~AssetCache() {
 
 std::filesystem::path AssetCache::file(const std::string& relative) const {
     if (relative.starts_with("@fe/")) {
-        return resolveInside(libraryRoot_ / "fe", relative.substr(4));
+        return resolveInside(builtinRoot_, relative.substr(4));
     }
     if (relative.starts_with(UserPrefix)) {
         if (userRoot_.empty()) {
@@ -407,7 +407,7 @@ bool AssetCache::reload(const std::filesystem::path& absolute) {
     collect();
     auto relative = relativeTo(root_, absolute);
     if (relative.empty()) {
-        relative = relativeTo(libraryRoot_ / "fe", absolute);
+        relative = relativeTo(builtinRoot_, absolute);
         if (relative.empty()) {
             return false;
         }

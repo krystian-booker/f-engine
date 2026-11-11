@@ -62,7 +62,7 @@ fe.dev.errors = nil
 ---@type fun()
 fe.dev.clear_errors = nil
 
---- Ask the development editor whether the game may leave a world's map: 'ok' (also without an editor), or 'pending' while it asks about unsaved edits; then poll leave_map_result. The field's warp does this, so a door or a zone never discards map edits.
+--- Ask the development editor whether the game may leave a world's map: 'ok' (also without an editor), or 'pending' while it asks about unsaved edits; then poll leave_map_result. Call it before unloading a map the player walks out of, so a door or a zone never discards map edits.
 ---@type fun(world: string): 'ok'|'pending'
 fe.dev.leave_map = nil
 
@@ -147,7 +147,7 @@ fe.json.decode = nil
 ---@type fun(value: any, pretty?: boolean): string
 fe.json.encode = nil
 
---- Read and parse a JSON file inside the game folder ('@fe/' for lualib).
+--- Read and parse a JSON file inside the game folder ('@fe/' for builtin).
 ---@type fun(path: string): any
 fe.json.read = nil
 
@@ -162,7 +162,7 @@ fe.fs.read = nil
 ---@type fun(path: string): boolean
 fe.fs.exists = nil
 
---- Sorted entries of a folder inside the game folder ('@fe/' for lualib, like read and exists); folders end with '/'.
+--- Sorted entries of a folder inside the game folder ('@fe/' for builtin, like read and exists); folders end with '/'.
 ---@type fun(folder: string): string[]
 fe.fs.list = nil
 
@@ -221,7 +221,7 @@ fe.app.set_fullscreen = nil
 ---@type fun(): {fullscreen: false|'borderless'|'exclusive', width: integer, height: integer, vsync: 'on'|'off'|'adaptive', monitor: integer, hdr: boolean, scale: number, monitors: {name: string, width: integer, height: integer, refresh: number}[], modes: {width: integer, height: integer, refresh: number}[]}
 fe.app.display = nil
 
---- Change display settings; omitted fields stay. fullscreen = true means 'borderless' (a desktop-sized window); 'exclusive' switches the monitor to the display mode closest to width x height. Applied after the frame; fe.app.display() shows the request until then. The engine does not store these: keep them in the player's settings (fe.config) and apply them at start.
+--- Change display settings; omitted fields stay. fullscreen = true means 'borderless' (a desktop-sized window); 'exclusive' switches the monitor to the display mode closest to width x height. Applied after the frame; fe.app.display() shows the request until then. The engine does not store these: keep them in the player's settings (fe.save.write_config) and apply them at start.
 ---@type fun(settings: {fullscreen?: boolean|'borderless'|'exclusive', width?: integer, height?: integer, vsync?: boolean|'on'|'off'|'adaptive', monitor?: integer})
 fe.app.set_display = nil
 
@@ -241,7 +241,7 @@ fe.app.set_clipboard = nil
 ---@type fun(): string[]
 fe.app.packs = nil
 
---- The number with the decimal and digit-group separators of a language: `locale` is a BCP 47 tag (default fe.app.locale()), of which the language subtag chooses from a built-in table (en, de, fr, es, it, pt, ja, zh, ko, ru, pl, nl, sv, tr; others format as English; languages that group with a space use a no-break space). `decimals` (0 to 20) is 0 for a whole number and 2 otherwise by default; the number is rounded to it. fe.i18n.number uses the current language.
+--- The number with the decimal and digit-group separators of a language: `locale` is a BCP 47 tag (default fe.app.locale()), of which the language subtag chooses from a built-in table (en, de, fr, es, it, pt, ja, zh, ko, ru, pl, nl, sv, tr; others format as English; languages that group with a space use a no-break space). `decimals` (0 to 20) is 0 for a whole number and 2 otherwise by default; the number is rounded to it.
 ---@type fun(number: number, options?: {decimals?: integer, locale?: string}): string
 fe.app.format_number = nil
 
@@ -387,7 +387,7 @@ fe.input.device_name = nil
 ---@type fun(): {number: integer, name: string, type: string, rumble: boolean, trigger_rumble: boolean}[]
 fe.input.pads = nil
 
---- Gamepads connected or disconnected this tick, in order (fe.input.pads() already reflects them). The fe.input kit turns them into its pad_connected and pad_disconnected signals; a game that pauses when the player's pad is unplugged listens there.
+--- Gamepads connected or disconnected this tick, in order (fe.input.pads() already reflects them). A game that pauses when the player's pad is unplugged reads them every tick.
 ---@type fun(): {type: 'connected'|'disconnected', pad: integer, name: string}[]
 fe.input.pad_events = nil
 
@@ -458,7 +458,7 @@ fe.text.color = nil
 ---@type fun(id: string, spec: {image: string, rect?: Rect})
 fe.text.icon = nil
 
---- Resolve custom tags such as {player} or {var:name}; nil removes the resolver. It runs under a C call (from fe.text, fe.canvas.text and the frame's text layout) and must not yield: a task.wait in it raises 'attempt to yield across a C-call boundary'. A resolver may replace or remove itself; the call in progress finishes with the old one. Its errors are reported and the tag is shown as written. A resolver that resolves markup with tags through fe.text or fe.canvas.text nests: more than 8 nested resolver calls raise one error from the outermost fe.text or fe.canvas.text call, as does the watchdog stopping a resolver. Tags in a replacement resolve too, up to 4 levels deep; replacements totalling more than 1 MiB (1048576 bytes) for one call raise an error.
+--- Resolve custom tags such as {player} or {var:name}; nil removes the resolver. It runs under a C call (from fe.text, fe.canvas.text and the frame's text layout) and must not yield: a coroutine.yield in it raises 'attempt to yield across a C-call boundary'. A resolver may replace or remove itself; the call in progress finishes with the old one. Its errors are reported and the tag is shown as written. A resolver that resolves markup with tags through fe.text or fe.canvas.text nests: more than 8 nested resolver calls raise one error from the outermost fe.text or fe.canvas.text call, as does the watchdog stopping a resolver. Tags in a replacement resolve too, up to 4 levels deep; replacements totalling more than 1 MiB (1048576 bytes) for one call raise an error.
 ---@type fun(resolver: (fun(tag: string): string?)|nil)
 fe.text.resolver = nil
 
@@ -636,7 +636,7 @@ fe.audio.set_paused = nil
 ---@type fun(): boolean
 fe.audio.available = nil
 
---- Full-screen effects. Scripts animate these values (see fe.tween); renderers apply them.
+--- Full-screen effects. Scripts animate these values; renderers apply them.
 fe.screen = fe.screen or {}
 
 --- Change screen effects. Colors take any color form; the alpha channel is the effect's amount, and the {r, g, b, a} tables fe.screen.get returns are accepted as they are. `radial_blur` (held within 0..1) streaks the screen away from `radial_centre` ({x, y}, 0..1 with y down); `chromatic` (held within 0..1) splits colour towards the edges. Transition kinds: none, fade, swirl, mosaic, wipe, iris, shatter. While frozen (fe.screen.freeze) a transition reveals the live frame instead of `color`.
@@ -898,7 +898,7 @@ World.spawn = nil
 ---@type fun(self: World, id: string): Entity?
 World.find = nil
 
---- Entities with a tag and/or within a radius (XZ distance from `near`). With `fields` the result is a struct of arrays instead of a list of handles: `n` entities and one array per requested field (`entity` handles, `x`, `y`, `z` positions, `layer`, `id`, `cell_x`, `cell_z`), so a HUD or a kit reads two hundred positions a tick with a handful of tables rather than a handle and a table per entity.
+--- Entities with a tag and/or within a radius (XZ distance from `near`). With `fields` the result is a struct of arrays instead of a list of handles: `n` entities and one array per requested field (`entity` handles, `x`, `y`, `z` positions, `layer`, `id`, `cell_x`, `cell_z`), so a HUD or a game system reads two hundred positions a tick with a handful of tables rather than a handle and a table per entity.
 ---@type fun(self: World, filter?: {tag?: string, near?: Vec3, radius?: number, fields?: string[]}): Entity[]|{n: integer, entity?: Entity[], x?: number[], y?: number[], z?: number[], layer?: integer[], id?: string[], cell_x?: integer[], cell_z?: integer[]}
 World.query = nil
 
@@ -942,7 +942,7 @@ World.set_cell = nil
 ---@type fun(self: World, position: Vec3, layer?: integer): number
 World.height_at = nil
 
---- A* path of cells (excluding the start; empty when none exists, found without a search when the goal cannot be entered or, without fly or jump, lies in another connected part of the grid). Rules: diagonal, max_step, max_up, max_down, footprint (1 to 8 cells per side, anchored at the cell towards +x and +z), fly (unwalkable cells and height steps are ignored), blocked_tags, required_tags (cells with none of them cannot be entered; every name must be in the map's tag list), blocked (cells that cannot be entered), jump = {distance, max_up?, max_down?, diagonal?} (gap jumps along the axes, and with diagonal = true the diagonals, over up to `distance` unwalkable, blocked-tag or sunken cells), ladders (default true; false never climbs ladder links), cost = fun(from, to, base): number|false (per step; false = impassable; the two cell tables are reused between calls; it runs under a C call, inside the search, so it must not yield: a task.wait in it raises 'attempt to yield across a C-call boundary'). Layer changes follow links and ladders the way movers do; steps that jump or climb a ladder are marked `jump`/`climb`. The search expands at most 200000 cells; when it stops there before reaching the goal the list has `truncated = true` and is empty or a route that may not be the cheapest.
+--- A* path of cells (excluding the start; empty when none exists, found without a search when the goal cannot be entered or, without fly or jump, lies in another connected part of the grid). Rules: diagonal, max_step, max_up, max_down, footprint (1 to 8 cells per side, anchored at the cell towards +x and +z), fly (unwalkable cells and height steps are ignored), blocked_tags, required_tags (cells with none of them cannot be entered; every name must be in the map's tag list), blocked (cells that cannot be entered), jump = {distance, max_up?, max_down?, diagonal?} (gap jumps along the axes, and with diagonal = true the diagonals, over up to `distance` unwalkable, blocked-tag or sunken cells), ladders (default true; false never climbs ladder links), cost = fun(from, to, base): number|false (per step; false = impassable; the two cell tables are reused between calls; it runs under a C call, inside the search, so it must not yield: a coroutine.yield in it raises 'attempt to yield across a C-call boundary'). Layer changes follow links and ladders the way movers do; steps that jump or climb a ladder are marked `jump`/`climb`. The search expands at most 200000 cells; when it stops there before reaching the goal the list has `truncated = true` and is empty or a route that may not be the cheapest.
 ---@type fun(self: World, from: Cell, to: Cell, rules?: table): {truncated?: true, [integer]: {x: integer, z: integer, layer: integer, jump?: true, climb?: true}}
 World.path = nil
 
@@ -1035,11 +1035,11 @@ fe.harness.tick = nil
 ---@type fun(): integer
 fe.harness.errors = nil
 
---- Restart the script watchdog's clock. fe.test calls it before each test, so every test (like every tick) gets the whole watchdog limit.
+--- Restart the script watchdog's clock. The test runner calls it before each test, so every test (like every tick) gets the whole watchdog limit.
 ---@type fun()
 fe.harness.begin_test = nil
 
---- Hot-reload a loaded module, named as for require or by its Lua file ('@fe/...' for lualib), as a file change does in development builds; false when no loaded module comes from it.
+--- Hot-reload a loaded module, named as for require or by its Lua file, as a file change does in development builds; false when no loaded module comes from it.
 ---@type fun(target: string): boolean
 fe.harness.reload = nil
 

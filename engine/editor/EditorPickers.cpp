@@ -236,26 +236,23 @@ std::vector<std::string> Editor::recordIds(const std::string& table) {
     if (Clock::now() - cached.first > std::chrono::seconds(2)) {
         cached.first = Clock::now();
         cached.second.clear();
+        // The ids of the records in the table's file, as the game's
+        // editor.describe hook names it ({name, file} under "tables").
         try {
-            auto& lua = engine_.lua();
-            const auto data = lua.require("fe.data");
-            if (data.get_type() == sol::type::table) {
-                sol::object has = data.as<sol::table>()["has_table"];
-                sol::object list = data.as<sol::table>()["list"];
-                if (has.get_type() == sol::type::function && list.get_type() == sol::type::function) {
-                    const auto loaded = lua.invoke(has, table);
-                    if (loaded.valid() && loaded.get<bool>()) {
-                        const auto records = lua.invoke(list, table);
-                        if (records.valid() && records.get_type() == sol::type::table) {
-                            for (const auto& [index, record] : records.get<sol::table>()) {
-                                if (record.is<sol::table>()) {
-                                    const sol::object id = record.as<sol::table>()["id"];
-                                    if (id.is<std::string>()) {
-                                        cached.second.push_back(id.as<std::string>());
-                                    }
-                                }
-                            }
+            for (const auto& described : jsonArray(schemas_, "tables")) {
+                if (jsonString(described, "name", {}) != table) {
+                    continue;
+                }
+                const auto records = readJson(resolveInside(engine_.lua().gameRoot(), jsonString(described, "file", {})));
+                if (records.is_array()) {
+                    for (const auto& record : records) {
+                        if (const auto id = jsonString(record, "id", {}); !id.empty()) {
+                            cached.second.push_back(id);
                         }
+                    }
+                } else if (records.is_object()) {
+                    for (const auto& [key, value] : records.items()) {
+                        cached.second.push_back(key);
                     }
                 }
             }

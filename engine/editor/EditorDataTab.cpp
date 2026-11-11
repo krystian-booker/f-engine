@@ -20,7 +20,7 @@ void Editor::saveTable(const Json& table) {
     }
     dataProblems_.clear();
     auto& lua = engine_.lua();
-    // The game's own check when it has one; otherwise its schema per record.
+    // The game's own check (its editor.validate_table hook) when it has one.
     if (const auto validate = devtool("validate_table"); validate != sol::lua_nil) {
         const auto result = lua.invoke(validate, name, jsonToLua(lua.lua(), dataDocument_));
         if (!succeeded(result)) {
@@ -30,26 +30,11 @@ void Editor::saveTable(const Json& table) {
             dataProblems_.push_back(result.return_count() > 1 ? result.get<std::string>(1)
                                                               : "Validation failed");
         }
-    } else if (const auto schema = jsonString(table, "schema", {}); !schema.empty()) {
-        const auto module = lua.require("fe.schema");
-        const sol::object check = module.as<sol::table>()["validate"];
+    } else {
+        // No game check: the one rule the editor itself relies on.
         for (std::size_t i = 0; i < dataDocument_.size(); ++i) {
-            const auto& record = dataDocument_[i];
-            const auto id = jsonString(record, "id", {});
-            if (id.empty()) {
-                dataProblems_.push_back("record " + std::to_string(i + 1) +
-                                        ": every record needs a string id");
-                continue;
-            }
-            const auto result = lua.invoke(check, schema, jsonToLua(lua.lua(), record), name + "." + id);
-            if (!succeeded(result)) {
-                return;
-            }
-            if (!result.get<bool>(0)) {
-                const auto errors = luaToJson(result.get<sol::object>(1));
-                for (const auto& error : errors) {
-                    dataProblems_.push_back(error.is_string() ? error.get<std::string>() : error.dump());
-                }
+            if (jsonString(dataDocument_[i], "id", {}).empty()) {
+                dataProblems_.push_back("record " + std::to_string(i + 1) + ": every record needs a string id");
             }
         }
     }

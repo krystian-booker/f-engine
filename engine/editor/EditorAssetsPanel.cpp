@@ -498,18 +498,9 @@ void Editor::drawAssetDetails(const AssetEntry& entry) {
         for (const auto& map : catalog_.maps()) {
             if (map.path == entry.path) {
                 ImGui::Text("%s: %d x %d cells", map.name.c_str(), map.width, map.depth);
-                if (const auto playFrom = devtool("play_from"); playFrom != sol::lua_nil) {
-                    if (ImGui::Button(ICON_FA_PLAY " Open this map")) {
-                        const auto points = mapPoints(map.id);
-                        const auto point = std::find(points.begin(), points.end(), "start") != points.end() ? std::string("start")
-                                           : points.empty() ? std::string()
-                                                            : points.front();
-                        if (point.empty()) {
-                            status_ = "The map has no points to start from";
-                        } else if (succeeded(engine_.lua().invoke(playFrom, map.id, point))) {
-                            status_ = "Opened " + map.id;
-                        }
-                    }
+                if (ImGui::Button(ICON_FA_PLAY " Open this map")) {
+                    const auto id = map.id;
+                    confirmDiscard(world().get(), "open another map", [this, id] { openMap(id); });
                 }
             }
         }
@@ -609,7 +600,7 @@ void Editor::drawAssetsPanel() {
         }
     };
     tree("");
-    tree("@fe"); // the kit's own assets
+    tree("@fe"); // the engine's own assets
     ImGui::EndChild();
     ImGui::SameLine();
     const AssetEntry* selected = catalog_.find(assetSelected_);

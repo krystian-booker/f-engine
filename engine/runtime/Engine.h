@@ -32,7 +32,7 @@ class WorldLoader;
 
 struct EngineOptions {
     std::filesystem::path gameRoot;
-    std::filesystem::path libraryRoot; // lualib
+    std::filesystem::path builtinRoot; // builtin
     std::filesystem::path userData;
     bool development = true;
     // Tests and replays: binds fe.input.feed and fe.dev.console even when

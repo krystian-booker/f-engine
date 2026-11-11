@@ -45,14 +45,16 @@ std::filesystem::path executablePath(const std::filesystem::path& fallback) {
     return std::filesystem::absolute(fallback);
 }
 
-std::filesystem::path findLibraryRoot(const std::filesystem::path& executable) {
+std::filesystem::path findBuiltinRoot(const std::filesystem::path& executable) {
     const auto folder = std::filesystem::weakly_canonical(executable).parent_path();
+    // The folder (or builtin.pak standing in for it) holds the default font,
+    // the weather presets and the input glyph sheets: no Lua.
     const auto isLibrary = [](const std::filesystem::path& candidate) {
         mountFolderPack(candidate);
-        return isFile(candidate / "fe" / "init.lua");
+        return isFile(candidate / "assets" / "weather.json");
     };
-    for (const auto& candidate : {folder / "lualib", folder.parent_path() / "Resources" / "lualib",
-                                  folder / "share" / "fengine" / "lualib"}) {
+    for (const auto& candidate : {folder / "builtin", folder.parent_path() / "Resources" / "builtin",
+                                  folder / "share" / "fengine" / "builtin"}) {
         if (isLibrary(candidate)) {
             return candidate;
         }
@@ -62,17 +64,17 @@ std::filesystem::path findLibraryRoot(const std::filesystem::path& executable) {
     auto parent = folder;
     for (int depth = 0; depth < 6 && parent != parent.parent_path(); ++depth) {
         parent = parent.parent_path();
-        for (const auto& candidate : {parent / "lualib", parent / "share" / "fengine" / "lualib"}) {
+        for (const auto& candidate : {parent / "builtin", parent / "share" / "fengine" / "builtin"}) {
             if (isLibrary(candidate)) {
                 return candidate;
             }
         }
     }
-#ifdef FENGINE_SOURCE_LUALIB
-    return FENGINE_SOURCE_LUALIB;
+#ifdef FENGINE_SOURCE_BUILTIN
+    return FENGINE_SOURCE_BUILTIN;
 #endif
 #endif
-    throw std::runtime_error("Cannot find the engine's lualib folder next to " + folder.string());
+    throw std::runtime_error("Cannot find the engine's builtin folder next to " + folder.string());
 }
 
 namespace {
@@ -110,11 +112,11 @@ private:
     std::filesystem::path path_;
 };
 
-std::unique_ptr<Engine> headlessEngine(const std::filesystem::path& game, const std::filesystem::path& lualib,
+std::unique_ptr<Engine> headlessEngine(const std::filesystem::path& game, const std::filesystem::path& builtin,
                                        const ScratchFolder& userData) {
     EngineOptions options;
     options.gameRoot = game;
-    options.libraryRoot = lualib;
+    options.builtinRoot = builtin;
     options.userData = userData.path();
     options.development = true;
     options.testHooks = true;
@@ -123,6 +125,125 @@ std::unique_ptr<Engine> headlessEngine(const std::filesystem::path& game, const 
     engine->setViewport(engine->config().windowWidth, engine->config().windowHeight);
     return engine;
 }
+
+// The test runner behind `--test`. The engine ships no Lua modules, so this
+// is the one piece of Lua it carries, and no game can require it: it is
+// compiled from this string for a `--test` run and nowhere else.
+//
+// Every tests/*.lua module returns a table of named test functions; each is
+// called with the helper table `t`. Keys starting with "_" are not tests:
+// `_before_each` and `_after_each` run around every test of their module
+// (a game resets its own state there).
+const char* const TestRunner = R"lua(
+local modules, filter = ...
+
+local function describe(value)
+  if type(value) == "string" then return string.format("%q", value) end
+  return tostring(value)
+end
+
+local function deep_equal(a, b)
+  if a == b then return true end
+  if type(a) ~= "table" or type(b) ~= "table" then return false end
+  for k, v in pairs(a) do
+    if not deep_equal(v, b[k]) then return false end
+  end
+  for k in pairs(b) do
+    if a[k] == nil then return false end
+  end
+  return true
+end
+
+local t = {}
+function t.ok(value, message)
+  if not value then error(message or "expected a true value", 2) end
+end
+function t.eq(actual, expected, message)
+  if not deep_equal(actual, expected) then
+    error((message and message .. ": " or "") .. "expected " .. describe(expected) .. ", got " .. describe(actual), 2)
+  end
+end
+function t.near(actual, expected, epsilon, message)
+  epsilon = epsilon or 1e-6
+  if type(actual) ~= "number" or math.abs(actual - expected) > epsilon then
+    error((message and message .. ": " or "") .. "expected ~" .. describe(expected) .. ", got " .. describe(actual), 2)
+  end
+end
+function t.error(fn, pattern)
+  local ok, err = pcall(fn)
+  if ok then error("expected an error", 2) end
+  if pattern and not tostring(err):find(pattern) then
+    error("error '" .. tostring(err) .. "' does not match '" .. pattern .. "'", 2)
+  end
+end
+-- Advance the game by fixed ticks (update, world ticks, post_update, draw).
+function t.tick(count)
+  fe.harness.tick(count or 1)
+end
+-- Tick until predicate is true; fails once `ticks` ticks have passed and at
+-- least `wall_seconds` (default 10) of real time, so work on engine worker
+-- threads (background world loads) gets time to finish however fast the
+-- build ticks.
+function t.wait_until(predicate, ticks, message, wall_seconds)
+  local deadline = fe.dev.clock() + (wall_seconds or 10)
+  local count = 0
+  while not predicate() do
+    if count >= (ticks or 600) and fe.dev.clock() >= deadline then
+      error(message or "condition not reached in time", 2)
+    end
+    fe.harness.tick(1)
+    count = count + 1
+  end
+end
+
+local passed, failed = 0, 0
+local function guarded(fn, ...)
+  return xpcall(fn, function(m) return fe.dev.traceback(nil, tostring(m)) end, ...)
+end
+for _, module_name in ipairs(modules) do
+  local ok, cases = pcall(require, module_name)
+  if not ok or type(cases) ~= "table" then
+    print("FAIL " .. module_name .. " (load): " .. tostring(ok and "the module must return a table of tests" or cases))
+    failed = failed + 1
+  else
+    local names = {}
+    for name, fn in pairs(cases) do
+      if type(name) == "string" and name:sub(1, 1) ~= "_" and type(fn) == "function" then names[#names + 1] = name end
+    end
+    table.sort(names)
+    for _, name in ipairs(names) do
+      if not filter or filter == "" or name:find(filter, 1, true) or module_name:find(filter, 1, true) then
+        local errors_before = fe.harness.errors()
+        fe.harness.begin_test()
+        local result = true
+        if type(cases._before_each) == "function" then
+          local fine, err = guarded(cases._before_each, t)
+          if not fine then result = "_before_each: " .. tostring(err) end
+        end
+        if result == true then
+          local fine, err = guarded(cases[name], t)
+          if not fine then result = err end
+        end
+        if type(cases._after_each) == "function" then
+          local fine, err = guarded(cases._after_each, t)
+          if not fine and result == true then result = "_after_each: " .. tostring(err) end
+        end
+        if result == true and fe.harness.errors() > errors_before then
+          result = "script errors were reported during the test (see log)"
+        end
+        if result == true then
+          passed = passed + 1
+        else
+          failed = failed + 1
+          print("FAIL " .. module_name .. " :: " .. name .. "\n  " .. tostring(result))
+        end
+      end
+    end
+  end
+end
+print(string.format("%d passed, %d failed", passed, failed))
+return failed
+)lua";
 
 void bindHarness(Engine& engine) {
     ModuleBinder(engine.lua(), engine.docs(), "fe.harness",
@@ -152,8 +273,8 @@ void bindHarness(Engine& engine) {
             "Recorded script errors.")
         .fn(
             "begin_test", [&engine] { engine.lua().beginFrame(); }, "fun()",
-            "Restart the script watchdog's clock. fe.test calls it before each test, so every test (like "
-            "every tick) gets the whole watchdog limit.")
+            "Restart the script watchdog's clock. The test runner calls it before each test, so every test "
+            "(like every tick) gets the whole watchdog limit.")
         .fn(
             "reload",
             [&engine](const std::string& target) {
@@ -162,21 +283,18 @@ void bindHarness(Engine& engine) {
                     const auto file = lua.resolve(target);
                     return file.has_value() && lua.reloadFile(*file);
                 }
-                return lua.reloadFile(target.starts_with("@fe/")
-                                          ? resolveInside(lua.libraryRoot() / "fe", target.substr(4))
-                                          : resolveInside(lua.gameRoot(), target));
+                return lua.reloadFile(resolveInside(lua.gameRoot(), target));
             },
             "fun(target: string): boolean",
-            "Hot-reload a loaded module, named as for require or by its Lua file ('@fe/...' for lualib), as "
-            "a "
-            "file change does in development builds; false when no loaded module comes from it.");
+            "Hot-reload a loaded module, named as for require or by its Lua file, as a file change does in "
+            "development builds; false when no loaded module comes from it.");
 }
 } // namespace
 
-int runTests(const std::filesystem::path& game, const std::filesystem::path& lualib,
+int runTests(const std::filesystem::path& game, const std::filesystem::path& builtin,
              const std::string& filter, double watchdog) {
     const ScratchFolder userData(game);
-    auto engine = headlessEngine(game, lualib, userData);
+    auto engine = headlessEngine(game, builtin, userData);
     engine->lua().setWatchdog(watchdog);
     bindHarness(*engine);
     std::vector<std::string> modules;
@@ -192,8 +310,13 @@ int runTests(const std::filesystem::path& game, const std::filesystem::path& lua
     auto& lua = engine->lua();
     try {
         lua.beginFrame();
-        sol::table test = lua.require("fe.test");
-        auto result = lua.invoke(test["run"], sol::as_table(modules), filter);
+        const auto loaded = lua.lua().load(TestRunner, "=fengine test runner", sol::load_mode::text);
+        if (!loaded.valid()) {
+            const sol::error error = loaded;
+            std::cerr << error.what() << "\n";
+            return 1;
+        }
+        auto result = lua.invoke(sol::object(loaded.get<sol::protected_function>()), sol::as_table(modules), filter);
         if (!result.valid()) {
             const sol::error error = result;
             std::cerr << error.what() << "\n";
@@ -207,10 +330,10 @@ int runTests(const std::filesystem::path& game, const std::filesystem::path& lua
     }
 }
 
-int checkGame(const std::filesystem::path& game, const std::filesystem::path& lualib) {
+int checkGame(const std::filesystem::path& game, const std::filesystem::path& builtin) {
     int problems = 0;
     const ScratchFolder userData(game);
-    auto engine = headlessEngine(game, lualib, userData);
+    auto engine = headlessEngine(game, builtin, userData);
     std::vector<std::string> maps;
     for (const auto& name : listFolder(game / "maps")) {
         if (name.ends_with('/') && isFile(game / "maps" / name / "map.json")) {
@@ -257,7 +380,7 @@ int checkGame(const std::filesystem::path& game, const std::filesystem::path& lu
     {
         // Every file, module, map and audio id that maps, data tables and
         // sprites name must exist.
-        AssetCatalog catalog(game, lualib);
+        AssetCatalog catalog(game, builtin);
         catalog.scan();
         for (const auto& [target, user] : catalog.missing()) {
             std::cerr << "missing " << target << " (named by " << user.file << " at " << user.where << ")\n";
@@ -284,12 +407,12 @@ int checkGame(const std::filesystem::path& game, const std::filesystem::path& lu
     return problems ? 1 : 0;
 }
 
-int bakeGame(const std::filesystem::path& game, const std::filesystem::path& lualib, bool checkOnly) {
+int bakeGame(const std::filesystem::path& game, const std::filesystem::path& builtin, bool checkOnly) {
     if (!std::filesystem::is_directory(game)) {
         std::cerr << "--bake needs a game folder, not an archive\n";
         return 1;
     }
-    AssetCache assets(game, lualib);
+    AssetCache assets(game, builtin);
     const auto readFile = gameFileReader(game);
     int stale = 0, problems = 0;
     for (const auto& name : listFolder(game / "maps")) {
@@ -339,10 +462,14 @@ int bakeGame(const std::filesystem::path& game, const std::filesystem::path& lua
     return stale || problems ? 1 : 0;
 }
 
-int writeApi(const std::filesystem::path& lualib, const std::filesystem::path& folder) {
-    const auto game = lualib / "tests" / "game";
-    const ScratchFolder userData(game);
-    auto engine = headlessEngine(game, lualib, userData);
+int writeApi(const std::filesystem::path& builtin, const std::filesystem::path& folder) {
+    // The bindings need an engine, and an engine a game folder: an empty one.
+    const ScratchFolder userData(folder);
+    const auto game = userData.path() / "game";
+    std::filesystem::create_directories(game);
+    writeTextAtomic(game / "game.json", "{\"title\": \"fengine api\"}\n");
+    writeTextAtomic(game / "main.lua", "return {}\n");
+    auto engine = headlessEngine(game, builtin, userData);
     bindHarness(*engine);
     engine->writeApi(folder / "fengine.d.lua", folder / "api.md");
     std::cout << "Wrote fengine.d.lua and api.md to " << folder.string() << "\n";
@@ -378,16 +505,16 @@ int runHeadlessCommand(int argc, char** argv) {
     if (!target.empty()) {
         target = openGame(target).string();
     }
-    const auto lualib = findLibraryRoot(executablePath(argv[0]));
+    const auto builtin = findBuiltinRoot(executablePath(argv[0]));
     if (command == "--test") {
-        return runTests(target, lualib, filter);
+        return runTests(target, builtin, filter);
     }
     if (command == "--check") {
-        return checkGame(target, lualib);
+        return checkGame(target, builtin);
     }
     if (command == "--bake") {
-        return bakeGame(target, lualib, checkOnly);
+        return bakeGame(target, builtin, checkOnly);
     }
-    return writeApi(lualib, output);
+    return writeApi(builtin, output);
 }
 } // namespace fe

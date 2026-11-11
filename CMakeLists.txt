@@ -146,7 +146,7 @@ add_library(fengine_core STATIC
 target_include_directories(fengine_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(fengine_core PUBLIC nlohmann_json::nlohmann_json glm::glm EnTT::EnTT fengine_sol2 fengine_asset_formats)
 target_compile_definitions(fengine_core PUBLIC FENGINE_DEV=${FENGINE_DEV_ENABLED}
-  PRIVATE $<${FENGINE_DEV_ENABLED}:FENGINE_SOURCE_LUALIB="${PROJECT_SOURCE_DIR}/lualib">)
+  PRIVATE $<${FENGINE_DEV_ENABLED}:FENGINE_SOURCE_BUILTIN="${PROJECT_SOURCE_DIR}/builtin">)
 fengine_warnings(fengine_core)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   # sol2 bindings are template heavy; keep debug objects reasonable.
@@ -159,11 +159,11 @@ target_link_libraries(fengine_headless PRIVATE fengine_core)
 fengine_warnings(fengine_headless)
 fengine_windows_manifest(fengine_headless) # UTF-8 arguments and paths on Windows
 
-# Executables look for lualib beside them (development builds also in parent
+# Executables look for builtin beside them (development builds also in parent
 # folders), so the build tree carries it next to the executables: a link to
 # the sources, or on Windows a copy that every build brings up to date. With a
 # multi-configuration generator (Visual Studio, Xcode, Ninja Multi-Config)
-# that is each configuration's folder (build/Release/lualib), where a shipped
+# that is each configuration's folder (build/Release/builtin), where a shipped
 # configuration, which looks nowhere else, finds it. Development
 # configurations on Windows use the source tree directly (hot reload sees
 # edits there).
@@ -173,12 +173,12 @@ else()
   set(FENGINE_STAGE_MODE "-DLINK=ON")
 endif()
 if(NOT PROJECT_BINARY_DIR STREQUAL PROJECT_SOURCE_DIR)
-  add_custom_target(fengine_lualib ALL
-    COMMAND "${CMAKE_COMMAND}" "-DSOURCE=${PROJECT_SOURCE_DIR}/lualib"
-      "-DDESTINATION=$<TARGET_FILE_DIR:fengine_headless>/lualib" "${FENGINE_STAGE_MODE}"
+  add_custom_target(fengine_builtin ALL
+    COMMAND "${CMAKE_COMMAND}" "-DSOURCE=${PROJECT_SOURCE_DIR}/builtin"
+      "-DDESTINATION=$<TARGET_FILE_DIR:fengine_headless>/builtin" "${FENGINE_STAGE_MODE}"
       -P "${PROJECT_SOURCE_DIR}/cmake/MirrorFolder.cmake"
-    COMMENT "Staging lualib" VERBATIM)
-  add_dependencies(fengine_headless fengine_lualib)
+    COMMENT "Staging builtin" VERBATIM)
+  add_dependencies(fengine_headless fengine_builtin)
 endif()
 
 if(FENGINE_BUILD_RUNTIME)

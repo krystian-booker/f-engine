@@ -102,7 +102,7 @@ TEST_CASE("GPU assets look at files only after a file change, and bake chunks pe
       "accessors": [{"bufferView": 0, "componentType": 5126, "count": 6, "type": "VEC3",
                      "min": [0, 0, 0], "max": [13, 0, 1]}]})";
     {
-        AssetCache cache(root, FENGINE_LUALIB);
+        AssetCache cache(root, FENGINE_BUILTIN);
         GpuAssets assets(cache);
         const auto* whole = assets.model("strip.gltf", false);
         const auto* baked = assets.model("strip.gltf", true);

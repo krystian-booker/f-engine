@@ -25,7 +25,7 @@ void write(const std::filesystem::path& file, const std::string& text) {
 EngineOptions options(const std::filesystem::path& userData = {}) {
     EngineOptions o;
     o.gameRoot = FENGINE_TEST_GAME;
-    o.libraryRoot = FENGINE_LUALIB;
+    o.builtinRoot = FENGINE_BUILTIN;
     o.userData = userData;
     o.seed = 7;
     return o;
@@ -463,12 +463,12 @@ TEST_CASE("the entry module's functions are read raw") {
 TEST_CASE("the engine library is found next to the executable") {
     const auto root = std::filesystem::temp_directory_path() / "fengine-library-root";
     std::filesystem::remove_all(root);
-    write(root / "bin" / "lualib" / "fe" / "init.lua", "return {}");
-    CHECK(findLibraryRoot(root / "bin" / "fengine") ==
-          std::filesystem::weakly_canonical(root / "bin" / "lualib"));
-    write(root / "Game.app" / "Contents" / "Resources" / "lualib" / "fe" / "init.lua", "return {}");
-    CHECK(findLibraryRoot(root / "Game.app" / "Contents" / "MacOS" / "fengine") ==
-          std::filesystem::weakly_canonical(root / "Game.app" / "Contents" / "Resources" / "lualib"));
+    write(root / "bin" / "builtin" / "assets" / "weather.json", "{}");
+    CHECK(findBuiltinRoot(root / "bin" / "fengine") ==
+          std::filesystem::weakly_canonical(root / "bin" / "builtin"));
+    write(root / "Game.app" / "Contents" / "Resources" / "builtin" / "assets" / "weather.json", "{}");
+    CHECK(findBuiltinRoot(root / "Game.app" / "Contents" / "MacOS" / "fengine") ==
+          std::filesystem::weakly_canonical(root / "Game.app" / "Contents" / "Resources" / "builtin"));
     std::filesystem::remove_all(root);
 }
 

@@ -23,7 +23,7 @@ std::filesystem::path writeReplay(const std::string& name, const Json& replay) {
 std::unique_ptr<Engine> fixtureEngine() {
     EngineOptions options;
     options.gameRoot = FENGINE_TEST_GAME;
-    options.libraryRoot = FENGINE_LUALIB;
+    options.builtinRoot = FENGINE_BUILTIN;
     options.userData = scratch("user");
     options.seed = 1;
     auto engine = std::make_unique<Engine>(std::move(options));
@@ -150,14 +150,14 @@ TEST_CASE("headless replays run Lua, waits and asserts without a window") {
                                               {{"tick", 2}, {"lua", "replay_counter = replay_counter + 1"}},
                                               {{"tick", 3}, {"wait_for", "replay_counter == 1"}},
                                               {{"tick", 4}, {"assert", "replay_counter == 1"}}}));
-    CHECK(runHeadlessReplay(FENGINE_TEST_GAME, FENGINE_LUALIB, pass, {}, std::nullopt) == 0);
+    CHECK(runHeadlessReplay(FENGINE_TEST_GAME, FENGINE_BUILTIN, pass, {}, std::nullopt) == 0);
     const auto fail = writeReplay("fail.json", Json::array({{{"tick", 1}, {"assert", "1 == 2"}}}));
-    CHECK(runHeadlessReplay(FENGINE_TEST_GAME, FENGINE_LUALIB, fail, {}, std::nullopt) == 1);
+    CHECK(runHeadlessReplay(FENGINE_TEST_GAME, FENGINE_BUILTIN, fail, {}, std::nullopt) == 1);
 }
 
 TEST_CASE("replay captures must be rendered frames and match the backend's references") {
     const auto references =
-        std::filesystem::path(FENGINE_LUALIB) / ".." / "samples" / "vale" / "replays" / "reference" / "metal";
+        std::filesystem::path(FENGINE_BUILTIN) / ".." / "samples" / "starfall" / "replays" / "reference" / "metal";
     const auto live = Image::load(references / "postfx-live.png");
     const auto custom = Image::load(references / "postfx-custom.png");
     CHECK(live.width == ReferenceWidth);

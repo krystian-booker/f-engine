@@ -271,7 +271,7 @@ TEST_CASE("save lists skip files that are not slots") {
 }
 
 TEST_CASE("redefined fonts stay alive until the frame's quads are gone") {
-    AssetCache assets(FENGINE_TEST_GAME, FENGINE_LUALIB);
+    AssetCache assets(FENGINE_TEST_GAME, FENGINE_BUILTIN);
     const Json spec = {{"files", {"@fe/assets/fonts/pixel.fnt"}}};
     assets.defineFont("default", spec);
     std::weak_ptr<FontSet> previous = assets.font("default");
@@ -282,7 +282,7 @@ TEST_CASE("redefined fonts stay alive until the frame's quads are gone") {
 }
 
 TEST_CASE("canvas records transformed, clipped quads") {
-    AssetCache assets(FENGINE_TEST_GAME, FENGINE_LUALIB);
+    AssetCache assets(FENGINE_TEST_GAME, FENGINE_BUILTIN);
     assets.defineFont("default", {{"files", {"@fe/assets/fonts/pixel.fnt"}}});
     TextSystem text(assets);
     Canvas canvas(text, 320, 180);
@@ -305,7 +305,7 @@ TEST_CASE("canvas records transformed, clipped quads") {
 }
 
 TEST_CASE("asset preload decodes on the worker thread") {
-    AssetCache assets(FENGINE_TEST_GAME, FENGINE_LUALIB);
+    AssetCache assets(FENGINE_TEST_GAME, FENGINE_BUILTIN);
     const int ticket = assets.preload({"maps/arena/geometry.glb", "@fe/assets/fonts/pixel.png"});
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     while (assets.progress(ticket) < 1 && std::chrono::steady_clock::now() < deadline) {
@@ -616,7 +616,7 @@ TEST_CASE("the file backend writes sidecar summaries and the save size is capped
 }
 
 TEST_CASE("the asset cache evicts least recently used assets outside the referenced set") {
-    AssetCache assets(FENGINE_TEST_GAME, FENGINE_LUALIB);
+    AssetCache assets(FENGINE_TEST_GAME, FENGINE_BUILTIN);
     CHECK(assets.budget() == AssetCache::DefaultBudget);
     const std::string a = "@fe/assets/ui/cursor.png", b = "@fe/assets/ui/bubble.png",
                       c = "@fe/assets/ui/spark.png";
@@ -661,9 +661,9 @@ TEST_CASE("the asset cache evicts least recently used assets outside the referen
 }
 
 TEST_CASE("a font reloads only for the files it names") {
-    AssetCache assets(FENGINE_TEST_GAME, FENGINE_LUALIB);
+    AssetCache assets(FENGINE_TEST_GAME, FENGINE_BUILTIN);
     assets.defineFont("default", {{"files", {"@fe/assets/fonts/pixel.fnt"}}});
-    const auto fonts = std::filesystem::path(FENGINE_LUALIB) / "fe" / "assets" / "fonts";
+    const auto fonts = std::filesystem::path(FENGINE_BUILTIN) / "assets" / "fonts";
     const auto generation = assets.generation();
     std::weak_ptr<FontSet> before = assets.font("default");
     // The face and its page image rebuild the font; a neighbour in the folder does not.

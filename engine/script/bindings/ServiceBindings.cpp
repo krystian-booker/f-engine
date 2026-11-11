@@ -301,8 +301,7 @@ void bindInput(Engine& engine) {
             },
             "fun(): {type: 'connected'|'disconnected', pad: integer, name: string}[]",
             "Gamepads connected or disconnected this tick, in order (fe.input.pads() already reflects "
-            "them). The fe.input kit turns them into its pad_connected and pad_disconnected signals; a "
-            "game that pauses when the player's pad is unplugged listens there.")
+            "them). A game that pauses when the player's pad is unplugged reads them every tick.")
         .fn(
             "rumble",
             [&input](float low, float high, double seconds, sol::object pad) {
@@ -686,7 +685,7 @@ void bindScreen(Engine& engine) {
     auto& host = engine.lua();
     auto& screen = engine.screen();
     ModuleBinder(host, engine.docs(), "fe.screen",
-                 "Full-screen effects. Scripts animate these values (see fe.tween); renderers apply them.")
+                 "Full-screen effects. Scripts animate these values; renderers apply them.")
         .fn(
             "set",
             [&screen](sol::table t) {

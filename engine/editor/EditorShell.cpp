@@ -131,7 +131,7 @@ void Editor::confirmDiscard(World* w, const char* what, std::function<void()> ac
 void Editor::openMap(const std::string& id) {
     const auto playFrom = devtool("play_from");
     if (playFrom == sol::lua_nil) {
-        status_ = "Define fe.devtools.play_from(map, point) to open maps from the editor";
+        openPreview(id);
         return;
     }
     const auto points = mapPoints(id);
@@ -147,6 +147,65 @@ void Editor::openMap(const std::string& id) {
         extra_.clear();
         cameraAdopted_ = false; // frame the new map from its game view
         status_ = "Opened " + id;
+    }
+}
+
+// A game with no `editor.play_from` hook (a new project with an empty
+// main.lua, say) still opens its maps: the editor loads the map into a world
+// of its own and stands simple entities in for the placements that name a
+// model or a sprite, so the scene can be laid out before any game code exists.
+void Editor::openPreview(const std::string& id) {
+    try {
+        if (engine_.world(PreviewWorld)) {
+            engine_.unloadWorld(PreviewWorld);
+        }
+        const auto w = engine_.loadWorld(PreviewWorld, id);
+        for (const auto& placement : w->authored().placements) {
+            respawnPreview(*w, placement.id);
+        }
+        worldName_ = PreviewWorld;
+        selection_ = {};
+        extra_.clear();
+        cameraAdopted_ = false;
+        status_ = "Opened " + id + " (preview: this game defines no editor.play_from hook)";
+    } catch (const std::exception& error) {
+        status_ = std::string("Cannot open ") + id + ": " + error.what();
+    }
+}
+
+void Editor::respawnPreview(World& w, const std::string& id) {
+    if (const auto existing = w.find(id); existing != entt::null) {
+        w.destroy(existing);
+    }
+    const auto& placements = w.authored().placements;
+    const auto found = std::find_if(placements.begin(), placements.end(), [&](const Placement& p) { return p.id == id; });
+    if (found == placements.end()) {
+        return;
+    }
+    const auto model = found->props.find("model");
+    const auto sprite = found->props.find("sprite");
+    const bool hasModel = model != found->props.end() && model->is_string();
+    const bool hasSprite = sprite != found->props.end() && sprite->is_string();
+    if (!hasModel && !hasSprite) {
+        return; // nothing to show; its handle still marks the spot
+    }
+    try {
+        const auto entity = w.spawn(found->id, found->position, found->layer);
+        auto& transform = w.registry().get<Transform>(entity);
+        transform.yaw = transform.previousYaw = glm::radians(found->yaw);
+        transform.scale = found->scale;
+        transform.facing = found->facing;
+        if (hasModel) {
+            MeshInstance mesh;
+            mesh.model = model->get<std::string>();
+            w.registry().emplace<MeshInstance>(entity, std::move(mesh));
+        } else {
+            Sprite visual;
+            visual.animation = sprite->get<std::string>();
+            w.registry().emplace<Sprite>(entity, std::move(visual));
+        }
+    } catch (const std::exception& error) {
+        status_ = std::string("Preview of ") + id + ": " + error.what();
     }
 }
 

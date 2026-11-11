@@ -27,8 +27,8 @@ struct Evaluation {
 // utf8; there is no io, os, debug, package or dynamic code loading, the
 // metatables of strings and engine objects are locked, and engine objects show
 // scripts only their documented members (see sealTypes). `require` searches the
-// game folder first and the engine's lualib second, so a game can override any
-// library module by placing a file at the same path.
+// game folder only: the engine ships no Lua modules, so every module a game
+// requires is its own. `builtinRoot` is the engine's asset folder ('@fe/...').
 //
 // The implementation is split by concern: LuaHost.cpp (state, sandbox,
 // sealing, require, console), ModulePatcher.cpp (hot reload), LuaJson.cpp
@@ -36,7 +36,7 @@ struct Evaluation {
 // only file that includes Lua's internal headers).
 class LuaHost {
 public:
-    LuaHost(std::filesystem::path gameRoot, std::filesystem::path libraryRoot, bool development);
+    LuaHost(std::filesystem::path gameRoot, std::filesystem::path builtinRoot, bool development);
     ~LuaHost();
     LuaHost(const LuaHost&) = delete;
     LuaHost& operator=(const LuaHost&) = delete;
@@ -46,7 +46,7 @@ public:
     // Creates (or returns) a nested table such as fe.world.
     sol::table module(const std::string& dottedName);
     [[nodiscard]] const std::filesystem::path& gameRoot() const { return gameRoot_; }
-    [[nodiscard]] const std::filesystem::path& libraryRoot() const { return libraryRoot_; }
+    [[nodiscard]] const std::filesystem::path& builtinRoot() const { return builtinRoot_; }
 
     sol::object require(const std::string& name);
     [[nodiscard]] std::optional<std::filesystem::path> resolve(const std::string& name) const;
@@ -182,7 +182,7 @@ private:
     [[nodiscard]] std::string chunkName(const std::filesystem::path& file) const;
     sol::object load(const std::string& name, const std::filesystem::path& file);
     void patchModule(const sol::table& live, const sol::table& fresh, const std::string& chunk);
-    std::filesystem::path gameRoot_, libraryRoot_;
+    std::filesystem::path gameRoot_, builtinRoot_;
     std::vector<std::shared_ptr<void>> kept_; // destroyed after the state closes (see keep)
     std::vector<std::function<void()>> atClose_;
     std::unique_ptr<sol::state> lua_;

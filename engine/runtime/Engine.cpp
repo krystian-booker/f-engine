@@ -41,7 +41,7 @@ Engine::Engine(EngineOptions&& options, std::optional<GameConfig> config)
       development_(options.development), testHooks_(options.testHooks),
       seed_(options.seed.value_or(
           static_cast<std::uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count()))),
-      assets_(std::make_unique<AssetCache>(options.gameRoot, options.libraryRoot, options.userData,
+      assets_(std::make_unique<AssetCache>(options.gameRoot, options.builtinRoot, options.userData,
                                            options.assetBudget)),
       text_(std::make_unique<TextSystem>(*assets_)),
       canvas_(std::make_unique<Canvas>(*text_, config_.virtualWidth, config_.virtualHeight)),
@@ -55,13 +55,13 @@ Engine::Engine(EngineOptions&& options, std::optional<GameConfig> config)
       locale_(options.locale.empty() ? "en-US" : options.locale),
       loader_(std::make_unique<WorldLoader>(*assets_)), emitters_(std::make_unique<EmitterAudio>()),
       docs_(std::make_unique<BindingDocs>()),
-      lua_(std::make_unique<LuaHost>(options.gameRoot, options.libraryRoot, options.development)),
+      lua_(std::make_unique<LuaHost>(options.gameRoot, options.builtinRoot, options.development)),
       script_(std::make_unique<Script>()), ownsLogSink_(static_cast<bool>(options.logSink)) {
     if (ownsLogSink_) {
         setLogSink(std::move(options.logSink));
     }
-    if (!isFolder(options.libraryRoot)) {
-        throw std::runtime_error("Lua library folder not found: " + options.libraryRoot.string());
+    if (!isFolder(options.builtinRoot)) {
+        throw std::runtime_error("Engine asset folder (builtin) not found: " + options.builtinRoot.string());
     }
     // Content packs go over the game folder once game.json is loaded, so a
     // pack cannot change the game's configuration, only its files.

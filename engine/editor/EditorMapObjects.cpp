@@ -352,7 +352,7 @@ void Editor::drawPointForm(World& w, const std::string& name) {
     }
     ImGui::EndDisabled();
     if (playFrom == sol::lua_nil && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip("Define fe.devtools.play_from(map, point) to enable");
+        ImGui::SetTooltip("Needs an editor.play_from(map, point) hook in the game's main.lua");
     }
 }
 

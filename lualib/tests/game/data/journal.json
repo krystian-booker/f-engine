@@ -1,6 +1,0 @@
-[
-  {"id": "notice", "tab": "evidence", "title_key": "Works notice", "text_key": "The allotment was reduced."},
-  {"id": "record", "tab": "evidence", "title_key": "Pressure record", "text_key": "The limit was overridden.", "image": "sprites/walker.png"},
-  {"id": "guide", "tab": "people", "title_key": "The guide", "text_key": "Knows the trail."},
-  {"id": "envelope", "tab": "notes", "title_key": "An envelope", "text_key": "Night wages.", "optional": true}
-]

@@ -13,7 +13,7 @@ MapData arena() {
 }
 
 struct Worlds {
-    AssetCache assets{FENGINE_TEST_GAME, FENGINE_LUALIB};
+    AssetCache assets{FENGINE_TEST_GAME, FENGINE_BUILTIN};
     World field{"field", arena(), assets, 1};
     World battle{"battle", arena(), assets, 2};
 };
@@ -464,7 +464,7 @@ TEST_CASE("the asset catalog classifies files by name") {
 }
 
 TEST_CASE("the asset catalog lists vale's assets, maps, audio ids and modules, and who uses what") {
-    AssetCatalog catalog(std::filesystem::path(FENGINE_SAMPLES) / "vale", FENGINE_LUALIB);
+    AssetCatalog catalog(std::filesystem::path(FENGINE_SAMPLES) / "starfall", FENGINE_BUILTIN);
     catalog.scan();
     const auto before = catalog.revision();
     CHECK(before == 1);
@@ -510,7 +510,7 @@ TEST_CASE("the asset catalog lists vale's assets, maps, audio ids and modules, a
 }
 
 TEST_CASE("the asset catalog reports references to files that do not exist") {
-    AssetCatalog catalog(std::filesystem::path(FENGINE_TEST_GAME), FENGINE_LUALIB);
+    AssetCatalog catalog(std::filesystem::path(FENGINE_TEST_GAME), FENGINE_BUILTIN);
     catalog.scan();
     // Nothing in the library's test game is known to be missing; the check
     // is that the walk itself does not throw on its data and maps.
@@ -1220,8 +1220,8 @@ TEST_CASE("the brush records overrides on a derived map, and clearing one hands 
 }
 
 TEST_CASE("the kit's stairs bake to ramps and its cliff block to a raised floor") {
-    const auto gameRoot = std::filesystem::path(FENGINE_SAMPLES) / "vale";
-    AssetCache assets(gameRoot, FENGINE_LUALIB);
+    const auto gameRoot = std::filesystem::path(FENGINE_SAMPLES) / "starfall";
+    AssetCache assets(gameRoot, FENGINE_BUILTIN);
     const auto stairs = assets.tryModel("fx/kit/stairs_1x2.glb");
     const auto cliff = assets.tryModel("fx/kit/cliff_2x2.glb");
     const auto floor = assets.tryModel("fx/kit/floor_1x1.glb");
@@ -1249,10 +1249,10 @@ TEST_CASE("the kit's stairs bake to ramps and its cliff block to a raised floor"
 }
 
 TEST_CASE("vale's committed walkability is exactly the bake of its terrain and placed models") {
-    const auto gameRoot = std::filesystem::path(FENGINE_SAMPLES) / "vale";
+    const auto gameRoot = std::filesystem::path(FENGINE_SAMPLES) / "starfall";
     const auto map = MapData::load(gameRoot / "maps/town/map.json");
     REQUIRE_FALSE(map.bake.empty());
-    AssetCache assets(gameRoot, FENGINE_LUALIB);
+    AssetCache assets(gameRoot, FENGINE_BUILTIN);
     const auto scene = sceneForMap(map, assets, geometryPathOf(map));
     CHECK(scene.problems.empty());
     CHECK(scene.pieces.size() >= 2); // the terrain and the inn
@@ -1655,7 +1655,7 @@ TEST_CASE("map files: blank maps, copies, renames and deletions in a scratch gam
     const auto placeholder = Model::load(root / "maps/cellar/geometry.gltf");
     CHECK(placeholder.parts.size() == 1);
     {
-        AssetCache assets(root, FENGINE_LUALIB);
+        AssetCache assets(root, FENGINE_BUILTIN);
         World world("blank", loaded, assets, 1);
         CHECK(world.geometryPath() == "maps/cellar/geometry.gltf");
         CHECK(assets.tryModel(world.geometryPath()) != nullptr);
