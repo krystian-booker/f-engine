@@ -566,10 +566,10 @@ TEST_CASE("game ids are stable folder names derived from the title or given in g
     CHECK(derivedGameId("Crystal of the Vale") == "crystal-of-the-vale");
     CHECK(derivedGameId("  Two   Words ") == "two-words");
     CHECK(derivedGameId("snake_case-ok 9") == "snake_case-ok-9");
-    CHECK_FALSE(derivedGameId("Final Fantasy VI — Narshe"));
+    CHECK_FALSE(derivedGameId("Starfall — Chapter Two"));
     CHECK_FALSE(derivedGameId("Dragon's Lair"));
     CHECK_FALSE(derivedGameId("   "));
-    CHECK(validGameId("ff6-narshe"));
+    CHECK(validGameId("starfall-2"));
     CHECK_FALSE(validGameId("Bad Id"));
     CHECK_FALSE(validGameId(""));
     CHECK_FALSE(validGameId(std::string(65, 'a')));
