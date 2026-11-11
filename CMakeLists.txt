@@ -113,6 +113,7 @@ add_library(fengine_core STATIC
   engine/services/Canvas.cpp
   engine/services/InputState.cpp
   engine/services/PlatformServices.cpp
+  engine/services/SaveQueue.cpp
   engine/services/SaveStore.cpp
   engine/platform/FileWatcher.cpp
   engine/script/Binder.cpp

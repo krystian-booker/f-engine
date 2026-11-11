@@ -166,6 +166,13 @@ SaveStore::SaveStore(std::filesystem::path directory, std::unique_ptr<SaveBacken
       backend_(backend ? std::move(backend) : std::make_unique<FileSaveBackend>(directory_)) {
 }
 
+void SaveStore::flush() {
+    backend_->flush();
+    if (const auto error = backend_->takeError()) {
+        throw std::runtime_error(*error);
+    }
+}
+
 std::string SaveStore::key(const std::string& slot) {
     validateSlot(slot);
     return std::string(SavesFolder) + "/" + slot + std::string(SlotSuffix);

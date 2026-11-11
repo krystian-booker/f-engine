@@ -720,3 +720,156 @@ TEST_CASE("save blobs live next to their slot through the backend and go with th
         CHECK_FALSE(memory->current.contains("saves/slot1.snapshot.blob"));
     }
 }
+
+#include "engine/services/SaveQueue.h"
+#include <atomic>
+#include <condition_variable>
+#include <map>
+#include <mutex>
+
+namespace {
+// A backend in memory whose writes wait at a gate, so a test can look at the
+// queue while a write is in progress, and which can be told to fail.
+class GatedBackend final : public SaveBackend {
+public:
+    struct State {
+        std::mutex mutex;
+        std::condition_variable changed;
+        std::map<std::string, std::string> files, backups;
+        bool open = true, fail = false;
+        int writes = 0, overlapping = 0, active = 0;
+    };
+    explicit GatedBackend(std::shared_ptr<State> state) : s_(std::move(state)) {}
+    [[nodiscard]] std::string name() const override { return "gated"; }
+    [[nodiscard]] std::optional<std::string> read(const std::string& key, bool backup) const override {
+        const std::scoped_lock lock(s_->mutex);
+        const auto& from = backup ? s_->backups : s_->files;
+        const auto found = from.find(key);
+        return found == from.end() ? std::nullopt : std::optional(found->second);
+    }
+    void write(const std::string& key, const std::string& bytes, bool keepBackup) override {
+        std::unique_lock lock(s_->mutex);
+        s_->overlapping += s_->active++ > 0 ? 1 : 0;
+        s_->changed.wait(lock, [&] { return s_->open; });
+        --s_->active;
+        if (s_->fail) {
+            throw std::runtime_error("disk full");
+        }
+        if (keepBackup && s_->files.contains(key)) {
+            s_->backups[key] = s_->files[key];
+        }
+        s_->files[key] = bytes;
+        ++s_->writes;
+    }
+    [[nodiscard]] std::vector<std::string> list(const std::string& folder) const override {
+        const std::scoped_lock lock(s_->mutex);
+        std::vector<std::string> names;
+        for (const auto& [key, bytes] : s_->files) {
+            if (key.starts_with(folder + "/")) {
+                names.push_back(key.substr(folder.size() + 1));
+            }
+        }
+        return names;
+    }
+    void remove(const std::string& key) override {
+        const std::scoped_lock lock(s_->mutex);
+        s_->files.erase(key);
+        s_->backups.erase(key);
+    }
+    [[nodiscard]] std::optional<Stat> stat(const std::string& key, bool) const override {
+        const std::scoped_lock lock(s_->mutex);
+        const auto found = s_->files.find(key);
+        if (found == s_->files.end()) {
+            return std::nullopt;
+        }
+        Stat stat;
+        stat.size = found->second.size();
+        return stat;
+    }
+
+private:
+    std::shared_ptr<State> s_;
+};
+
+void setGate(GatedBackend::State& state, bool open) {
+    {
+        const std::scoped_lock lock(state.mutex);
+        state.open = open;
+    }
+    state.changed.notify_all();
+}
+} // namespace
+
+TEST_CASE("queued saves return at once and read back from the queue until they are written") {
+    const auto state = std::make_shared<GatedBackend::State>();
+    QueuedSaveBackend queue(std::make_unique<GatedBackend>(state));
+    setGate(*state, false); // storage is slow: nothing gets through yet
+    queue.write("saves/a.json", "one", true);
+    queue.write("config.json", "first", false);
+    queue.write("config.json", "second", false); // replaces the queued one: no backup to keep
+    queue.writeBlob("a", "snapshot", std::string("\0bytes", 6));
+    CHECK(queue.pending() == 3);
+    {
+        const std::scoped_lock lock(state->mutex);
+        CHECK(state->files.empty());
+    }
+    // The game sees its saves as written.
+    CHECK(queue.read("saves/a.json", false) == std::optional<std::string>("one"));
+    CHECK(queue.read("config.json", false) == std::optional<std::string>("second"));
+    CHECK(queue.readBlob("a", "snapshot") == std::optional<std::string>(std::string("\0bytes", 6)));
+    CHECK(queue.stat("saves/a.json", false)->size == 3);
+    CHECK(queue.list("saves") == std::vector<std::string>{"a.json"});
+    CHECK(queue.listBlobs("a") == std::vector<std::string>{"snapshot"});
+    CHECK_FALSE(queue.read("saves/b.json", false).has_value());
+    setGate(*state, true);
+    queue.flush();
+    CHECK(queue.pending() == 0);
+    CHECK_FALSE(queue.takeError().has_value());
+    const std::scoped_lock lock(state->mutex);
+    CHECK(state->files.at("saves/a.json") == "one");
+    CHECK(state->files.at("config.json") == "second");
+    CHECK(state->writes == 3);      // the first config never reached storage
+    CHECK(state->overlapping == 0); // the wrapped backend is never called twice at once
+}
+
+TEST_CASE("queued slot writes keep their order and their backups; removing drops what is queued") {
+    const auto state = std::make_shared<GatedBackend::State>();
+    QueuedSaveBackend queue(std::make_unique<GatedBackend>(state));
+    setGate(*state, false);
+    queue.write("saves/a.json", "one", true);
+    queue.write("saves/a.json", "two", true);
+    queue.write("saves/gone.json", "never", true);
+    CHECK(queue.read("saves/a.json", false) == std::optional<std::string>("two"));
+    queue.remove("saves/gone.json"); // nothing of it is in progress: dropped without waiting for storage
+    CHECK_FALSE(queue.read("saves/gone.json", false).has_value());
+    setGate(*state, true);
+    // The backup is the save before the last one, as with writes carried out at once.
+    CHECK(queue.read("saves/a.json", true) == std::optional<std::string>("one"));
+    queue.flush();
+    const std::scoped_lock lock(state->mutex);
+    CHECK(state->files.at("saves/a.json") == "two");
+    CHECK(state->backups.at("saves/a.json") == "one");
+    CHECK_FALSE(state->files.contains("saves/gone.json"));
+}
+
+TEST_CASE("a failed background write is reported by flush, once") {
+    const auto state = std::make_shared<GatedBackend::State>();
+    {
+        const std::scoped_lock lock(state->mutex);
+        state->fail = true;
+    }
+    const auto folder = std::filesystem::temp_directory_path() / "fengine-save-queue-test";
+    std::filesystem::remove_all(folder);
+    SaveStore store(folder, std::make_unique<QueuedSaveBackend>(std::make_unique<GatedBackend>(state)));
+    store.write("slot1", Json{{"gold", 5}}, Json::object()); // queued: no error yet
+    CHECK_THROWS_WITH_AS(store.flush(), doctest::Contains("disk full"), std::runtime_error);
+    CHECK_NOTHROW(store.flush()); // reported once
+    {
+        const std::scoped_lock lock(state->mutex);
+        state->fail = false;
+    }
+    store.write("slot1", Json{{"gold", 6}}, Json::object());
+    CHECK_NOTHROW(store.flush());
+    CHECK(store.read("slot1")->data.at("gold") == 6);
+    CHECK(store.pending() == 0);
+}

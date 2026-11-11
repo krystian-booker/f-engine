@@ -1377,6 +1377,8 @@ TEST_CASE("fe.save reports a save read from its backup and refuses data it could
            "nests deeper than 127");
     CHECK(lua.console("local data, meta, backup = fe.save.read('slot1') return data.gold, backup") ==
           "2\tnil");
+    // Saves are written in the background; the file is there once flushed.
+    CHECK(lua.console("fe.save.flush() return fe.save.pending()") == "0");
     write(saves / "slot1.json", "{\"format\": 1, \"data\": {\"gold\": ");
     CHECK(lua.console("local data, meta, backup = fe.save.read('slot1') return data.gold, backup") ==
           "1\ttrue");
@@ -1795,6 +1797,9 @@ TEST_CASE("fe.save blobs are stored next to the slot and deleted with it") {
     REQUIRE(lua.evaluate("fe.save.write('slot1', {gold = 1}); bytes = '\\0\\1\\255 snapshot'; "
                          "fe.save.write_blob('slot1', 'snapshot', bytes)")
                 .ok);
+    // Readable at once, from the queue; on disk once flushed.
+    CHECK(lua.console("fe.save.read_blob('slot1', 'snapshot') == bytes") == "true");
+    REQUIRE(lua.evaluate("fe.save.flush()").ok);
     CHECK(std::filesystem::is_regular_file(saves / "slot1.snapshot.blob"));
     CHECK(lua.console("fe.save.read_blob('slot1', 'snapshot') == bytes") == "true");
     CHECK(lua.console("fe.save.read_blob('slot1', 'missing')") == "nil");

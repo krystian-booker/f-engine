@@ -22,7 +22,19 @@ void bindSave(Engine& engine) {
             "fun(slot: string, data: table, meta?: table)",
             "Atomically write a save slot, keeping the previous version as its .bak. Raises (writing "
             "nothing) for data that could not be read back: tables nested deeper than 127 levels (the save "
-            "file wraps them in one more) and the values fe.json.encode rejects.")
+            "file wraps them in one more) and the values fe.json.encode rejects. The call returns once the "
+            "save is checked and queued: the slow part, getting it onto storage, happens on a worker thread, "
+            "so saving on a door or a menu costs the frame nothing. The slot reads back, lists and deletes "
+            "as if written at once; fe.save.pending() and fe.save.flush() are for the moments that must "
+            "know (a 'Saving...' icon, quitting). The same holds for write_blob and write_config.")
+        .fn(
+            "pending", [&saves] { return saves.pending(); }, "fun(): integer",
+            "Writes (slots, blobs, settings) not yet on storage; 0 when everything is.")
+        .fn(
+            "flush", [&saves] { saves.flush(); }, "fun()",
+            "Wait until every queued write is on storage. Raises when one of them failed (a full disk, a "
+            "removed card): the message of the first failure since the last flush. Failures are also logged "
+            "when they happen. The engine flushes by itself when it shuts down.")
         .fn(
             "read",
             [&saves, &host](const std::string& slot) -> std::tuple<sol::object, sol::object, sol::object> {

@@ -5,6 +5,7 @@
 #include "engine/runtime/WorldLoader.h"
 #include "engine/script/Binder.h"
 #include "engine/script/LuaHost.h"
+#include "engine/services/SaveQueue.h"
 #include "engine/world/World.h"
 #include <algorithm>
 #include <chrono>
@@ -33,6 +34,19 @@ struct Engine::Script {
     }
 };
 
+namespace {
+// Where saves go: the port's backend or files in the user-data folder,
+// behind the background writer unless the options turn it off.
+std::unique_ptr<SaveBackend> saveBackendFor(EngineOptions& options) {
+    auto backend = options.saveBackend ? std::move(options.saveBackend)
+                                       : std::make_unique<FileSaveBackend>(options.userData);
+    if (!options.backgroundSaves) {
+        return backend;
+    }
+    return std::make_unique<QueuedSaveBackend>(std::move(backend));
+}
+} // namespace
+
 Engine::Engine(EngineOptions options) : Engine(std::move(options), std::nullopt) {
 }
 
@@ -46,7 +60,7 @@ Engine::Engine(EngineOptions&& options, std::optional<GameConfig> config)
       text_(std::make_unique<TextSystem>(*assets_)),
       canvas_(std::make_unique<Canvas>(*text_, config_.virtualWidth, config_.virtualHeight)),
       audio_(options.audio ? std::move(options.audio) : std::make_unique<NullAudio>()),
-      saves_(options.userData, std::move(options.saveBackend)),
+      saves_(options.userData, saveBackendFor(options)),
       platform_(options.platform ? std::move(options.platform)
                                  : std::make_unique<LocalPlatformServices>(
                                        options.userData.empty() ? std::filesystem::path()

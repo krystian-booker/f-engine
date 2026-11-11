@@ -54,6 +54,14 @@ public:
     [[nodiscard]] static std::string blobKey(const std::string& slot, const std::string& name) {
         return "saves/" + slot + "." + name + ".blob";
     }
+
+    // For a backend that writes in the background (QueuedSaveBackend): wait
+    // until every write is done; how many are not; and the first failure
+    // since the last call, once. A backend that writes as it is called has
+    // nothing to wait for.
+    virtual void flush() {}
+    [[nodiscard]] virtual std::size_t pending() const { return 0; }
+    [[nodiscard]] virtual std::optional<std::string> takeError() { return std::nullopt; }
 };
 
 // The default backend: files below a folder, written with writeTextAtomic;
@@ -123,6 +131,11 @@ public:
     [[nodiscard]] std::optional<std::string> thumbnailUri(const std::string& slot) const;
     [[nodiscard]] Json readConfig() const;
     void writeConfig(const Json& data);
+    // Writes still on their way to storage (0 with a backend that writes at
+    // once), and waiting for them: flush() returns when all are written and
+    // raises the first failure among them.
+    [[nodiscard]] std::size_t pending() const { return backend_->pending(); }
+    void flush();
     [[nodiscard]] const std::filesystem::path& directory() const { return directory_; }
     [[nodiscard]] SaveBackend& backend() { return *backend_; }
     // Where fe.app.capture writes screenshots.

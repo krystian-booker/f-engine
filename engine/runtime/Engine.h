@@ -42,6 +42,10 @@ struct EngineOptions {
     std::unique_ptr<Audio> audio;               // null = silent NullAudio
     std::unique_ptr<PlatformServices> platform; // null = LocalPlatformServices in userData
     std::unique_ptr<SaveBackend> saveBackend;   // null = files in userData
+    // Saves are handed to a worker thread and written in the background
+    // (QueuedSaveBackend); false writes them inside fe.save.write, as a tool
+    // that inspects the files right afterwards wants.
+    bool backgroundSaves = true;
     std::unique_ptr<Clipboard> clipboard;       // null = MemoryClipboard (headless, tests, replays)
     std::string locale = "en-US";               // the player's preferred locale, BCP 47
     // Decoded bytes the asset cache keeps before evicting assets no loaded
