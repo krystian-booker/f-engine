@@ -24,7 +24,11 @@ namespace fe {
 //     progress before removing;
 //   * flush() waits until everything is written; the destructor flushes.
 // A write that fails is logged, and reported once by takeError() (which
-// fe.save.flush raises). Calls into the wrapped backend never overlap.
+// fe.save.flush raises). Writes and removes of the wrapped backend never
+// overlap each other; its reads wait for a write in progress too unless it
+// says they need not (SaveBackend::concurrentReads, as the file backend
+// does), in which case nothing the game calls waits on storage except
+// remove and flush.
 class QueuedSaveBackend final : public SaveBackend {
 public:
     explicit QueuedSaveBackend(std::unique_ptr<SaveBackend> inner);
@@ -52,8 +56,8 @@ private:
     struct Job {
         std::string id;
         bool blob = false;
-        std::string key;        // a key, or for a blob its slot
-        std::string name;       // a blob's name
+        std::string key;  // a key, or for a blob its slot
+        std::string name; // a blob's name
         std::string bytes;
         bool keepBackup = false;
         double queued = 0; // seconds since epoch
@@ -70,8 +74,13 @@ private:
     void run();
 
     std::unique_ptr<SaveBackend> inner_;
-    mutable std::mutex mutex_;   // the queue
-    mutable std::mutex io_;      // every call into inner_
+    mutable std::mutex mutex_; // the queue
+    mutable std::mutex io_;    // calls into inner_ (reads only when it cannot take them concurrently)
+    // Held for a read of inner_: io_, or nothing when reads may overlap writes.
+    [[nodiscard]] std::unique_lock<std::mutex> readLock() const {
+        return concurrentReads_ ? std::unique_lock<std::mutex>() : std::unique_lock<std::mutex>(io_);
+    }
+    bool concurrentReads_ = false;
     std::condition_variable wake_, idle_;
     std::deque<Job> waiting_; // oldest first
     std::string runningId_;   // the job the worker is writing, "" for none

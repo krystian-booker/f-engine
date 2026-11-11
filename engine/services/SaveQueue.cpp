@@ -11,7 +11,7 @@ double now() {
 } // namespace
 
 QueuedSaveBackend::QueuedSaveBackend(std::unique_ptr<SaveBackend> inner)
-    : inner_(std::move(inner)), worker_([this] { run(); }) {
+    : inner_(std::move(inner)), concurrentReads_(inner_->concurrentReads()), worker_([this] { run(); }) {
 }
 
 QueuedSaveBackend::~QueuedSaveBackend() {
@@ -98,7 +98,8 @@ void QueuedSaveBackend::write(const std::string& key, const std::string& bytes, 
     enqueue(std::move(job));
 }
 
-void QueuedSaveBackend::writeBlob(const std::string& slot, const std::string& name, const std::string& bytes) {
+void QueuedSaveBackend::writeBlob(const std::string& slot, const std::string& name,
+                                  const std::string& bytes) {
     Job job;
     job.blob = true;
     job.key = slot;
@@ -112,34 +113,33 @@ std::optional<std::string> QueuedSaveBackend::read(const std::string& key, bool 
     if (backup) {
         // The backup is what the wrapped backend holds once this key's writes are done.
         std::unique_lock lock(mutex_);
-        const_cast<QueuedSaveBackend*>(this)->idle_.wait(
-            lock, [&] { return find(keyId(key)) == nullptr; });
+        const_cast<QueuedSaveBackend*>(this)->idle_.wait(lock, [&] { return find(keyId(key)) == nullptr; });
     } else {
         const std::scoped_lock lock(mutex_);
         if (const auto* job = find(keyId(key))) {
             return job->bytes;
         }
     }
-    const std::scoped_lock io(io_);
+    const auto io = readLock();
     return inner_->read(key, backup);
 }
 
-std::optional<std::string> QueuedSaveBackend::readBlob(const std::string& slot, const std::string& name) const {
+std::optional<std::string> QueuedSaveBackend::readBlob(const std::string& slot,
+                                                       const std::string& name) const {
     {
         const std::scoped_lock lock(mutex_);
         if (const auto* job = find(blobId(slot, name))) {
             return job->bytes;
         }
     }
-    const std::scoped_lock io(io_);
+    const auto io = readLock();
     return inner_->readBlob(slot, name);
 }
 
 std::optional<SaveBackend::Stat> QueuedSaveBackend::stat(const std::string& key, bool backup) const {
     if (backup) {
         std::unique_lock lock(mutex_);
-        const_cast<QueuedSaveBackend*>(this)->idle_.wait(
-            lock, [&] { return find(keyId(key)) == nullptr; });
+        const_cast<QueuedSaveBackend*>(this)->idle_.wait(lock, [&] { return find(keyId(key)) == nullptr; });
     } else {
         const std::scoped_lock lock(mutex_);
         if (const auto* job = find(keyId(key))) {
@@ -149,14 +149,14 @@ std::optional<SaveBackend::Stat> QueuedSaveBackend::stat(const std::string& key,
             return stat;
         }
     }
-    const std::scoped_lock io(io_);
+    const auto io = readLock();
     return inner_->stat(key, backup);
 }
 
 std::vector<std::string> QueuedSaveBackend::list(const std::string& folder) const {
     std::vector<std::string> names;
     {
-        const std::scoped_lock io(io_);
+        const auto io = readLock();
         names = inner_->list(folder);
     }
     const std::scoped_lock lock(mutex_);
@@ -181,7 +181,7 @@ std::vector<std::string> QueuedSaveBackend::list(const std::string& folder) cons
 std::vector<std::string> QueuedSaveBackend::listBlobs(const std::string& slot) const {
     std::vector<std::string> names;
     {
-        const std::scoped_lock io(io_);
+        const auto io = readLock();
         names = inner_->listBlobs(slot);
     }
     const std::scoped_lock lock(mutex_);

@@ -55,6 +55,14 @@ public:
         return "saves/" + slot + "." + name + ".blob";
     }
 
+    // Whether read, stat, list, readBlob and listBlobs may be called while
+    // another thread is inside write or writeBlob (of a different key: the
+    // queue never reads a key it is writing). The background writer then
+    // answers reads without waiting for a write in progress; otherwise every
+    // call into the backend waits its turn. The file backend can: its writes
+    // go to a temporary file and are renamed into place.
+    [[nodiscard]] virtual bool concurrentReads() const { return false; }
+
     // For a backend that writes in the background (QueuedSaveBackend): wait
     // until every write is done; how many are not; and the first failure
     // since the last call, once. A backend that writes as it is called has
@@ -70,6 +78,7 @@ class FileSaveBackend final : public SaveBackend {
 public:
     explicit FileSaveBackend(std::filesystem::path directory);
     [[nodiscard]] std::string name() const override { return "file"; }
+    [[nodiscard]] bool concurrentReads() const override { return true; }
     [[nodiscard]] std::optional<std::string> read(const std::string& key, bool backup) const override;
     void write(const std::string& key, const std::string& bytes, bool keepBackup) override;
     [[nodiscard]] std::vector<std::string> list(const std::string& folder) const override;

@@ -89,9 +89,13 @@ std::string readRange(const std::filesystem::path& file, std::uint64_t offset, s
     return bytes;
 }
 
+// Formats stored as they are: already compressed, or audio, which the mixer
+// streams straight out of the archive (a window of the file; see
+// engine/audio/PackVfs.h) and so must not be wrapped in a zlib stream.
 bool alreadyCompressed(const std::string& name) {
     const auto extension = std::filesystem::path(name).extension().string();
-    for (const char* known : {".png", ".jpg", ".jpeg", ".ogg", ".mp3", ".flac", ".ktx", ".dds", ".zip"}) {
+    for (const char* known :
+         {".png", ".jpg", ".jpeg", ".ogg", ".mp3", ".flac", ".wav", ".ktx", ".dds", ".zip"}) {
         if (extension == known) {
             return true;
         }

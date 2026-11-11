@@ -272,9 +272,17 @@ fe.app.sprite_clips = nil
 --- Per-user persistence. Saves are JSON documents the game defines; the engine adds no schema.
 fe.save = fe.save or {}
 
---- Atomically write a save slot, keeping the previous version as its .bak. Raises (writing nothing) for data that could not be read back: tables nested deeper than 127 levels (the save file wraps them in one more) and the values fe.json.encode rejects.
+--- Atomically write a save slot, keeping the previous version as its .bak. Raises (writing nothing) for data that could not be read back: tables nested deeper than 127 levels (the save file wraps them in one more) and the values fe.json.encode rejects. The call returns once the save is checked and queued: the slow part, getting it onto storage, happens on a worker thread, so saving on a door or a menu costs the frame nothing. The slot reads back, lists and deletes as if written at once; fe.save.pending() and fe.save.flush() are for the moments that must know (a 'Saving...' icon, quitting). The same holds for write_blob and write_config.
 ---@type fun(slot: string, data: table, meta?: table)
 fe.save.write = nil
+
+--- Writes (slots, blobs, settings) not yet on storage; 0 when everything is.
+---@type fun(): integer
+fe.save.pending = nil
+
+--- Wait until every queued write is on storage. Raises when one of them failed (a full disk, a removed card): the message of the first failure since the last flush. Failures are also logged when they happen. The engine flushes by itself when it shuts down.
+---@type fun()
+fe.save.flush = nil
 
 --- Read a slot's data and metadata (nil when empty). When the slot's file is missing or cut short (an interrupted write) the previous save kept as its .bak is read instead, a warning is logged and the third result is true. A slot file that is complete but unreadable (invalid JSON, nested too deep, not a save) raises an error instead of loading the previous save.
 ---@type fun(slot: string): table?, table?, true?

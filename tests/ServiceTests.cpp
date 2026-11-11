@@ -739,8 +739,10 @@ public:
         bool open = true, fail = false;
         int writes = 0, overlapping = 0, active = 0;
     };
-    explicit GatedBackend(std::shared_ptr<State> state) : s_(std::move(state)) {}
+    explicit GatedBackend(std::shared_ptr<State> state, bool concurrent = true)
+        : s_(std::move(state)), concurrent_(concurrent) {}
     [[nodiscard]] std::string name() const override { return "gated"; }
+    [[nodiscard]] bool concurrentReads() const override { return concurrent_; }
     [[nodiscard]] std::optional<std::string> read(const std::string& key, bool backup) const override {
         const std::scoped_lock lock(s_->mutex);
         const auto& from = backup ? s_->backups : s_->files;
@@ -789,6 +791,7 @@ public:
 
 private:
     std::shared_ptr<State> s_;
+    bool concurrent_;
 };
 
 void setGate(GatedBackend::State& state, bool open) {
@@ -872,4 +875,20 @@ TEST_CASE("a failed background write is reported by flush, once") {
     CHECK_NOTHROW(store.flush());
     CHECK(store.read("slot1")->data.at("gold") == 6);
     CHECK(store.pending() == 0);
+}
+
+TEST_CASE("a backend that cannot be read while it writes is never called twice at once") {
+    const auto state = std::make_shared<GatedBackend::State>();
+    QueuedSaveBackend queue(std::make_unique<GatedBackend>(state, false));
+    for (int i = 0; i < 20; ++i) {
+        queue.write("saves/slot" + std::to_string(i % 3) + ".json", std::to_string(i), true);
+        // Reads of keys the queue does not hold reach the backend, each waiting its turn.
+        CHECK_FALSE(queue.read("saves/other.json", false).has_value());
+        CHECK(queue.list("saves").size() <= 3);
+    }
+    queue.flush();
+    const std::scoped_lock lock(state->mutex);
+    CHECK(state->overlapping == 0);
+    CHECK(state->files.at("saves/slot1.json") == "19");
+    CHECK(state->backups.at("saves/slot1.json") == "16");
 }

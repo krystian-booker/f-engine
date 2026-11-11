@@ -1,5 +1,7 @@
 #pragma once
+#include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -47,6 +49,17 @@ void unmountPacks();
 [[nodiscard]] std::vector<std::string> listFolder(const std::filesystem::path& folder);
 // Sorted folder-relative generic paths of every file below `folder`.
 [[nodiscard]] std::vector<std::string> listFilesBelow(const std::filesystem::path& folder);
+// Where a file's bytes lie when it is an archive entry stored as it is (not
+// compressed): the archive file, and the offset and size of the entry in it.
+// Nullopt for a loose file, a compressed entry and a missing file. A reader
+// that takes a window of the archive needs no copy of the entry. Thread safe.
+struct StoredSpan {
+    std::filesystem::path archive;
+    std::uint64_t offset = 0, size = 0;
+};
+[[nodiscard]] std::optional<StoredSpan> storedSpan(const std::filesystem::path& path);
+// Whether the file is read from an archive entry, stored or compressed.
+[[nodiscard]] bool isPacked(const std::filesystem::path& path);
 // A path on disk holding the file, for libraries that only open files by
 // name: the loose file, or the archive entry extracted once per process into
 // a private temporary folder removed at exit.

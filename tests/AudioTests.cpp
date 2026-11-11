@@ -1,11 +1,14 @@
 #include "engine/audio/MiniAudio.h"
 #include "engine/audio/PitchShift.h"
+#include "engine/core/Pack.h"
+#include "engine/core/Paths.h"
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <doctest/doctest.h>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <random>
 #include <string>
 #include <thread>
@@ -669,4 +672,52 @@ TEST_CASE("preserve_speed shifts the pitch and keeps the playback time; outside 
     // Voices that never asked for it have no shifter.
     const int plain = audio.playSound(file, SoundOptions{});
     CHECK_FALSE(audio.voiceShifted(plain));
+}
+
+TEST_CASE("packed audio plays from inside the archive, stored or compressed, without being extracted") {
+    TempFolder folder;
+    const auto game = folder.path / "game";
+    std::filesystem::create_directories(game / "audio");
+    const auto read = [](const std::filesystem::path& file) {
+        std::ifstream in(file, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), {});
+    };
+    const auto ogg = read(std::filesystem::path(FENGINE_TEST_GAME) / "audio" / "tone.ogg");
+    const auto wav = read(toneFile());
+    {
+        PackWriter writer(folder.path / "game.pak");
+        writer.add("audio/stored.ogg", ogg); // as the packer stores audio
+        writer.add("audio/stored.wav", wav);
+        writer.add("audio/squeezed.wav", wav, PackWriter::Compression::Zlib); // an archive made otherwise
+        writer.add("audio/squeezed.ogg", ogg, PackWriter::Compression::Zlib);
+        writer.finish();
+    }
+    mountPack(folder.path / "game.pak", false);
+    REQUIRE(storedSpan(game / "audio" / "stored.ogg").has_value());
+    CHECK(storedSpan(game / "audio" / "stored.ogg")->size == ogg.size());
+    CHECK_FALSE(storedSpan(game / "audio" / "squeezed.wav").has_value());
+    CHECK(isPacked(game / "audio" / "squeezed.wav"));
+    CHECK_FALSE(isPacked(toneFile()));
+
+    MiniAudio audio(false);
+    CHECK(audio.length(game / "audio" / "stored.ogg") == doctest::Approx(0.5).epsilon(0.05));
+    CHECK(audio.length(game / "audio" / "squeezed.ogg") == doctest::Approx(0.5).epsilon(0.05));
+    CHECK(audio.length(game / "audio" / "stored.wav") == doctest::Approx(1.0));
+    CHECK(audio.length(game / "audio" / "squeezed.wav") == doctest::Approx(1.0));
+    for (const char* name : {"stored.ogg", "stored.wav", "squeezed.wav", "squeezed.ogg"}) {
+        CAPTURE(name);
+        const int voice = audio.playSound(game / "audio" / name, SoundOptions{});
+        CHECK(audio.playing(voice));
+        mixUntil(audio, [&] { return audio.position(voice) > 0; });
+        CHECK(audio.position(voice) > 0); // it produced sound
+        audio.stopSound(voice, 0);
+    }
+    // Music streams from the archive too.
+    audio.playMusic(game / "audio" / "stored.wav", MusicOptions{});
+    mixUntil(audio, [&] { return audio.musicPosition("main") > 0; });
+    CHECK(audio.musicPosition("main") > 0);
+    // Nothing was written next to the archive or anywhere under the game folder.
+    CHECK_FALSE(std::filesystem::exists(game / "audio" / "stored.ogg"));
+    audio.stopMusic("", 0);
+    unmountPacks();
 }
