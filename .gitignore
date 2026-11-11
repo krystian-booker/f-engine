@@ -13,3 +13,6 @@ __pycache__/
 
 # Editor walkthrough screenshots
 tools/editor_walkthrough/out/
+
+# Screenshots a windowed replay writes into the working directory
+/replay-out/

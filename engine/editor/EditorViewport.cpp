@@ -70,7 +70,8 @@ void Editor::adjustDraws(std::vector<WorldDraw>& draws) {
     }
     if (!focus) {
         // Nothing drew it (a title screen, a battle on top): show the map anyway.
-        draws.push_back(WorldDraw{.world = w});
+        draws.emplace_back();
+        draws.back().world = w;
         focus = &draws.back();
     }
     focus->pixelRect = viewRect_.pixels;

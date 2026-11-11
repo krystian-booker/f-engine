@@ -18,7 +18,8 @@ std::tuple<float, float, bool> projectToCanvas(Engine& engine, const Camera& cam
 
 namespace {
 WorldDraw worldDraw(Engine& engine, const std::shared_ptr<World>& world, const sol::object& options) {
-    WorldDraw draw{.world = world};
+    WorldDraw draw;
+    draw.world = world;
     const auto spec = lua::options(options, "world:draw options");
     if (!spec) {
         return draw;

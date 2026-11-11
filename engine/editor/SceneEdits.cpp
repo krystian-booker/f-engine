@@ -129,12 +129,17 @@ bool syncPlacementEntity(World& world, const Placement& placement) {
 }
 
 std::vector<std::string> changedPlacementIds(const MapData& before, const MapData& after) {
+    const auto placementJson = [](const Placement& placement) {
+        MapData map;
+        map.placements = {placement};
+        return map.toJson().at("placements").at(0);
+    };
     std::map<std::string, Json> was, now;
     for (const auto& p : before.placements) {
-        was[p.id] = MapData{.placements = {p}}.toJson().at("placements").at(0);
+        was[p.id] = placementJson(p);
     }
     for (const auto& p : after.placements) {
-        now[p.id] = MapData{.placements = {p}}.toJson().at("placements").at(0);
+        now[p.id] = placementJson(p);
     }
     std::vector<std::string> ids;
     for (const auto& [id, json] : was) {

@@ -186,7 +186,11 @@ public:
     // cache is over its budget; returns how many were evicted.
     std::size_t releaseUnusedAssets();
     // Worlds scripts asked to draw this frame, in order.
-    void queueDraw(const std::shared_ptr<World>& world) { drawList_.push_back(WorldDraw{.world = world}); }
+    void queueDraw(const std::shared_ptr<World>& world) {
+        WorldDraw draw; // not a designated initializer: GCC's -Wextra flags the omitted members
+        draw.world = world;
+        drawList_.push_back(std::move(draw));
+    }
     void queueDraw(WorldDraw draw) { drawList_.push_back(std::move(draw)); }
     [[nodiscard]] const std::vector<WorldDraw>& drawList() const { return drawList_; }
     // The world most recently drawn (editor).

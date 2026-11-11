@@ -236,7 +236,7 @@ void Editor::drawPaint(World& w) {
                     const auto cell = stack.back();
                     stack.pop_back();
                     cells.push_back(cell);
-                    for (const auto [dx, dz] : {std::pair{1, 0}, std::pair{-1, 0}, std::pair{0, 1}, std::pair{0, -1}}) {
+                    for (const auto& [dx, dz] : {std::pair{1, 0}, std::pair{-1, 0}, std::pair{0, 1}, std::pair{0, -1}}) {
                         const GridPos next{cell.x + dx, cell.z + dz, layer_};
                         if (grid.inRange(next) && grid.at(next).walkable == walkable && seen.insert({next.x, next.z}).second) {
                             stack.push_back(next);

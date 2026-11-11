@@ -208,7 +208,7 @@ void FrameRenderer::render(const std::vector<WorldDraw>& draws, const Canvas& ca
 
     for (const auto& [target, key] : keepRequests_) {
         const auto* named = named_.find(target);
-        if (!named || next + 1 >= last) {
+        if (!named || next + 1u >= last) {
             continue;
         }
         auto copy = colorTexture(named->size, BGFX_TEXTURE_BLIT_DST | LinearClamp);

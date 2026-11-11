@@ -160,11 +160,21 @@ if(FENGINE_DEV_ENABLED)
   target_sources(fengine_imgui PRIVATE "${imguizmo_SOURCE_DIR}/src/ImGuizmo.cpp")
   target_include_directories(fengine_imgui SYSTEM PUBLIC "${imguizmo_SOURCE_DIR}/src" "${iconfontcppheaders_SOURCE_DIR}")
   set(FENGINE_EDITOR_FONT "${PROJECT_BINARY_DIR}/fonts/fa-solid-900.ttf")
+  set(editor_font_hash af19d135d3a935b3ebfbd80320716ffe1202052c5f68dc2c5f1abc57005ac605)
   if(NOT EXISTS "${FENGINE_EDITOR_FONT}")
+    # No EXPECTED_HASH here: with it a failed download (offline, a proxy) is a
+    # fatal configure error instead of the warning below. The hash is checked
+    # by hand once the file has arrived.
     file(DOWNLOAD https://github.com/FortAwesome/Font-Awesome/raw/6.7.2/webfonts/fa-solid-900.ttf
-      "${FENGINE_EDITOR_FONT}" EXPECTED_HASH SHA256=af19d135d3a935b3ebfbd80320716ffe1202052c5f68dc2c5f1abc57005ac605
-      STATUS editor_font_status)
+      "${FENGINE_EDITOR_FONT}" STATUS editor_font_status)
     list(GET editor_font_status 0 editor_font_code)
+    if(editor_font_code EQUAL 0)
+      file(SHA256 "${FENGINE_EDITOR_FONT}" editor_font_actual)
+      if(NOT editor_font_actual STREQUAL editor_font_hash)
+        set(editor_font_code 1)
+        set(editor_font_status "unexpected SHA256 ${editor_font_actual}")
+      endif()
+    endif()
     if(NOT editor_font_code EQUAL 0)
       message(WARNING "Could not download the editor icon font (${editor_font_status}); the editor shows text labels")
       file(REMOVE "${FENGINE_EDITOR_FONT}")
