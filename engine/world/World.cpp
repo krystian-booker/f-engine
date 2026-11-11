@@ -238,15 +238,20 @@ void World::rename(entt::entity entity, const std::string& id) {
     if (!registry_.valid(entity)) {
         return;
     }
+    // Refused before anything changes: a rename that throws leaves the
+    // entity findable under its old id.
+    if (const auto taken = names_.find(id); taken != names_.end()) {
+        if (taken->second == entity) {
+            return;
+        }
+        throw std::runtime_error("Entity id already in use: " + id);
+    }
     if (const auto* name = registry_.try_get<Name>(entity)) {
         names_.erase(name->id);
     }
     if (id.empty()) {
         registry_.remove<Name>(entity);
         return;
-    }
-    if (names_.contains(id)) {
-        throw std::runtime_error("Entity id already in use: " + id);
     }
     registry_.emplace_or_replace<Name>(entity, Name{id});
     names_[id] = entity;

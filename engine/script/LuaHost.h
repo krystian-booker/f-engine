@@ -182,6 +182,11 @@ private:
     [[nodiscard]] std::string chunkName(const std::filesystem::path& file) const;
     sol::object load(const std::string& name, const std::filesystem::path& file);
     void patchModule(const sol::table& live, const sol::table& fresh, const std::string& chunk);
+    // report(): the last message written to the log, when, and how many
+    // identical ones were left out since.
+    std::string lastLogged_;
+    std::chrono::steady_clock::time_point lastLoggedAt_{};
+    int suppressedLogs_ = 0;
     std::filesystem::path gameRoot_, builtinRoot_;
     std::vector<std::shared_ptr<void>> kept_; // destroyed after the state closes (see keep)
     std::vector<std::function<void()>> atClose_;

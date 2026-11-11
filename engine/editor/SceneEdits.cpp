@@ -13,6 +13,13 @@ GridPos snapToCell(const Grid& grid, glm::vec3 position, int layer) {
             std::clamp(layer, 0, std::max(0, grid.layerCount() - 1))};
 }
 
+glm::vec3 clampToGrid(const Grid& grid, glm::vec3 position) {
+    const float margin = 0.001f;
+    position.x = std::clamp(position.x, 0.0f, std::max(0.0f, static_cast<float>(grid.width()) - margin));
+    position.z = std::clamp(position.z, 0.0f, std::max(0.0f, static_cast<float>(grid.depth()) - margin));
+    return position;
+}
+
 glm::vec3 cellCentre(const Grid& grid, GridPos cell) {
     const glm::vec2 centre(static_cast<float>(cell.x) + 0.5f, static_cast<float>(cell.z) + 0.5f);
     const int layer = std::clamp(cell.layer, 0, std::max(0, grid.layerCount() - 1));

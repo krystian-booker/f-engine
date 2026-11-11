@@ -456,7 +456,22 @@ sol::object LuaHost::require(const std::string& name) {
 
 
 void LuaHost::report(const std::string& message) {
-    log(LogLevel::Error, message);
+    // An update that fails every tick would write (and flush) the same
+    // traceback sixty times a second: the log gets it once a second, with a
+    // count of what it left out. The error list below still records each.
+    const auto time = std::chrono::steady_clock::now();
+    if (message == lastLogged_ && time - lastLoggedAt_ < std::chrono::seconds(1)) {
+        ++suppressedLogs_;
+    } else {
+        if (suppressedLogs_ > 0) {
+            log(LogLevel::Error,
+                "(the previous script error repeated " + std::to_string(suppressedLogs_) + " more time(s))");
+        }
+        log(LogLevel::Error, message);
+        lastLogged_ = message;
+        lastLoggedAt_ = time;
+        suppressedLogs_ = 0;
+    }
     errors_.push_back({message, now()});
     while (errors_.size() > 50) {
         errors_.pop_front();

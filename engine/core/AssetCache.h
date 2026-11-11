@@ -51,6 +51,12 @@ public:
     std::shared_ptr<const Image> tryImage(const std::string& path);
     // Whether `path` is decoded and cached right now (no load is started).
     [[nodiscard]] bool loaded(const std::string& path) const;
+    // The cached asset, or null: nothing is loaded and, unlike the accessors
+    // above, the asset does not count as used (the renderer compares its GPU
+    // copies with these without making every asset look recently used).
+    [[nodiscard]] std::shared_ptr<const Model> cachedModel(const std::string& path) const;
+    [[nodiscard]] std::shared_ptr<const SpriteAnimation> cachedSprite(const std::string& path) const;
+    [[nodiscard]] std::shared_ptr<const Image> cachedImage(const std::string& path) const;
 
     // Fonts are named sets of faces, e.g. {"files":["ui/font.fnt","ui/noto.ttf"],"size":12}.
     // Redefining a font keeps the previous faces alive until

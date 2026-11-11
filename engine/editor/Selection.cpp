@@ -1,4 +1,5 @@
 #include "engine/editor/Selection.h"
+#include "engine/editor/SceneEdits.h"
 #include "engine/world/Animation.h"
 #include "engine/world/Geometry.h"
 #include "engine/world/World.h"
@@ -230,7 +231,7 @@ bool applySelectionTransform(MapData& map, const Selection& s, const SelectionTr
         return false;
     case Selection::Kind::Point:
         if (const auto found = map.points.find(s.id); found != map.points.end()) {
-            found->second.position = t.position;
+            found->second.position = clampToGrid(map.grid, t.position); // a point off the grid cannot be saved
             found->second.facing = glm::length(t.facing) > 1e-4f ? glm::normalize(t.facing) : found->second.facing;
             found->second.layer = std::clamp(t.layer, 0, map.grid.layerCount() - 1);
             return true;

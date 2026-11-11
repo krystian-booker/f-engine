@@ -3,12 +3,19 @@
 #include "engine/audio/PitchShift.h"
 #include "engine/core/Log.h"
 #include "engine/core/Paths.h"
+// Ogg Vorbis: miniaudio decodes it through stb_vorbis (shipped in its
+// extras) when that header is seen before the implementation; the decoder's
+// own implementation follows miniaudio's, at the end of this file's includes.
+#define STB_VORBIS_HEADER_ONLY
+#include <extras/stb_vorbis.c>
 #define MINIAUDIO_IMPLEMENTATION
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <map>
 #include <miniaudio.h>
+#undef STB_VORBIS_HEADER_ONLY
+#include <extras/stb_vorbis.c>
 #include <optional>
 #include <set>
 #include <stdexcept>

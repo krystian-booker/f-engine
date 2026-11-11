@@ -116,6 +116,21 @@ AssetCache::Decoded AssetCache::decode(const std::filesystem::path& file) {
     return {};
 }
 
+std::shared_ptr<const Model> AssetCache::cachedModel(const std::string& path) const {
+    const auto found = models_.find(path);
+    return found == models_.end() ? nullptr : found->second;
+}
+
+std::shared_ptr<const SpriteAnimation> AssetCache::cachedSprite(const std::string& path) const {
+    const auto found = sprites_.find(path);
+    return found == sprites_.end() ? nullptr : found->second;
+}
+
+std::shared_ptr<const Image> AssetCache::cachedImage(const std::string& path) const {
+    const auto found = images_.find(path);
+    return found == images_.end() ? nullptr : found->second;
+}
+
 std::shared_ptr<const Model> AssetCache::model(const std::string& path) {
     collect();
     touch(path);

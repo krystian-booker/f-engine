@@ -56,14 +56,15 @@ void moveOverKeeping(const std::filesystem::path& from, const std::filesystem::p
     moveOver(from, to);
 }
 #else
-void syncDescriptor(int descriptor) {
+// False when the data could not be flushed to the device.
+bool syncDescriptor(int descriptor) {
 #ifdef __APPLE__
     // fsync only reaches the drive cache on macOS.
     if (fcntl(descriptor, F_FULLFSYNC) == 0) {
-        return;
+        return true;
     }
 #endif
-    fsync(descriptor);
+    return fsync(descriptor) == 0;
 }
 
 void writeDurably(const std::filesystem::path& path, const std::string& text) {
@@ -83,8 +84,15 @@ void writeDurably(const std::filesystem::path& path, const std::string& text) {
         }
         done += static_cast<std::size_t>(count);
     }
-    syncDescriptor(descriptor);
-    close(descriptor);
+    // A flush or close that fails (a full disk, an I/O error) means the bytes
+    // may not be on the device: the caller must not rename this file over a
+    // good one and report success.
+    const bool flushed = syncDescriptor(descriptor);
+    const int flushError = errno;
+    if (close(descriptor) != 0 || !flushed) {
+        throw std::runtime_error("Cannot flush " + path.string() + ": " +
+                                 std::strerror(flushed ? errno : flushError));
+    }
 }
 
 void flushFolder(const std::filesystem::path& folder) {

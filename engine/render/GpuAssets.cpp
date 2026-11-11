@@ -367,14 +367,15 @@ void GpuAssets::sync() {
         }
     }
     // An asset the cache no longer holds (evicted) or replaced (reloaded)
-    // takes its GPU copy with it. loaded() starts no load, so an evicted
-    // asset stays evicted until something uses it again.
+    // takes its GPU copy with it. loaded() and the cached lookups start no
+    // load and do not count as a use, so an evicted asset stays evicted and
+    // the cache's least-recently-used order is left as the game made it.
     const auto imageGone = [&](const std::string& path, const std::shared_ptr<const Image>& image) {
-        return !assets_.loaded(path) || assets_.tryImage(path) != image;
+        return !assets_.loaded(path) || assets_.cachedImage(path) != image;
     };
     for (auto& [path, uses] : images_) {
         const bool loaded = assets_.loaded(path);
-        const auto current = loaded ? assets_.tryImage(path) : nullptr;
+        const auto current = loaded ? assets_.cachedImage(path) : nullptr;
         for (auto& entry : uses) {
             if (entry.source && (!loaded || entry.source != current)) {
                 entry = {};
@@ -386,13 +387,13 @@ void GpuAssets::sync() {
         const auto replaced = [&](const std::string& path, const std::shared_ptr<const Image>& image) {
             return !path.empty() && imageGone(path, image);
         };
-        return !assets_.loaded(entry.first) || assets_.trySprite(entry.first) != sheet.animation ||
+        return !assets_.loaded(entry.first) || assets_.cachedSprite(entry.first) != sheet.animation ||
                (sheet.animation &&
                 (replaced(sheet.atlasPath, sheet.atlas) || replaced(sheet.normalPath, sheet.normalImage) ||
                  replaced(sheet.emissivePath, sheet.emissiveImage)));
     });
     std::erase_if(models_, [&](const auto& entry) {
-        return !assets_.loaded(entry.first.first) || assets_.tryModel(entry.first.first) != entry.second->source;
+        return !assets_.loaded(entry.first.first) || assets_.cachedModel(entry.first.first) != entry.second->source;
     });
     // A texture no model part holds any more belonged to dropped models only.
     std::erase_if(modelTextures_, [](const auto& entry) { return entry.second.use_count() == 1; });

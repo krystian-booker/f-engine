@@ -13,6 +13,9 @@ struct Model;
 // grid's height there (what "sits on the grid" means for placements and points).
 [[nodiscard]] GridPos snapToCell(const Grid& grid, glm::vec3 position, int layer);
 [[nodiscard]] glm::vec3 cellCentre(const Grid& grid, GridPos cell);
+// `position` moved inside the grid's rectangle (x and z; y is kept): where a
+// map's points must lie, or the map no longer loads (MapData::fromJson).
+[[nodiscard]] glm::vec3 clampToGrid(const Grid& grid, glm::vec3 position);
 // A position snapped to a step (0.5, 0.25) on every axis.
 [[nodiscard]] glm::vec3 snapToStep(glm::vec3 position, float step);
 // The cells per side a placed model covers (at least 1 each), from its box at

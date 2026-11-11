@@ -1,4 +1,5 @@
 #include "engine/editor/SceneHandles.h"
+#include "engine/editor/MapEdits.h"
 #include "engine/world/Animation.h"
 #include "engine/world/Geometry.h"
 #include "engine/world/World.h"
@@ -243,16 +244,16 @@ void buildHandles(World& world, const HandleOptions& options, const Selection& p
             if (const auto pages = p.props.find("pages"); pages != p.props.end() && pages->is_array()) {
                 for (const auto& page : *pages) {
                     if (page.is_object()) {
-                        const auto trigger = page.value("trigger", std::string("action"));
+                        const auto trigger = editorui::jsonString(page, "trigger", "action"); // tolerant of other types
                         if (std::find(triggers.begin(), triggers.end(), trigger) == triggers.end()) {
                             triggers.push_back(trigger);
                         }
                     }
                 }
             } else if (p.props.contains("script")) {
-                triggers.push_back(p.props.value("trigger", std::string("action")));
+                triggers.push_back(editorui::jsonString(p.props, "trigger", "action"));
             } else if (p.props.contains("map") && p.props.at("map").is_string()) {
-                triggers.push_back(p.props.value("trigger", std::string("touch")));
+                triggers.push_back(editorui::jsonString(p.props, "trigger", "touch"));
             }
             if (triggers.empty()) {
                 continue;

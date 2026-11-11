@@ -226,6 +226,16 @@ TEST_CASE("one-shots end by themselves; missing files throw") {
     CHECK_THROWS(audio.playSound("missing.wav", SoundOptions{}));
 }
 
+TEST_CASE("Ogg Vorbis files decode like the other formats") {
+    MiniAudio audio(false);
+    const auto file = std::filesystem::path(FENGINE_TEST_GAME) / "audio" / "tone.ogg";
+    CHECK(audio.length(file) == doctest::Approx(0.5).epsilon(0.05));
+    const int voice = audio.playSound(file, SoundOptions{});
+    CHECK(audio.playing(voice));
+    play(audio, 0.8);
+    CHECK(audio.activeSounds() == 0); // it played to its end
+}
+
 TEST_CASE("voices report whether they play and where they are") {
     MiniAudio audio(false);
     CHECK(audio.length(toneFile()) == doctest::Approx(1.0));

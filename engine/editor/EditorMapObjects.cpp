@@ -110,7 +110,9 @@ void Editor::drawPlacementForm(World& w, std::size_t index) {
         changed = respawn = true;
     }
     if (ImGui::BeginCombo("Type", p.type.c_str())) {
-        for (const auto& type : schemas_.value("entities", Json::object()).items()) {
+        // Named: items() of a temporary would outlive what it iterates.
+        const auto entityTypes = schemas_.value("entities", Json::object());
+        for (const auto& type : entityTypes.items()) {
             if (ImGui::Selectable(type.key().c_str(), type.key() == p.type)) {
                 p.type = type.key();
                 changed = respawn = true;
@@ -256,7 +258,8 @@ void Editor::drawZoneForm(World& w, std::size_t index) {
     const auto previousId = z.id;
     bool changed = ImGui::InputText("Zone id", &z.id);
     if (ImGui::BeginCombo("Zone type", z.type.c_str())) {
-        for (const auto& type : schemas_.value("zones", Json::object()).items()) {
+        const auto zoneTypes = schemas_.value("zones", Json::object());
+        for (const auto& type : zoneTypes.items()) {
             if (ImGui::Selectable(type.key().c_str(), type.key() == z.type)) {
                 z.type = type.key();
                 changed = true;
@@ -320,6 +323,7 @@ void Editor::drawPointForm(World& w, const std::string& name) {
     changed |= ImGui::DragFloat2("Point facing", glm::value_ptr(point.facing), 0.05f, -1, 1);
     changed |= editLayer("Point layer", point.layer, w.authored().grid);
     if (changed) {
+        point.position = clampToGrid(w.authored().grid, point.position);
         edit(w, [&](MapData& m) { m.points[name] = point; });
     }
     static std::string rename;

@@ -487,6 +487,7 @@ void Editor::duplicateSelection(World& w) {
     case Selection::Kind::Point: {
         auto copy = map.points.at(s.id);
         copy.position.x += 1;
+        copy.position = clampToGrid(map.grid, copy.position);
         std::string name = s.id + "_copy";
         for (int n = 2; map.points.contains(name); ++n) {
             name = s.id + "_copy" + std::to_string(n);

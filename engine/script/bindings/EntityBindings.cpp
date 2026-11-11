@@ -628,7 +628,10 @@ void bindEntity(Engine& engine) {
         .method(
             "move_to",
             [](const EntityRef& e, sol::object target, sol::object settings) {
-                auto& world = e.owner();
+                // Held for the call: planning may run a script's cost
+                // function, which can unload this world from under it.
+                const auto keep = e.lock();
+                auto& world = *keep;
                 const auto options = lua::options(settings, "move_to options");
                 std::optional<int> layer;
                 std::optional<StepRules> rules;

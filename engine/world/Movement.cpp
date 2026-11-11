@@ -125,11 +125,18 @@ void MovementSystem::moveTo(entt::entity entity, glm::vec3 target, bool findPath
         planning.blocked.erase(cellKey(from)); // a body already beside a box may leave
     }
     const auto planned = findRoute(grid_, from, {to.x, to.z, goalLayer}, planning, routeVisitLimit_);
+    // The search may have run a script's cost function, and a script can
+    // destroy the entity it is planning for: nothing is left to move then,
+    // and `mover` above no longer refers to anything.
+    if (!registry_.valid(entity) || !registry_.all_of<Mover, Transform>(entity)) {
+        return;
+    }
+    auto& planner = registry_.get<Mover>(entity);
     const auto& path = planned.steps;
     // A search stopped by its visit cap may hold a detour (or nothing): the
     // mover does not follow it, and says so the way it does for no route.
     if (path.empty() || planned.truncated) {
-        reset(mover);
+        reset(planner);
         events_.push({WorldEvent::Kind::Blocked, entity, entt::null, {}});
         return;
     }
