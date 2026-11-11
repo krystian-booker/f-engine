@@ -46,7 +46,7 @@ jobs:
         run: cmake -S . -B build -A x64 -DFENGINE_DEV=ON -DFENGINE_WARNINGS_AS_ERRORS=ON
       - name: Build
         run: cmake --build build --config Release --parallel 4
-      - name: Tests (C++, Lua library, samples, headless replays, boundary and API checks)
+      - name: Tests (C++, engine Lua tests, the sample, headless replays, boundary and API checks)
         run: ctest --test-dir build -C Release --output-on-failure
 
   # What players get: FENGINE_DEV=OFF (no editor, no source-tree fallbacks),
@@ -103,34 +103,36 @@ jobs:
           --assetc ${{ matrix.tools }}/fengine_assetc${{ matrix.exe }}
           --shaders build/shaders --validator ${{ matrix.bin }}/fengine_headless${{ matrix.exe }}
           --shaderc ${{ matrix.shaderc }}${{ matrix.exe }} --shader-include build/shader-include
-          --licenses build/licenses --game samples/vale --output dist/vale --zip --self-check
+          --licenses build/licenses --game samples/starfall --output dist/starfall --zip --self-check
       - name: Check the unpacked package
         shell: bash
         run: |
-          mkdir unpacked && python -m zipfile -e dist/vale.zip unpacked
+          mkdir unpacked && python -m zipfile -e dist/starfall.zip unpacked
           if [ "$RUNNER_OS" = macOS ]; then
-            chmod +x unpacked/vale/*.app/Contents/MacOS/fengine
-            app=$(ls -d unpacked/vale/*.app)
+            chmod +x unpacked/starfall/*.app/Contents/MacOS/fengine
+            app=$(ls -d unpacked/starfall/*.app)
             resources="$app/Contents/Resources"
             runtime="$app/Contents/MacOS/fengine"
             game="$resources/game"
-            lualib="$resources/lualib.pak"
+            builtin="$resources/builtin.pak"
           else
-            chmod +x unpacked/vale/bin/fengine${{ matrix.exe }}
-            runtime=unpacked/vale/bin/fengine${{ matrix.exe }}
-            game=unpacked/vale/game
-            lualib=unpacked/vale/bin/lualib.pak
+            chmod +x unpacked/starfall/bin/fengine${{ matrix.exe }}
+            runtime=unpacked/starfall/bin/fengine${{ matrix.exe }}
+            game=unpacked/starfall/game
+            builtin=unpacked/starfall/bin/builtin.pak
           fi
-          # The game and lualib ship only as archives holding what they should.
+          # The game and the engine's builtin assets ship only as archives holding what they should.
           fail() { echo "::error::$1"; exit 1; }
           [ ! -e "$game/main.lua" ] || fail "loose game files next to game.pak"
-          [ ! -d "${lualib%.pak}" ] || fail "loose lualib next to lualib.pak"
+          [ ! -d "${builtin%.pak}" ] || fail "loose builtin folder next to builtin.pak"
           assetc=${{ matrix.tools }}/fengine_assetc${{ matrix.exe }}
           "$assetc" list "$game.pak" | cut -f1 | tr -d '\r' > game-entries.txt
-          "$assetc" list "$lualib" | cut -f1 | tr -d '\r' > lualib-entries.txt
+          "$assetc" list "$builtin" | cut -f1 | tr -d '\r' > builtin-entries.txt
           for entry in game.json main.lua; do grep -qx "$entry" game-entries.txt || fail "game.pak lacks $entry"; done
-          grep -qx fe/init.lua lualib-entries.txt || fail "lualib.pak lacks fe/init.lua"
-          if grep -E '^(tests|replays|saves)/' game-entries.txt lualib-entries.txt; then fail "development files packed"; fi
+          grep -qx assets/weather.json builtin-entries.txt || fail "builtin.pak lacks assets/weather.json"
+          # The engine ships no Lua: every script in a package is the game's own.
+          if grep -E '\.lua$' builtin-entries.txt; then fail "Lua packed into builtin.pak"; fi
+          if grep -E '^(tests|replays|saves)/' game-entries.txt builtin-entries.txt; then fail "development files packed"; fi
           "$runtime" --check "$game"
       - name: Install and engine ZIP
         run: |
@@ -141,7 +143,7 @@ jobs:
           name: fengine-${{ runner.os }}
           path: |
             build/dist/fengine-*.zip
-            dist/vale.zip
+            dist/starfall.zip
 
   # macOS universal binaries (FENGINE_UNIVERSAL: arm64 and x86_64), as a
   # macOS release is built: both slices must be present in every executable,

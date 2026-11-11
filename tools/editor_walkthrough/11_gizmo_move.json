@@ -52,7 +52,7 @@
  },
  {
   "frame": 120,
-  "expect": "require('fe.field').world:placement('house_inn').position.x == 7.5"
+  "expect": "require('game.field').world:placement('house_inn').position.x == 7.5"
  },
  {
   "frame": 120,
@@ -69,7 +69,7 @@
  },
  {
   "frame": 134,
-  "expect": "require('fe.field').world:placement('house_inn').position.x == 4"
+  "expect": "require('game.field').world:placement('house_inn').position.x == 4"
  },
  {
   "frame": 140,

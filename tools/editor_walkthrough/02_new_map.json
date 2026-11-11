@@ -78,7 +78,7 @@
  },
  {
   "frame": 170,
-  "expect": "require('fe.field').world ~= nil and require('fe.field').world.map_id == 'walk_test'"
+  "expect": "require('game.field').world ~= nil and require('game.field').world.map_id == 'walk_test'"
  },
  {
   "frame": 170,

@@ -45,7 +45,7 @@
  },
  {
   "frame": 112,
-  "expect": "require('fe.field').world:placement('villager').position.x > 12"
+  "expect": "require('game.field').world:placement('villager').position.x > 12"
  },
  {
   "frame": 116,
@@ -53,7 +53,7 @@
  },
  {
   "frame": 130,
-  "expect": "(function() require('fe.task').detached('w', function() require('fe.field').warp('grotto', 'entry') end); return true end)()"
+  "expect": "(function() require('game.task').spawn(function() require('game.field').warp('grotto', 'entry') end, 'w'); return true end)()"
  },
  {
   "frame": 170,
@@ -84,7 +84,7 @@
  },
  {
   "frame": 264,
-  "expect": "(function() require('fe.task').detached('w2', function() require('fe.field').warp('town', 'return') end); return true end)()"
+  "expect": "(function() require('game.task').spawn(function() require('game.field').warp('town', 'entry') end, 'w2'); return true end)()"
  },
  {
   "frame": 330,
@@ -92,7 +92,7 @@
  },
  {
   "frame": 330,
-  "expect": "require('fe.field').world:placement('villager').position.x > 12"
+  "expect": "require('game.field').world:placement('villager').position.x > 12"
  },
  {
   "frame": 330,

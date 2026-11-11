@@ -45,7 +45,7 @@
  },
  {
   "frame": 112,
-  "expect": "require('fe.field').world:placement('villager').position.x > 12"
+  "expect": "require('game.field').world:placement('villager').position.x > 12"
  },
  {
   "frame": 120,
@@ -54,7 +54,7 @@
  },
  {
   "frame": 128,
-  "expect": "math.abs(require('fe.field').world:placement('villager').position.x - 11.5) < 0.01"
+  "expect": "math.abs(require('game.field').world:placement('villager').position.x - 11.5) < 0.01"
  },
  {
   "frame": 128,
@@ -67,7 +67,7 @@
  },
  {
   "frame": 138,
-  "expect": "require('fe.field').world:placement('villager').position.x > 12"
+  "expect": "require('game.field').world:placement('villager').position.x > 12"
  },
  {
   "frame": 138,
@@ -154,7 +154,7 @@
  },
  {
   "frame": 256,
-  "expect": "require('fe.field').world:placement('aster') ~= nil"
+  "expect": "require('game.field').world:placement('aster') ~= nil"
  },
  {
   "frame": 256,

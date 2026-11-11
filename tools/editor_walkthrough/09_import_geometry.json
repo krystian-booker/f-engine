@@ -54,7 +54,7 @@
  },
  {
   "frame": 150,
-  "expect": "require('fe.field').world.map_id == 'walk_test'"
+  "expect": "require('game.field').world.map_id == 'walk_test'"
  },
  {
   "frame": 150,
@@ -63,7 +63,7 @@
  {
   "frame": 152,
   "import": [
-   "/Users/krystian/repos/f-engine/samples/vale/maps/grotto/geometry.glb"
+   "/Users/krystian/repos/f-engine/samples/starfall/maps/grotto/geometry.glb"
   ],
   "purpose": "geometry"
  },
