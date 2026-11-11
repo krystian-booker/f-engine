@@ -22,8 +22,10 @@ constexpr float SilhouetteMargin = 0.3f;
 constexpr float WrapHeadroom = 16;
 const glm::mat4 Identity(1);
 
-std::uint64_t cull(const Material& material) {
-    return material.doubleSided ? 0 : BGFX_STATE_CULL_CW;
+// A mirrored transform (negative determinant) reverses the winding the GPU
+// sees, so the other face is the back face.
+std::uint64_t cull(const Material& material, bool mirrored = false) {
+    return material.doubleSided ? 0 : mirrored ? BGFX_STATE_CULL_CCW : BGFX_STATE_CULL_CW;
 }
 
 float skyMode(const std::string& mode) {
@@ -153,6 +155,7 @@ void WorldRenderer::render(World& world, std::size_t slot, double alpha, double 
     opaque_.clear();
     casters_.clear();
     parts_.clear();
+    skinned_.clear();
     transparent_.clear();
     sprites_.clear();
     distortQuads_.clear();
@@ -292,9 +295,10 @@ void WorldRenderer::drawSky(World& world, glm::vec3 focus) {
 
 void WorldRenderer::addPart(const GpuPart& part, const glm::mat4& transform, const glm::vec4& tint,
                             bool castShadow, std::optional<BlendMode> blend, int shader,
-                            const ShaderParams* params) {
+                            const ShaderParams* params, int skinned,
+                            const std::pair<glm::vec3, glm::vec3>* bounds) {
     glm::vec3 lo, hi;
-    transformBounds(transform, part.min, part.max, lo, hi);
+    transformBounds(transform, bounds ? bounds->first : part.min, bounds ? bounds->second : part.max, lo, hi);
     const auto& material = part.material;
     const bool water = material.kind == MaterialKind::Water;
     const BlendMode mode = water
@@ -319,6 +323,8 @@ void WorldRenderer::addPart(const GpuPart& part, const glm::mat4& transform, con
     PartDraw draw{&part, transform, glm::mat4(glm::transpose(glm::inverse(glm::mat3(transform)))),
                   tint,  mode,      shader};
     draw.params = shader >= 0 ? params : nullptr;
+    draw.skinned = skinned;
+    draw.mirrored = glm::determinant(glm::mat3(transform)) < 0;
     if (shader >= 0 && bgfx::isValid(custom_.shadowProgram(shader, ShaderVertex::World))) {
         draw.shadowShader = shader;
     }
@@ -364,7 +370,7 @@ void WorldRenderer::bindPart(const PartDraw& draw, std::uint64_t state, bool ins
         bgfx::setTransform(glm::value_ptr(draw.transform));
         bgfx::setUniform(uniforms_.normalMatrix.get(), glm::value_ptr(draw.normal));
     }
-    bgfx::setVertexBuffer(0, part.vertices.get());
+    setPartVertices(draw);
     bgfx::setIndexBuffer(part.indices.get());
     lighting_->bind(uniforms_);
     const bool anisotropic = environment_->anisotropic;
@@ -399,7 +405,56 @@ void WorldRenderer::bindPart(const PartDraw& draw, std::uint64_t state, bool ins
         bgfx::setUniform(uniforms_.params.get(), (draw.params ? *draw.params : ZeroParams).data(),
                          Uniforms::ParamsCount);
     }
-    bgfx::setState(state | cull(m));
+    bgfx::setState(state | cull(m, draw.mirrored));
+}
+
+void WorldRenderer::setPartVertices(const PartDraw& draw) const {
+    if (draw.skinned >= 0) {
+        bgfx::setVertexBuffer(0, &skinned_[static_cast<std::size_t>(draw.skinned)]);
+    } else {
+        bgfx::setVertexBuffer(0, draw.part->vertices.get());
+    }
+}
+
+int WorldRenderer::skinPart(const GpuPart& part, const Model& model, std::pair<glm::vec3, glm::vec3>& bounds) {
+    const auto& source = model.parts[static_cast<std::size_t>(part.sourcePart)];
+    const auto count = static_cast<std::uint32_t>(part.packed.size() / sizeof(WorldVertex));
+    if (count == 0 || count != source.vertices.size() || bgfx::getAvailTransientVertexBuffer(count, worldLayout()) < count) {
+        return -1;
+    }
+    bgfx::TransientVertexBuffer buffer;
+    bgfx::allocTransientVertexBuffer(&buffer, count, worldLayout());
+    // The packed rest vertices carry uv and colour; position, normal and
+    // tangent are rewritten from the joints (linear blend skinning, as
+    // skinVertices does, without the intermediate MeshVertex copy).
+    std::memcpy(buffer.data, part.packed.data(), part.packed.size());
+    auto* out = reinterpret_cast<WorldVertex*>(buffer.data);
+    glm::vec3 lo(std::numeric_limits<float>::max()), hi(-std::numeric_limits<float>::max());
+    for (std::uint32_t v = 0; v < count; ++v) {
+        const auto& vertex = source.vertices[v];
+        const auto& index = source.joints[v];
+        const auto& weight = source.weights[v];
+        glm::mat4 blended = joints_[index[0]] * weight[0];
+        for (std::size_t k = 1; k < 4; ++k) {
+            if (weight[static_cast<int>(k)] > 0) {
+                blended += joints_[index[k]] * weight[static_cast<int>(k)];
+            }
+        }
+        const glm::mat3 linear(blended);
+        const auto position = glm::vec3(blended * glm::vec4(vertex.position, 1));
+        auto normal = linear * vertex.normal;
+        auto tangent = linear * glm::vec3(vertex.tangent);
+        normal = glm::dot(normal, normal) > 1e-12f ? glm::normalize(normal) : vertex.normal;
+        tangent = glm::dot(tangent, tangent) > 1e-12f ? glm::normalize(tangent) : glm::vec3(vertex.tangent);
+        out[v].position = position;
+        out[v].normal = packDirection(normal);
+        out[v].tangent = packDirection(tangent, vertex.tangent.w);
+        lo = glm::min(lo, position);
+        hi = glm::max(hi, position);
+    }
+    bounds = {lo, hi};
+    skinned_.push_back(buffer);
+    return static_cast<int>(skinned_.size()) - 1;
 }
 
 void WorldRenderer::submitPart(std::uint16_t view, const PartDraw& draw, std::uint64_t state) {
@@ -410,7 +465,7 @@ void WorldRenderer::submitPart(std::uint16_t view, const PartDraw& draw, std::ui
 void WorldRenderer::drawOpaqueParts() {
     keys_.clear();
     for (const auto& draw : opaque_) {
-        keys_.emplace_back(draw.part, draw.shader, draw.params);
+        keys_.emplace_back(draw.part, draw.shader, draw.params, draw.variant());
     }
     groupByFirstUse(keys_, order_, rank_);
     for (std::size_t first = 0; first < order_.size();) {
@@ -467,18 +522,20 @@ void WorldRenderer::castShadow(std::uint16_t view, const std::vector<int>& caste
         // A game shadow shader keeps casters apart by shader and parameters;
         // the engine's depth-only pass groups by part alone.
         const auto& draw = casters_[static_cast<std::size_t>(index)].draw;
-        keys_.emplace_back(draw.part, draw.shadowShader, draw.shadowShader >= 0 ? draw.params : nullptr);
+        keys_.emplace_back(draw.part, draw.shadowShader, draw.shadowShader >= 0 ? draw.params : nullptr,
+                           draw.variant());
     }
     groupByFirstUse(keys_, order_, rank_);
-    const auto bind = [&](const GpuPart& part) {
+    const auto bind = [&](const PartDraw& draw) {
+        const auto& part = *draw.part;
         const auto& material = part.material;
         const glm::vec4 shadowMaterial[Uniforms::MaterialCount] = {
             glm::vec4(1), glm::vec4(material.alphaCutoff, 0, 0, 0), glm::vec4(0)};
-        bgfx::setVertexBuffer(0, part.vertices.get());
+        setPartVertices(draw);
         bgfx::setIndexBuffer(part.indices.get());
         bgfx::setTexture(0, uniforms_.albedo.get(), part.albedo, samplerFlags(material.albedoSampler, false));
         bgfx::setUniform(uniforms_.material.get(), shadowMaterial, Uniforms::MaterialCount);
-        bgfx::setState(ShadowState | cull(material));
+        bgfx::setState(ShadowState | cull(material, draw.mirrored));
     };
     const auto caster = [&](std::size_t k) -> const PartDraw& {
         return casters_[static_cast<std::size_t>(casters[static_cast<std::size_t>(order_[k])])].draw;
@@ -518,7 +575,7 @@ void WorldRenderer::castShadow(std::uint16_t view, const std::vector<int>& caste
         } else if (count == 1 || bgfx::getAvailInstanceDataBuffer(count, ShadowInstanceStride) < count) {
             for (std::size_t k = first; k < last; ++k) {
                 bgfx::setTransform(glm::value_ptr(caster(k).transform));
-                bind(*caster(k).part);
+                bind(caster(k));
                 submitDraw(view, shadow_.get(), *calls_);
             }
         } else {
@@ -529,7 +586,7 @@ void WorldRenderer::castShadow(std::uint16_t view, const std::vector<int>& caste
                 std::memcpy(out, glm::value_ptr(caster(k).transform), sizeof(glm::mat4));
                 out += ShadowInstanceStride;
             }
-            bind(*head.part);
+            bind(head);
             bgfx::setInstanceDataBuffer(&instances);
             submitDraw(view, shadowInstanced_.get(), *calls_);
         }
@@ -581,10 +638,12 @@ void WorldRenderer::drawMeshes(World& world, double alpha) {
             continue;
         }
         auto& cache = registry.get_or_emplace<MeshDrawCache>(entity);
+        bool modelChanged = false;
         if (cache.revision != gpu_.revision() || cache.model != mesh.model) {
             cache.revision = gpu_.revision();
             cache.model = mesh.model;
             cache.gpu = gpu_.model(mesh.model, false);
+            modelChanged = true; // another model numbers its animations differently
         }
         if (cache.shader != mesh.shader) {
             cache.shader = mesh.shader;
@@ -594,10 +653,12 @@ void WorldRenderer::drawMeshes(World& world, double alpha) {
         if (!model) {
             continue;
         }
-        if (cache.animation != mesh.animation) {
+        if (modelChanged || cache.animation != mesh.animation) {
             cache.animation = mesh.animation;
             cache.animationIndex = model->source->animation(mesh.animation);
         }
+        const bool fading = mesh.fade > 0 && mesh.fadeElapsed < mesh.fade;
+        const bool skinnedModel = model->source->skinned();
         const auto& transform = registry.get<Transform>(entity);
         const float turn = std::remainder(transform.yaw - transform.previousYaw, glm::two_pi<float>());
         const auto base = glm::translate(glm::mat4(1), world.interpolated(entity, alpha)) *
@@ -605,7 +666,7 @@ void WorldRenderer::drawMeshes(World& world, double alpha) {
                           glm::scale(glm::mat4(1), transform.scale);
         // Bit o: the mesh is drawn under wrapOffsets_[o] (all of them while animating).
         std::uint32_t mirrors = (1u << wrapOffsets_.size()) - 1;
-        if (cache.animationIndex < 0) {
+        if (cache.animationIndex < 0 && !fading) {
             // At rest the model's bounds are known: a mesh that is neither in
             // view nor in a shadow volume is skipped before it is posed.
             glm::vec3 lo, hi;
@@ -620,16 +681,58 @@ void WorldRenderer::drawMeshes(World& world, double alpha) {
                 continue;
             }
         }
-        model->source->pose(cache.animationIndex, mesh.time, pose_);
+        if (fading) {
+            // A crossfade: both animations' local transforms, blended, then composed.
+            const auto& source = *model->source;
+            source.sample(source.animation(mesh.fromAnimation), mesh.fromTime, blendFrom_);
+            source.sample(cache.animationIndex, mesh.time, blendTo_);
+            const float weight = mesh.fadeElapsed / mesh.fade;
+            Model::blendPoses(blendFrom_, blendTo_, weight * weight * (3 - 2 * weight));
+            source.compose(blendFrom_, pose_);
+        } else {
+            model->source->pose(cache.animationIndex, mesh.time, pose_);
+        }
         const auto* params = paramsOf(entity);
+        // Skinned parts are skinned once, in model space, and drawn under
+        // every visible mirror with the entity's transform alone.
+        struct Skinned {
+            int buffer = -1;
+            std::pair<glm::vec3, glm::vec3> bounds;
+        };
+        std::array<Skinned, 16> skinnedParts;
+        std::size_t skinnedCount = 0;
+        if (skinnedModel) {
+            int jointsOf = -1;
+            for (const auto& part : model->parts) {
+                if (part.skin < 0 || skinnedCount >= skinnedParts.size()) {
+                    continue;
+                }
+                if (jointsOf != part.skin) {
+                    model->source->jointMatrices(part.skin, pose_, joints_);
+                    jointsOf = part.skin;
+                }
+                auto& slot = skinnedParts[skinnedCount++];
+                slot.bounds = {part.min, part.max};
+                slot.buffer = skinPart(part, *model->source, slot.bounds);
+            }
+        }
         for (std::size_t o = 0; o < wrapOffsets_.size(); ++o) {
             if (!(mirrors & (1u << o))) {
                 continue;
             }
             const auto placed = o == 0 ? base : glm::translate(glm::mat4(1), wrapOffsets_[o]) * base;
+            std::size_t next = 0;
             for (const auto& part : model->parts) {
-                addPart(part, placed * pose_[static_cast<std::size_t>(part.node)], mesh.tint, mesh.castShadow,
-                        mesh.blend, cache.shaderSlot, params);
+                if (part.skin >= 0 && next < skinnedCount) {
+                    const auto& slot = skinnedParts[next++];
+                    addPart(part, placed, mesh.tint, mesh.castShadow, mesh.blend, cache.shaderSlot, params,
+                            slot.buffer, &slot.bounds);
+                } else if (part.skin >= 0) {
+                    addPart(part, placed, mesh.tint, mesh.castShadow, mesh.blend, cache.shaderSlot, params);
+                } else {
+                    addPart(part, placed * pose_[static_cast<std::size_t>(part.node)], mesh.tint, mesh.castShadow,
+                            mesh.blend, cache.shaderSlot, params);
+                }
             }
         }
     }

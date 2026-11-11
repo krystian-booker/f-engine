@@ -135,6 +135,7 @@ Application, window and asset-loading services.
 | `preload` | `fun(paths: string[]): integer` | Decode assets on a worker thread; returns a ticket. |
 | `progress` | `fun(ticket: integer): number` | Preload progress 0..1. |
 | `image_size` | `fun(path: string): integer, integer` | Pixel size of an image, or of a render target ('rt:<name>'). A missing or unreadable image, or a target no world was drawn into, raises an error. |
+| `model_animations` | `fun(path: string): table<string, {length: number}>` | The animations of a glTF model (.glb or .gltf) by name, with their length in seconds: what entity:play and the mesh component's `animation` accept. A missing or invalid file raises an error. |
 | `sprite_clips` | `fun(path: string): table<string, {loop: boolean, length: number, directions: integer}>` | Clip information of a sprite animation (.anim.json). An empty path (a sprite without an animation) has no clips; a missing or invalid file raises an error. |
 
 ## `fe.save`
@@ -306,8 +307,8 @@ A world entity. Components are optional; a script decides what an entity is.
 | `:shader_params` | `fun(values?: number[]/nil): number[]?` | The 16 numbers a game shader (sprite or mesh `shader`) reads as `u_params[4]`: a list of up to 16 numbers in order (`u_params[0].x` first; missing ones are 0), for dissolve amounts, hit timers and the like. No argument reads them (nil when never set); nil removes them (zeros). |
 | `:sprite` | `fun(settings?: table/nil): table?` | Add or change the sprite and return its state; e:sprite() reads it (nil when the entity has no sprite) and nil removes it. |
 | `:clip` | `fun(clip: string, restart?: boolean)` | Play a sprite clip. |
-| `:mesh` | `fun(settings?: table/nil): table?` | Add or change a glTF mesh (props, doors...) and return its state; e:mesh() reads it (nil without one) and nil removes it. |
-| `:play` | `fun(animation: string, loop?: boolean)` | Play a mesh animation by name. |
+| `:mesh` | `fun(settings?: table/nil): table?` | Add or change a glTF mesh (props, doors, skinned characters and creatures) and return its state; e:mesh() reads it (nil without one) and nil removes it. Fields: `model`, `animation`, `speed`, `loop`, `playing`, `visible`, `cast_shadow`, `tint`, `blend`, `shader`. |
+| `:play` | `fun(animation: string, loop?: boolean, fade?: number)` | Play a mesh animation by name from its start: a glTF animation of the model's nodes or, for a skinned model, of its skeleton. With `fade` (seconds, 0 to 60) the pose blends from the animation playing now into the new one instead of cutting (idle to attack and back). A finished non-looping animation emits 'anim_finished' with its name. fe.app.model_animations lists a model's animations. |
 | `:light` | `fun(settings?: table/nil): table?` | Attach a light (position is an offset; `enabled = false` keeps it but turns it off) and return its state; e:light() reads it (nil without one) and nil removes it. |
 | `:emitter` | `fun(settings?: table/nil): table?` | Attach particles (the settings replace the previous ones) and return their state; `paused = true|false` stops or resumes spawning, and a table with no other field keeps the settings. e:emitter() reads it (nil without one) and nil removes the emitter. |
 | `:collider` | `fun(settings?: {radius?: number, height?: number, solid?: boolean}/nil): table?` | Contact shape: an upright cylinder, `radius` 0 to 64 (default 0.25) and `height` 0 to 1000 (default 1.6). Solid colliders block movers; all report contacts. e:collider() reads it (nil without one) and nil removes it. |

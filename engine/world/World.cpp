@@ -283,8 +283,19 @@ void World::setClip(entt::entity entity, const std::string& clip, bool restart) 
     restartClip(sprite, clip);
 }
 
-void World::playMesh(entt::entity entity, const std::string& animation, bool loop) {
+void World::playMesh(entt::entity entity, const std::string& animation, bool loop, float fade) {
     auto& mesh = registry_.get<MeshInstance>(entity);
+    if (fade > 0 && mesh.animation != animation) {
+        // Blend out of the pose shown now, wherever its animation had got to.
+        mesh.fromAnimation = mesh.animation;
+        mesh.fromTime = mesh.time;
+        mesh.fromLoop = mesh.loop;
+        mesh.fade = fade;
+        mesh.fadeElapsed = 0;
+    } else if (fade <= 0) {
+        mesh.fade = mesh.fadeElapsed = 0;
+        mesh.fromAnimation.clear();
+    }
     mesh.animation = animation;
     mesh.loop = loop;
     mesh.time = 0;

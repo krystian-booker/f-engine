@@ -261,6 +261,10 @@ fe.app.progress = nil
 ---@type fun(path: string): integer, integer
 fe.app.image_size = nil
 
+--- The animations of a glTF model (.glb or .gltf) by name, with their length in seconds: what entity:play and the mesh component's `animation` accept. A missing or invalid file raises an error.
+---@type fun(path: string): table<string, {length: number}>
+fe.app.model_animations = nil
+
 --- Clip information of a sprite animation (.anim.json). An empty path (a sprite without an animation) has no clips; a missing or invalid file raises an error.
 ---@type fun(path: string): table<string, {loop: boolean, length: number, directions: integer}>
 fe.app.sprite_clips = nil
@@ -744,12 +748,12 @@ Entity.sprite = nil
 ---@type fun(self: Entity, clip: string, restart?: boolean)
 Entity.clip = nil
 
---- Add or change a glTF mesh (props, doors...) and return its state; e:mesh() reads it (nil without one) and nil removes it.
+--- Add or change a glTF mesh (props, doors, skinned characters and creatures) and return its state; e:mesh() reads it (nil without one) and nil removes it. Fields: `model`, `animation`, `speed`, `loop`, `playing`, `visible`, `cast_shadow`, `tint`, `blend`, `shader`.
 ---@type fun(self: Entity, settings?: table|nil): table?
 Entity.mesh = nil
 
---- Play a mesh animation by name.
----@type fun(self: Entity, animation: string, loop?: boolean)
+--- Play a mesh animation by name from its start: a glTF animation of the model's nodes or, for a skinned model, of its skeleton. With `fade` (seconds, 0 to 60) the pose blends from the animation playing now into the new one instead of cutting (idle to attack and back). A finished non-looping animation emits 'anim_finished' with its name. fe.app.model_animations lists a model's animations.
+---@type fun(self: Entity, animation: string, loop?: boolean, fade?: number)
 Entity.play = nil
 
 --- Attach a light (position is an offset; `enabled = false` keeps it but turns it off) and return its state; e:light() reads it (nil without one) and nil removes it.

@@ -732,6 +732,20 @@ void bindApp(Engine& engine) {
             "a "
             "target no world was drawn into, raises an error.")
         .fn(
+            "model_animations",
+            [&engine](sol::this_state state, const std::string& path) {
+                sol::state_view lua(state);
+                auto out = lua.create_table();
+                const auto model = engine.assets().model(path);
+                for (const auto& animation : model->animations) {
+                    out[animation.name] = lua.create_table_with("length", animation.duration);
+                }
+                return out;
+            },
+            "fun(path: string): table<string, {length: number}>",
+            "The animations of a glTF model (.glb or .gltf) by name, with their length in seconds: what "
+            "entity:play and the mesh component's `animation` accept. A missing or invalid file raises an error.")
+        .fn(
             "sprite_clips",
             [&engine](sol::this_state state, const std::string& path) {
                 sol::state_view lua(state);

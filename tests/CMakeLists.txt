@@ -13,6 +13,7 @@ add_executable(fengine_tests
   ReplayTests.cpp
   PlatformTests.cpp
   PackTests.cpp
+  SkinTests.cpp
   # The renderer's CPU-only parts; the rest of engine/render needs bgfx.
   ${PROJECT_SOURCE_DIR}/engine/render/LightGrid.cpp
   ${PROJECT_SOURCE_DIR}/engine/render/ShadowCascades.cpp

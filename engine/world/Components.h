@@ -88,6 +88,12 @@ struct MeshInstance {
     std::string animation;
     float time = 0, speed = 1;
     bool loop = true, playing = false, visible = true, castShadow = true;
+    // A crossfade in progress: the pose blends from `fromAnimation` at
+    // `fromTime` (which keeps running) to the current one over `fade`
+    // seconds, `fadeElapsed` of which have passed. fade 0 = none.
+    std::string fromAnimation;
+    float fromTime = 0, fade = 0, fadeElapsed = 0;
+    bool fromLoop = true;
     glm::vec4 tint{1};
     std::optional<BlendMode> blend; // unset: each glTF material's alpha mode
     std::string shader;             // game fragment shader for every part; empty: each material's own

@@ -783,14 +783,21 @@ void bindEntity(Engine& engine) {
             "fun(clip: string, restart?: boolean)", "Play a sprite clip.")
         .method(
             "mesh", component<MeshInstance>("mesh", setMesh, meshTable), "fun(settings?: table|nil): table?",
-            "Add or change a glTF mesh (props, doors...) and return its state; e:mesh() reads it (nil "
-            "without one) and nil removes it.")
+            "Add or change a glTF mesh (props, doors, skinned characters and creatures) and return its state; "
+            "e:mesh() reads it (nil without one) and nil removes it. Fields: `model`, `animation`, `speed`, "
+            "`loop`, `playing`, `visible`, `cast_shadow`, `tint`, `blend`, `shader`.")
         .method(
             "play",
-            [](const EntityRef& e, const std::string& animation, sol::object loop) {
-                e.owner().playMesh(e.id, animation, lua::opt<bool>(loop, "loop").value_or(false));
+            [](const EntityRef& e, const std::string& animation, sol::object loop, sol::object fade) {
+                const float seconds =
+                    lua::within(lua::opt<float>(fade, "fade").value_or(0.0f), 0.0f, 60.0f, "mesh animation fade");
+                e.owner().playMesh(e.id, animation, lua::opt<bool>(loop, "loop").value_or(false), seconds);
             },
-            "fun(animation: string, loop?: boolean)", "Play a mesh animation by name.")
+            "fun(animation: string, loop?: boolean, fade?: number)",
+            "Play a mesh animation by name from its start: a glTF animation of the model's nodes or, for a "
+            "skinned model, of its skeleton. With `fade` (seconds, 0 to 60) the pose blends from the animation "
+            "playing now into the new one instead of cutting (idle to attack and back). A finished non-looping "
+            "animation emits 'anim_finished' with its name. fe.app.model_animations lists a model's animations.")
         .method(
             "light", component<LightSource>("light", setLight, lightTable),
             "fun(settings?: table|nil): table?",

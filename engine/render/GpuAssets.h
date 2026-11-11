@@ -91,6 +91,13 @@ struct GpuPart {
     Material material;
     int node = 0;
     glm::vec3 min{0}, max{0}; // bounds: world space for baked map chunks, node space otherwise
+    // A skinned part of a mesh entity's model: the skin and the ModelPart
+    // (index into the source's parts) its vertices are skinned from each
+    // frame, and those vertices packed at rest (the bytes of WorldVertex,
+    // RenderCommon.h), of which a frame rewrites only position, normal and
+    // tangent. -1 and empty otherwise.
+    int skin = -1, sourcePart = -1;
+    std::vector<std::uint8_t> packed;
 };
 
 // GPU copy of a model. Static map geometry is baked into world space and

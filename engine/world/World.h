@@ -123,7 +123,9 @@ public:
     void setRouteVisitLimit(int limit) { movement_.setRouteVisitLimit(limit); }
 
     void setClip(entt::entity entity, const std::string& clip, bool restart = true);
-    void playMesh(entt::entity entity, const std::string& animation, bool loop);
+    // Starts a mesh animation from its beginning. With `fade` > 0 the pose
+    // blends from the animation playing now into it over that many seconds.
+    void playMesh(entt::entity entity, const std::string& animation, bool loop, float fade = 0);
     void burst(glm::vec3 position, const EmitterSettings& settings, int count) {
         particles_.burst(position, settings, count);
     }

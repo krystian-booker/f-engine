@@ -215,6 +215,8 @@ ModelPart readPrimitive(const cgltf_primitive& primitive, ImageCache& images, co
     const cgltf_accessor* uvs = nullptr;
     const cgltf_accessor* colors = nullptr;
     const cgltf_accessor* tangents = nullptr;
+    const cgltf_accessor* joints = nullptr;
+    const cgltf_accessor* weights = nullptr;
     for (std::size_t a = 0; a < primitive.attributes_count; ++a) {
         const auto& attribute = primitive.attributes[a];
         if (attribute.type == cgltf_attribute_type_position) {
@@ -227,6 +229,10 @@ ModelPart readPrimitive(const cgltf_primitive& primitive, ImageCache& images, co
             uvs = attribute.data;
         } else if (attribute.type == cgltf_attribute_type_color && attribute.index == 0) {
             colors = attribute.data;
+        } else if (attribute.type == cgltf_attribute_type_joints && attribute.index == 0) {
+            joints = attribute.data;
+        } else if (attribute.type == cgltf_attribute_type_weights && attribute.index == 0) {
+            weights = attribute.data;
         }
     }
     if (!positions || positions->count > 10000000 || positions->type != cgltf_type_vec3) {
@@ -234,8 +240,20 @@ ModelPart readPrimitive(const cgltf_primitive& primitive, ImageCache& images, co
     }
     const auto count = positions->count;
     if ((normals && normals->count != count) || (uvs && uvs->count != count) ||
-        (colors && colors->count != count) || (tangents && tangents->count != count)) {
+        (colors && colors->count != count) || (tangents && tangents->count != count) ||
+        (joints && joints->count != count) || (weights && weights->count != count)) {
         throw std::runtime_error("glTF vertex attributes disagree in length");
+    }
+    // Every read below copies an accessor's components into four floats, so
+    // an accessor typed wider than its attribute allows (a MAT4 colour, say)
+    // is refused here instead of overrunning them.
+    const auto typed = [](const cgltf_accessor* accessor, std::initializer_list<cgltf_type> allowed) {
+        return !accessor || std::find(allowed.begin(), allowed.end(), accessor->type) != allowed.end();
+    };
+    if (!typed(normals, {cgltf_type_vec3}) || !typed(tangents, {cgltf_type_vec4}) || !typed(uvs, {cgltf_type_vec2}) ||
+        !typed(colors, {cgltf_type_vec3, cgltf_type_vec4}) || !typed(joints, {cgltf_type_vec4}) ||
+        !typed(weights, {cgltf_type_vec4})) {
+        throw std::runtime_error("A glTF vertex attribute has the wrong accessor type");
     }
     ModelPart part;
     part.vertices.resize(count);
@@ -264,6 +282,29 @@ ModelPart readPrimitive(const cgltf_primitive& primitive, ImageCache& images, co
             values = {1, 1, 1, 1};
             readAccessor(colors, v, values.data(), cgltf_num_components(colors->type));
             vertex.color = glm::make_vec4(values.data());
+        }
+    }
+    if (joints && weights) {
+        part.joints.resize(count);
+        part.weights.resize(count);
+        for (std::size_t v = 0; v < count; ++v) {
+            std::array<cgltf_uint, 4> index{0, 0, 0, 0};
+            if (!cgltf_accessor_read_uint(joints, v, index.data(), 4)) {
+                throw std::runtime_error("Unreadable glTF joints");
+            }
+            std::array<float, 4> weight{0, 0, 0, 0};
+            readAccessor(weights, v, weight.data(), 4);
+            float sum = 0;
+            for (std::size_t k = 0; k < 4; ++k) {
+                if (index[k] > std::numeric_limits<std::uint16_t>::max()) {
+                    throw std::runtime_error("glTF joint index out of range");
+                }
+                weight[k] = std::isfinite(weight[k]) ? std::max(0.0f, weight[k]) : 0.0f;
+                sum += weight[k];
+                part.joints[v][k] = static_cast<std::uint16_t>(index[k]);
+            }
+            // Weights sum to 1; a vertex bound to nothing follows its first joint.
+            part.weights[v] = sum > 1e-6f ? glm::make_vec4(weight.data()) / sum : glm::vec4(1, 0, 0, 0);
         }
     }
     const std::size_t indexCount = primitive.indices ? primitive.indices->count : count;
@@ -352,13 +393,19 @@ void readAnimations(const cgltf_data& data, Model& model) {
             const bool cubic = channel.sampler->interpolation == cgltf_interpolation_type_cubic_spline;
             const auto* input = channel.sampler->input;
             const auto* output = channel.sampler->output;
+            // Translation and scale are VEC3, rotation VEC4; anything wider
+            // would overrun the four floats a key is read into.
+            const auto components = cgltf_num_components(output->type);
+            if (components > 4 || output->count < input->count * (cubic ? 3 : 1)) {
+                throw std::runtime_error("A glTF animation sampler has an invalid output accessor");
+            }
             for (std::size_t k = 0; k < input->count; ++k) {
                 float time = 0;
                 readAccessor(input, k, &time, 1);
                 out.times.push_back(time);
                 std::array<float, 4> value{0, 0, 0, 1};
                 // Cubic splines store in-tangent, value, out-tangent: keep the value.
-                readAccessor(output, cubic ? k * 3 + 1 : k, value.data(), cgltf_num_components(output->type));
+                readAccessor(output, cubic ? k * 3 + 1 : k, value.data(), components);
                 out.values.emplace_back(value[0], value[1], value[2], value[3]);
             }
             if (!out.times.empty()) {
@@ -373,7 +420,7 @@ void readAnimations(const cgltf_data& data, Model& model) {
     }
 }
 
-glm::vec4 sample(const AnimationChannel& channel, float time) {
+glm::vec4 sampleChannel(const AnimationChannel& channel, float time) {
     const auto& times = channel.times;
     if (time <= times.front()) {
         return channel.values.front();
@@ -467,15 +514,51 @@ Model Model::load(const std::filesystem::path& path) {
                 node.scale = glm::make_vec3(source.scale);
             }
         }
-        if (source.skin) {
-            throw std::runtime_error("Skinned glTF meshes are not supported; use sprites for characters: " +
-                                     path.string());
-        }
         if (source.mesh) {
+            const int skin = source.skin ? static_cast<int>(source.skin - data->skins) : -1;
             for (std::size_t p = 0; p < source.mesh->primitives_count; ++p) {
                 auto part = readPrimitive(source.mesh->primitives[p], images, node.properties);
                 part.node = static_cast<int>(n);
+                if (skin >= 0 && !part.joints.empty()) {
+                    const auto jointCount = source.skin->joints_count;
+                    for (const auto& indices : part.joints) {
+                        for (const auto index : indices) {
+                            if (index >= jointCount) {
+                                throw std::runtime_error("A glTF vertex names a joint outside its skin: " +
+                                                         path.string());
+                            }
+                        }
+                    }
+                    part.skin = skin;
+                } else {
+                    // Not skinned, or a skinned node whose mesh carries no
+                    // weights: drawn rigidly with its node.
+                    part.joints.clear();
+                    part.weights.clear();
+                }
                 model.parts.push_back(std::move(part));
+            }
+        }
+    }
+    model.skins.resize(data->skins_count);
+    for (std::size_t k = 0; k < data->skins_count; ++k) {
+        const auto& source = data->skins[k];
+        auto& skin = model.skins[k];
+        if (source.joints_count == 0 || source.joints_count > 1024) {
+            throw std::runtime_error("A glTF skin needs 1 to 1024 joints: " + path.string());
+        }
+        if (source.inverse_bind_matrices && (source.inverse_bind_matrices->type != cgltf_type_mat4 ||
+                                             source.inverse_bind_matrices->count < source.joints_count)) {
+            throw std::runtime_error("A glTF skin has invalid inverse bind matrices: " + path.string());
+        }
+        skin.joints.reserve(source.joints_count);
+        skin.inverseBind.resize(source.joints_count, glm::mat4(1));
+        for (std::size_t j = 0; j < source.joints_count; ++j) {
+            skin.joints.push_back(static_cast<int>(source.joints[j] - data->nodes));
+            if (source.inverse_bind_matrices) {
+                std::array<float, 16> values{};
+                readAccessor(source.inverse_bind_matrices, j, values.data(), 16);
+                skin.inverseBind[j] = glm::make_mat4(values.data());
             }
         }
     }
@@ -525,8 +608,8 @@ Model Model::load(const std::filesystem::path& path) {
         marker.min = glm::vec3(std::numeric_limits<float>::max());
         marker.max = -marker.min;
         for (const auto& part : model.parts) {
-            if (part.node != n) {
-                continue;
+            if (part.node != n || part.skin >= 0) {
+                continue; // a skinned part is placed by its joints (below), not by this node
             }
             for (const auto& vertex : part.vertices) {
                 const auto world =
@@ -542,6 +625,26 @@ Model Model::load(const std::filesystem::path& path) {
         }
         if (!marker.properties.empty()) {
             model.markers.push_back(std::move(marker));
+        }
+    }
+    // Skinned parts: their bounds are those of the rest pose, in model space.
+    std::vector<glm::mat4> joints;
+    std::vector<MeshVertex> skinnedRest;
+    for (auto& part : model.parts) {
+        if (part.skin < 0) {
+            continue;
+        }
+        model.jointMatrices(part.skin, matrices, joints);
+        skinVertices(part, joints, skinnedRest);
+        part.min = glm::vec3(std::numeric_limits<float>::max());
+        part.max = -part.min;
+        for (const auto& vertex : skinnedRest) {
+            part.min = glm::min(part.min, vertex.position);
+            part.max = glm::max(part.max, vertex.position);
+        }
+        if (!part.hidden && !skinnedRest.empty()) {
+            model.min = glm::min(model.min, part.min);
+            model.max = glm::max(model.max, part.max);
         }
     }
     if (model.min.x > model.max.x) {
@@ -599,7 +702,7 @@ void Model::pose(int index, float time, std::vector<glm::mat4>& matrices) const 
             glm::vec3 translation = node.translation, scale = node.scale;
             glm::quat rotation = node.rotation;
             for (; c < channels.size() && channels[c].node == n; ++c) {
-                const auto value = sample(channels[c], time);
+                const auto value = sampleChannel(channels[c], time);
                 switch (channels[c].target) {
                 case AnimationChannel::Target::Translation:
                     translation = glm::vec3(value);
@@ -621,6 +724,81 @@ void Model::pose(int index, float time, std::vector<glm::mat4>& matrices) const 
         if (parent >= 0) {
             matrices[i] = matrices[static_cast<std::size_t>(parent)] * matrices[i];
         }
+    }
+}
+
+void Model::sample(int index, float time, std::vector<NodePose>& locals) const {
+    locals.resize(nodes.size());
+    for (std::size_t n = 0; n < nodes.size(); ++n) {
+        locals[n] = {nodes[n].translation, nodes[n].rotation, nodes[n].scale};
+    }
+    if (index < 0 || index >= static_cast<int>(animations.size())) {
+        return;
+    }
+    for (const auto& channel : animations[static_cast<std::size_t>(index)].channels) {
+        const auto value = sampleChannel(channel, time);
+        auto& local = locals[static_cast<std::size_t>(channel.node)];
+        switch (channel.target) {
+        case AnimationChannel::Target::Translation: local.translation = glm::vec3(value); break;
+        case AnimationChannel::Target::Rotation: local.rotation = glm::quat(value.w, value.x, value.y, value.z); break;
+        case AnimationChannel::Target::Scale: local.scale = glm::vec3(value); break;
+        }
+    }
+}
+
+void Model::compose(const std::vector<NodePose>& locals, std::vector<glm::mat4>& matrices) const {
+    matrices.resize(nodes.size());
+    for (std::size_t n = 0; n < nodes.size() && n < locals.size(); ++n) {
+        matrices[n] = localMatrix(locals[n].translation, locals[n].rotation, locals[n].scale);
+    }
+    for (const int n : order) {
+        const auto i = static_cast<std::size_t>(n);
+        const int parent = nodes[i].parent;
+        if (parent >= 0) {
+            matrices[i] = matrices[static_cast<std::size_t>(parent)] * matrices[i];
+        }
+    }
+}
+
+void Model::blendPoses(std::vector<NodePose>& into, const std::vector<NodePose>& other, float weight) {
+    const float w = std::clamp(weight, 0.0f, 1.0f);
+    for (std::size_t n = 0; n < into.size() && n < other.size(); ++n) {
+        into[n].translation = glm::mix(into[n].translation, other[n].translation, w);
+        into[n].scale = glm::mix(into[n].scale, other[n].scale, w);
+        into[n].rotation = glm::normalize(glm::slerp(into[n].rotation, other[n].rotation, w));
+    }
+}
+
+void Model::jointMatrices(int skin, const std::vector<glm::mat4>& pose, std::vector<glm::mat4>& matrices) const {
+    const auto& source = skins.at(static_cast<std::size_t>(skin));
+    matrices.resize(source.joints.size());
+    for (std::size_t j = 0; j < source.joints.size(); ++j) {
+        matrices[j] = pose[static_cast<std::size_t>(source.joints[j])] * source.inverseBind[j];
+    }
+}
+
+void skinVertices(const ModelPart& part, const std::vector<glm::mat4>& joints, std::vector<MeshVertex>& out) {
+    out.resize(part.vertices.size());
+    for (std::size_t v = 0; v < part.vertices.size(); ++v) {
+        const auto& source = part.vertices[v];
+        const auto& index = part.joints[v];
+        const auto& weight = part.weights[v];
+        // Linear blend skinning: one matrix per vertex, the weighted sum of its joints'.
+        glm::mat4 blended = joints[index[0]] * weight[0];
+        for (int k = 1; k < 4; ++k) {
+            if (weight[k] > 0) {
+                blended += joints[index[static_cast<std::size_t>(k)]] * weight[k];
+            }
+        }
+        const glm::mat3 linear(blended);
+        auto& vertex = out[v];
+        vertex = source;
+        vertex.position = glm::vec3(blended * glm::vec4(source.position, 1));
+        const auto normal = linear * source.normal;
+        const auto tangent = linear * glm::vec3(source.tangent);
+        vertex.normal = glm::dot(normal, normal) > 1e-12f ? glm::normalize(normal) : source.normal;
+        vertex.tangent = glm::vec4(glm::dot(tangent, tangent) > 1e-12f ? glm::normalize(tangent) : glm::vec3(source.tangent),
+                                   source.tangent.w);
     }
 }
 } // namespace fe

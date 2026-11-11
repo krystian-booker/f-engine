@@ -49,6 +49,23 @@ void advanceAnimations(entt::registry& registry, AssetCache& assets, float camer
     }
     for (const auto entity : registry.view<MeshInstance>()) {
         auto& mesh = registry.get<MeshInstance>(entity);
+        if (mesh.fade > 0) {
+            // The outgoing animation keeps moving while it fades out.
+            mesh.fadeElapsed += static_cast<float>(dt);
+            mesh.fromTime += static_cast<float>(dt) * mesh.speed;
+            if (mesh.fadeElapsed >= mesh.fade) {
+                mesh.fade = mesh.fadeElapsed = 0;
+                mesh.fromAnimation.clear();
+            } else if (const auto fading = assets.tryModel(mesh.model)) {
+                if (const int from = fading->animation(mesh.fromAnimation); from >= 0) {
+                    const float length = fading->animations[static_cast<std::size_t>(from)].duration;
+                    if (length > 0) {
+                        mesh.fromTime = mesh.fromLoop ? std::fmod(mesh.fromTime, length)
+                                                      : std::clamp(mesh.fromTime, 0.0f, length);
+                    }
+                }
+            }
+        }
         if (!mesh.playing) {
             continue;
         }
@@ -64,6 +81,13 @@ void advanceAnimations(entt::registry& registry, AssetCache& assets, float camer
         }
         if (mesh.loop) {
             mesh.time = std::fmod(mesh.time, duration);
+            if (mesh.time < 0) {
+                mesh.time += duration; // a negative speed plays backwards
+            }
+        } else if (mesh.time < 0) {
+            mesh.time = 0;
+            mesh.playing = false;
+            events.push({WorldEvent::Kind::AnimationFinished, entity, entt::null, mesh.animation});
         } else if (mesh.time >= duration) {
             mesh.time = duration;
             mesh.playing = false;

@@ -554,11 +554,17 @@ const GpuModel* GpuAssets::model(const std::string& path, bool bakeChunks) {
     auto gpu = std::make_unique<GpuModel>();
     gpu->source = source;
     auto emit = [&](const ModelPart& part, const std::vector<WorldVertex>& vertices,
-                    const std::vector<std::uint32_t>& indices, glm::vec3 min, glm::vec3 max) {
+                    const std::vector<std::uint32_t>& indices, glm::vec3 min, glm::vec3 max, bool skinned = false) {
         if (indices.empty()) {
             return;
         }
         GpuPart out;
+        if (skinned) {
+            out.skin = part.skin;
+            out.sourcePart = static_cast<int>(&part - source->parts.data());
+            const auto* bytes = reinterpret_cast<const std::uint8_t*>(vertices.data());
+            out.packed.assign(bytes, bytes + vertices.size() * sizeof(WorldVertex));
+        }
         out.vertices = VertexBuffer(bgfx::createVertexBuffer(
             bgfx::copy(vertices.data(), static_cast<std::uint32_t>(vertices.size() * sizeof(WorldVertex))),
             worldLayout()));
@@ -593,34 +599,54 @@ const GpuModel* GpuAssets::model(const std::string& path, bool bakeChunks) {
     };
     std::vector<glm::mat4> rest;
     source->pose(-1, 0, rest);
+    std::vector<glm::mat4> joints;
+    std::vector<MeshVertex> skinnedRest;
     for (const auto& part : source->parts) {
         if (part.hidden) {
             continue;
         }
+        const bool skinned = part.skin >= 0;
+        if (skinned) {
+            // At rest, in model space: what a static buffer shows, and what
+            // a frame that cannot skin (no transient memory) falls back to.
+            source->jointMatrices(part.skin, rest, joints);
+            skinVertices(part, joints, skinnedRest);
+        }
         if (!bakeChunks) {
             std::vector<WorldVertex> vertices;
             vertices.reserve(part.vertices.size());
-            for (const auto& v : part.vertices) {
+            for (const auto& v : skinned ? skinnedRest : part.vertices) {
                 vertices.push_back(pack(v));
             }
-            emit(part, vertices, part.indices, part.min, part.max);
+            emit(part, vertices, part.indices, part.min, part.max, skinned);
             continue;
         }
-        const auto& matrix = rest[static_cast<std::size_t>(part.node)];
-        const auto normalMatrix = glm::transpose(glm::inverse(glm::mat3(matrix)));
-        std::vector<MeshVertex> world(part.vertices);
-        for (auto& v : world) {
-            v.position = glm::vec3(matrix * glm::vec4(v.position, 1));
-            v.normal = glm::normalize(normalMatrix * v.normal);
-            v.tangent = glm::vec4(glm::normalize(glm::mat3(matrix) * glm::vec3(v.tangent)), v.tangent.w);
+        std::vector<MeshVertex> world(skinned ? skinnedRest : part.vertices);
+        if (!skinned) {
+            const auto& matrix = rest[static_cast<std::size_t>(part.node)];
+            const auto normalMatrix = glm::transpose(glm::inverse(glm::mat3(matrix)));
+            for (auto& v : world) {
+                v.position = glm::vec3(matrix * glm::vec4(v.position, 1));
+                v.normal = glm::normalize(normalMatrix * v.normal);
+                v.tangent = glm::vec4(glm::normalize(glm::mat3(matrix) * glm::vec3(v.tangent)), v.tangent.w);
+            }
         }
         std::vector<glm::vec3> positions;
         positions.reserve(world.size());
         for (const auto& v : world) {
             positions.push_back(v.position);
         }
+        // A mirrored node (negative scale) reverses the winding of what is
+        // baked through it: turn its triangles back so they face outwards.
+        std::vector<std::uint32_t> flipped;
+        if (!skinned && glm::determinant(glm::mat3(rest[static_cast<std::size_t>(part.node)])) < 0) {
+            flipped = part.indices;
+            for (std::size_t i = 0; i + 2 < flipped.size(); i += 3) {
+                std::swap(flipped[i + 1], flipped[i + 2]);
+            }
+        }
         std::vector<WorldVertex> vertices;
-        for (const auto& chunk : splitChunks(positions, part.indices, ChunkSize)) {
+        for (const auto& chunk : splitChunks(positions, flipped.empty() ? part.indices : flipped, ChunkSize)) {
             vertices.clear();
             glm::vec3 min(std::numeric_limits<float>::max()), max(-std::numeric_limits<float>::max());
             for (const auto source : chunk.vertices) {
