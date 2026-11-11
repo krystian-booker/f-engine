@@ -293,8 +293,7 @@ void World::advanceAnimations(double dt) {
         if (!sprite.finished) {
             const auto found = animation->clips.find(sprite.clip);
             if (found != animation->clips.end() && !found->second.loop) {
-                const auto& frames = found->second.directions[std::min<std::size_t>(
-                    static_cast<std::size_t>(direction), found->second.directions.size() - 1)];
+                const auto& frames = found->second.row(direction);
                 double length = 0;
                 for (const auto& frame : frames) {
                     length += frame.duration;

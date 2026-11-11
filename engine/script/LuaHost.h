@@ -6,6 +6,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <sol/sol.hpp>
 #include <string>
 
@@ -58,8 +59,13 @@ public:
     }
 
     void report(const std::string& message);
+    // Reports a message that may recur every frame only once until the errors are cleared.
+    void reportOnce(const std::string& message);
     [[nodiscard]] const std::deque<ScriptError>& errors() const { return errors_; }
-    void clearErrors() { errors_.clear(); }
+    void clearErrors() {
+        errors_.clear();
+        reportedOnce_.clear();
+    }
     std::function<void(const ScriptError&)> onError;
 
     // Evaluates a console line; returns printable results or the error.
@@ -79,6 +85,7 @@ private:
     std::map<std::string, std::filesystem::path> moduleFiles_;
     std::map<std::string, int> loading_;
     std::deque<ScriptError> errors_;
+    std::set<std::string> reportedOnce_;
     std::chrono::steady_clock::time_point start_, frameStart_;
     double watchdog_ = 0;
 };

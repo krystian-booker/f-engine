@@ -85,8 +85,12 @@ void Engine::tick(double dt) {
     // Copy: scripts may load or unload worlds during the tick.
     const auto worlds = worlds_;
     for (const auto& [name, world] : worlds) {
-        (void)name;
-        world->tick(dt);
+        try {
+            world->tick(dt);
+        } catch (const std::exception& error) {
+            // A simulation fault is shown like a script error instead of closing the game.
+            lua_->reportOnce("World '" + name + "' tick failed: " + error.what());
+        }
     }
     updateAudioEmitters();
     audio_->update(dt);

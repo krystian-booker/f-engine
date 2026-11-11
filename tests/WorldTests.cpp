@@ -1,5 +1,7 @@
+#include "engine/runtime/Engine.h"
 #include "engine/world/World.h"
 #include <doctest/doctest.h>
+#include <fstream>
 
 using namespace fe;
 
@@ -133,4 +135,76 @@ TEST_CASE("destroying an entity releases its name and calls the hook") {
     CHECK((f.world.find("npc") == entt::null));
     CHECK(calls == 1);
     CHECK_NOTHROW(f.world.spawn("npc", {2, 0, 2}));
+}
+
+TEST_CASE("a fixed sprite direction wraps onto clips with fewer rows") {
+    // The reported case: direction 2 on a clip with a single direction row.
+    Fixture f;
+    Sprite spark;
+    spark.animation = "@fe/assets/ui/spark.anim.json";
+    spark.direction = 2;
+    f.world.registry().emplace<Sprite>(f.world.spawn("", {2, 0, 2}), spark);
+    CHECK_NOTHROW(f.run(0.5));
+
+    // One sprite whose clips have different direction counts.
+    const auto root = std::filesystem::temp_directory_path() / "fengine-world-test";
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root);
+    const std::string frame = R"({"rect": [0, 0, 8, 8], "duration": 0.1})";
+    const std::string row = "[" + frame + "]";
+    std::ofstream(root / "mixed.anim.json")
+        << R"({"atlas": "mixed.png", "clips": {"idle": {"directions": [)" << row << "," << row << "," << row
+        << "," << row << R"(]}, "ko": {"loop": false, "directions": [[)" << frame
+        << R"(, {"rect": [8, 0, 8, 8], "duration": 0.1, "event": "thud"}]]}}})";
+    AssetCache assets{root, FENGINE_LUALIB};
+    World world{"mixed", MapData::load(std::filesystem::path(FENGINE_TEST_GAME) / "maps/arena/map.json"),
+                assets, 7};
+    const auto e = world.spawn("", {2, 0, 2});
+    Sprite sprite;
+    sprite.animation = "mixed.anim.json";
+    sprite.direction = 2;
+    world.registry().emplace<Sprite>(e, sprite);
+    REQUIRE(assets.trySprite(sprite.animation));
+    world.beginTick();
+    world.tick(1.0 / 60);
+    world.setClip(e, "ko", true);
+    for (int i = 0; i < 30; ++i) {
+        world.beginTick();
+        CHECK_NOTHROW(world.tick(1.0 / 60));
+    }
+    const auto events = world.takeEvents();
+    CHECK(std::count_if(events.begin(), events.end(), [](const WorldEvent& event) {
+              return event.kind == WorldEvent::Kind::AnimationEvent && event.name == "thud";
+          }) == 1);
+    CHECK(f.has(events, WorldEvent::Kind::AnimationFinished));
+    CHECK(world.registry().get<Sprite>(e).finished);
+}
+
+TEST_CASE("a throwing world tick is reported once and does not escape the engine tick") {
+    EngineOptions options;
+    options.gameRoot = FENGINE_TEST_GAME;
+    options.libraryRoot = FENGINE_LUALIB;
+    options.userData = std::filesystem::temp_directory_path() / "fengine-world-tick-test";
+    options.seed = 99;
+    Engine engine(std::move(options));
+    const auto broken = engine.loadWorld("broken", "arena");
+    const auto healthy = engine.loadWorld("healthy", "arena");
+    // A looping clip advanced by thousands of loops in one tick trips the
+    // event interval guard, which throws from World::advanceAnimations.
+    Sprite sprite;
+    sprite.animation = "@fe/assets/ui/spark.anim.json";
+    sprite.speed = 1e6f;
+    broken->registry().emplace<Sprite>(broken->spawn("", {2, 0, 2}), sprite);
+    broken->beginTick();
+    REQUIRE_THROWS(broken->tick(1.0 / 60));
+
+    CHECK_NOTHROW(engine.tick(1.0 / 60));
+    REQUIRE(engine.lua().errors().size() == 1);
+    CHECK(engine.lua().errors().back().message.find("broken") != std::string::npos);
+    CHECK(healthy->time() == doctest::Approx(1.0 / 60)); // later worlds still tick
+    CHECK_NOTHROW(engine.tick(1.0 / 60));
+    CHECK(engine.lua().errors().size() == 1); // the same message is not repeated
+    engine.lua().clearErrors();
+    CHECK_NOTHROW(engine.tick(1.0 / 60));
+    CHECK(engine.lua().errors().size() == 1); // reported again once cleared
 }

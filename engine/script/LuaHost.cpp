@@ -240,6 +240,15 @@ void LuaHost::report(const std::string& message) {
     }
 }
 
+void LuaHost::reportOnce(const std::string& message) {
+    if (reportedOnce_.size() >= 256) {
+        reportedOnce_.clear(); // messages that differ every frame must not grow this forever
+    }
+    if (reportedOnce_.insert(message).second) {
+        report(message);
+    }
+}
+
 std::string LuaHost::console(const std::string& code) {
     lua_State* state = lua_.lua_state();
     for (const auto& source : {"return " + code, code}) {

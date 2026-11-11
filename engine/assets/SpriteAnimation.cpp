@@ -5,6 +5,11 @@
 #include <stdexcept>
 
 namespace fe {
+const std::vector<SpriteFrame>& SpriteClip::row(int direction) const {
+    const int count = static_cast<int>(directions.size());
+    return directions[static_cast<std::size_t>((direction % count + count) % count)];
+}
+
 SpriteAnimation SpriteAnimation::load(const std::filesystem::path& path) {
     return fromJson(readJson(path));
 }
@@ -62,7 +67,7 @@ const SpriteFrame& SpriteAnimation::frameFor(const std::string& name, int row, d
         it = clips.begin();
     }
     const auto& clip = it->second;
-    const auto& frames = clip.directions[static_cast<std::size_t>(row) % clip.directions.size()];
+    const auto& frames = clip.row(row);
     double duration = 0;
     for (const auto& f : frames) {
         duration += f.duration;
@@ -98,7 +103,7 @@ std::vector<std::string> SpriteAnimation::events(const std::string& name, int di
     if (found == clips.end() || to <= from)
         return result;
     const auto& clip = found->second;
-    const auto& frames = clip.directions.at(static_cast<std::size_t>(direction));
+    const auto& frames = clip.row(direction);
     double length = 0;
     for (const auto& f : frames)
         length += f.duration;

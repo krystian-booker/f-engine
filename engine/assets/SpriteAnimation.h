@@ -14,6 +14,9 @@ struct SpriteFrame {
 struct SpriteClip {
     bool loop = true;
     std::vector<std::vector<SpriteFrame>> directions;
+    // Frames of a direction row. Rows wrap, so a fixed direction stays valid
+    // when clips of one sprite have different direction counts.
+    [[nodiscard]] const std::vector<SpriteFrame>& row(int direction) const;
 };
 struct SpriteAnimation {
     std::string atlas;
