@@ -12,7 +12,6 @@
 ---   game/menu.lua, shop.lua, title.lua
 ---   game/editor.lua             what the F1 editor knows about this game
 ---   events/*.lua                what the people and things on the maps do
-local audio = require("game.audio")
 local data = require("game.data")
 local editor = require("game.editor")
 local input = require("game.input")
@@ -52,7 +51,6 @@ end
 --- `fengine_headless --check`: the data tables must be consistent.
 function main.validate()
   data.validate()
-  local _ = audio
 end
 
 return main

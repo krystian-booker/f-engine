@@ -71,14 +71,13 @@ function Box:draw()
 end
 
 local function open(speaker, text, options, settings)
-  local x, _, w = layout()
+  local _, _, w = layout()
   local portrait = settings and settings.portrait
   local width = w - 20 - (portrait and 46 or 0)
   local box = setmetatable({ speaker = speaker, portrait = portrait, options = options, cursor = ui.cursor(),
     pages = fe.text.paginate(text, { width = width }, dialogue.lines), page = 1, shown = 0,
     cancel = settings and settings.cancel }, Box)
   if #box.pages == 0 then box.pages = { "" } end
-  local _ = x
   scenes.push(box)
   task.wait_until(function() return box.closed end)
   scenes.pop(box)

@@ -40,7 +40,7 @@ function Shop:update()
 end
 
 function Shop:draw()
-  local w, h = ui.size()
+  local w = ui.size()
   local list = rows(self.record)
   ui.window(20, 16, 200, 18)
   ui.text(self.record.name, 28, 21, { color = ui.colors.accent })
@@ -50,7 +50,6 @@ function Shop:draw()
   ui.text(row.about or "", 234, 22, { width = w - 262 })
   ui.text("Owned: " .. state.item_count(row.id), 234, 46, { color = ui.colors.dim })
   ui.text("Gil " .. state.data.gold, 234, 58, { color = ui.colors.accent })
-  local _ = h
   ui.hints({ { "confirm", "Buy" }, { "cancel", "Leave" } })
 end
 
