@@ -114,7 +114,12 @@ return {
 
   ["the chamber: the Colossus stops at half, Rowan charges twice, and LAST LIGHT ends it"] = function(t)
     prologue.start("chamber")
+    play(t, function() return field.world ~= nil and field.world.map_id == "chamber" end, 900, "the chamber loading")
+    t.ok(field.locked > 0, "the chamber is a scene from its first frame")
     play(t, function() return battle.active ~= nil and battle.active.boss ~= nil end, 9000, "the Colossus waking")
+    local intro = field.world:points().intro2.position
+    local rowan_at = field.actors.rowan.position
+    t.ok(math.abs(rowan_at.x - intro.x) < 4 and math.abs(rowan_at.z - intro.z) < 4, "the party walked in")
     local first = battle.active
     t.eq(first.boss.hp, 8000)
     play(t, function() return battle.active ~= first end, 30000, "phase one")
@@ -139,6 +144,12 @@ return {
     for _, unit in ipairs(last.rules.heroes) do t.ok(not unit.ko, unit.name .. " is still standing") end
     play(t, function() return prologue.scene == "last_light" end, 600, "choosing LAST LIGHT")
     -- The sacrifice is a cinematic: it runs on its own clock to the white-out and on.
+    local last_light = require("story.last_light")
+    play(t, function() return last_light.beat == "cael" end, 60 * 20, "Rowan's walk")
+    t.ok(field.actors.rowan.position.x < 17, "Rowan walked to the Colossus: x " .. field.actors.rowan.position.x)
+    t.ok(field.actors.cael.position.x > 19, "the others stayed where they stood")
+    play(t, function() return last_light.beat == "cry" end, 60 * 60, "the wall of Aether")
+    t.ok(field.actors.cael.position.x > 20.5, "Cael was thrown back: x " .. field.actors.cael.position.x)
     play(t, function() return prologue.scene == "remains" end, 60 * 150, "the sacrifice")
   end,
 

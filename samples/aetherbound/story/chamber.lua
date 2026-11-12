@@ -88,6 +88,7 @@ function chamber.run(_, from)
   audio.ambience("hum", 2, "hum")
   audio.volume("hum", 1, 2)
   local world = field.enter("chamber", "start")
+  field.locked = math.max(field.locked, 1) -- a scene from here on, however the prologue was started
   local cael, rowan, lyra, darius = common.cast()
   local points = world:points()
   local info = colossus_info()
