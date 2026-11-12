@@ -20,7 +20,7 @@ last_light.marks = {
   stop = 6, cael = 11, tower = 16, what = 22, world = 26, please = 34, promise = 39,
   run = 46, cry = 51, raise = 56, signature = 60, failure = 66,
   swell = 75, breaking = 82, out = 88, leaving = 94, look = 102, forgive = 108,
-  column = 113, silhouette = 119.4, climax = 120, black = 131, done = 138,
+  column = 113, silhouette = 119.4, climax = 120, black = 133, done = 146,
 }
 
 --- Seconds of the scene per second of play. 1 always, except in a replay
@@ -169,7 +169,7 @@ function last_light.run(stage)
   beat("column", m.column)
   director.face(rowan, { x = -1, z = 0 })
   actors.pose(rowan, "raise")
-  audio.sfx("last_light", { volume = 1 })
+  audio.sfx("last_light_sfx", { volume = 1 })
   fx.stop_shake(rumble)
   local quake = fx.shake(world, 0.25, 1, true)
   local at = rowan.position

@@ -181,14 +181,15 @@ local function hero_strike(self, unit, use, events)
   spot.z = spot.z + (self.home[unit].z - self.home[target].z) * 0.15
   local resonance = use.skill == "resonance"
   if resonance then
-    -- The Aetherite answers: a breath of violet light before the blow.
-    audio.sfx("aether_charge", { volume = 0.9 })
+    -- The Aetherite answers: a breath of violet light before the blow. The
+    -- sound rises for a second and lands with the blade.
+    audio.sfx("resonance", { volume = 1 })
     actors.pose(e, "cast")
     vfx.light(self.world, e.position, { color = { 0.7, 0.35, 1.0 }, intensity = 5, radius = 7, y = 1 }, 1.6)
     vfx.aura(self.world, e, { color = { 0.75, 0.45, 1.0 }, seconds = 1.0 })
     e:sprite({ outline = { 0.75, 0.45, 1.0, 1 }, outline_width = 1 })
-    fx.camera_async(self.world, { distance = self.camera.distance - 3 }, 0.9)
-    task.wait(0.9)
+    fx.camera_async(self.world, { distance = self.camera.distance - 3 }, 0.65)
+    task.wait(0.65)
   end
   actors.pose(e, "run")
   director.slide(e, spot, resonance and 0.16 or 0.22, { ease = fx.ease_out })
@@ -196,7 +197,6 @@ local function hero_strike(self, unit, use, events)
   task.wait(0.24) -- the frame the blade lands on
   local at = body(self, target)
   if resonance then
-    audio.sfx("resonance", { volume = 1 })
     vfx.sprite(self.world, "fx/battle/resonance.anim.json", at, { scale = is_mesh(target) and 3.2 or 1.8, life = 0.5 })
     vfx.ring(self.world, at, { color = { 0.8, 0.5, 1.0 }, scale = 5, seconds = 0.5 })
     vfx.burst(self.world, at, "shard", 26)
@@ -290,9 +290,18 @@ local function boss_act(self, unit, use, events)
   end
   local magic = use.kind == "magic"
   e:play(use.animation or "slam", false, 0.15)
-  local sound = use.animation == "sweep" and "colossus_sweep" or (magic and "aether_charge" or "colossus_slam")
-  if magic then audio.sfx(sound, { volume = 0.9 }) end
-  task.wait(use.impact or 0.9)
+  -- Each sound has its blow a little way in: start it that much early.
+  local impact = use.impact or 0.9
+  local sound, lead = "colossus_slam", 0.18
+  if use.animation == "sweep" then sound, lead = "colossus_sweep", 0.8 end
+  if magic then
+    audio.sfx("aether_charge", { volume = 0.9, pitch = 2.0 / impact }) -- two seconds, squeezed to end on the release
+    task.wait(impact)
+  else
+    task.wait(impact - lead)
+    audio.sfx(sound, { volume = 1 })
+    task.wait(lead)
+  end
   if magic then
     audio.sfx("aether_pulse", { volume = 1 })
     vfx.ring(self.world, body(self, unit), { color = { 0.75, 0.45, 1.0 }, scale = 14, seconds = 0.7 })
@@ -300,7 +309,6 @@ local function boss_act(self, unit, use, events)
     fx.flash({ 0.8, 0.6, 1.0 }, 0.4, 0.6)
     fx.shake(self.world, 0.4, 0.7)
   else
-    audio.sfx(sound, { volume = 1 })
     fx.shake(self.world, 0.45, 0.6)
     fx.hitstop(self.world, 0.08)
   end
