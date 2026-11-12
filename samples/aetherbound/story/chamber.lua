@@ -23,9 +23,9 @@ local BATTLE_CAMERA = { target = { x = 16, y = 1.7, z = 16.4 }, yaw = 0, pitch =
 --- positions, which way is east), with defaults while it is not there.
 local function colossus_info()
   local info = fe.fs.exists("models/colossus.json") and fe.json.read("models/colossus.json") or {}
-  info.yaw_east = info.yaw_east or info.yaw_plus_x or (info.yaw and (info.yaw.east or info.yaw["+x"])) or 90
-  info.core = info.core or { 0, 3.4, 0.6 }
-  info.head = info.head or { 0, 5.6, 0.8 }
+  info.yaw_east = info.yaw_facing_plus_x or 90
+  info.core = info.core or { 0, 3.2, 1.4 }
+  info.head = info.head or { 0, 4.2, 2.7 }
   return info
 end
 

@@ -83,7 +83,7 @@ function remains.run()
   wait(1.2)
   line("Lyra", "...Cael.", 2.4)
   -- Cael approaches. Rowan's sword lies broken in two.
-  director.walk(cael, { x = points.sword.position.x + 0.9, z = points.sword.position.z + 0.5 }, { speed = 1.1 })
+  director.walk(cael, { x = points.sword.position.x + 1.3, z = points.sword.position.z + 0.7 }, { speed = 1.1 })
   director.face(cael, { x = -1, z = 0 })
   common.camera_async({ target = { x = points.sword.position.x + 0.3, y = 0.1, z = points.sword.position.z + 0.3 },
     pitch = 20, distance = 6 }, 2.4)
@@ -132,8 +132,9 @@ function remains.run()
 
   -- The camera slowly pans upward, past the ruined tower. High above, a
   -- single violet star flickers.
-  local star = world:spawn { position = { x = 15, y = 62, z = -46 }, keep_height = true,
-    sprite = { animation = "fx/battle/star.anim.json", mode = "facing", blend = "additive", unlit = true, scale = 2.6,
+  world:set_environment { post = { depth_of_field = false } }
+  local star = world:spawn { position = { x = 20, y = 150, z = -140 }, keep_height = true,
+    sprite = { animation = "fx/battle/star.anim.json", mode = "facing", blend = "additive", unlit = true, scale = 7,
       tint = { 2.2, 1.5, 3.4, 0 }, cast_shadow = false } }
   local twinkle = task.spawn(function()
     local t = 0
@@ -141,10 +142,11 @@ function remains.run()
       t = t + task.frame()
       local appear = math.min(1, math.max(0, (t - 7) / 4))
       local shimmer = 0.75 + 0.25 * math.sin(t * 5.1) * math.sin(t * 1.7)
-      star:sprite({ tint = { 2.2, 1.5, 3.4, appear * shimmer }, scale = 2.6 * (0.9 + 0.2 * shimmer) })
+      star:sprite({ tint = { 2.2, 1.5, 3.4, appear * shimmer }, scale = 7 * (0.9 + 0.2 * shimmer) })
     end
   end, "star")
-  common.camera({ target = { x = 14, y = 16, z = 6 }, pitch = -32, distance = 34 }, 15)
+  common.camera({ target = { x = 12, y = 1, z = 16 }, pitch = 2, distance = 11 }, 4)
+  common.camera({ target = { x = 14, y = 14, z = 8 }, pitch = -40, distance = 11 }, 13)
   audio.sfx("star", { volume = 0.7 })
   wait(4.5)
 
