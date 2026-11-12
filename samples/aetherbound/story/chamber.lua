@@ -108,7 +108,7 @@ function chamber.run(_, from)
       hero:face({ x = -1, z = 0 })
     end
     boss:play("overload", true)
-    glow:light({ intensity = 9, radius = 22, flicker = 0.6, flicker_speed = 5 })
+    glow:light({ intensity = 5, radius = 16, flicker = 0.6, flicker_speed = 5 })
     common.bind_rowan(rowan, 1)
     fx.camera(world, BATTLE_CAMERA, 0)
     fx.letterbox(0, 0)
@@ -195,7 +195,7 @@ function chamber.run(_, from)
     vfx.ring(world, core, { color = { 0.8, 0.5, 1.0 }, scale = 30, seconds = 0.9 })
     vfx.shockwave(world, core, { scale = 26, seconds = 0.9, strength = 0.9 })
     vfx.burst(world, core, "shard", 60)
-    glow:light({ intensity = 9, radius = 22, flicker = 0.6, flicker_speed = 5 })
+    glow:light({ intensity = 5, radius = 16, flicker = 0.6, flicker_speed = 5 })
     local throws = {}
     for index, id in ipairs(party.order) do
       local hero = field.actors[id]

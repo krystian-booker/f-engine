@@ -710,11 +710,18 @@ local function place_units(self, options)
   local points = self.world:points()
   local prefix = options.prefix or ""
   self.home, self.entities = {}, {}
+  -- The heroes' line, opened up a little around its middle so four sprites
+  -- do not stand in each other's way.
+  local cx, cz, count = 0, 0, #self.rules.heroes
+  for index = 1, count do
+    local point = points[prefix .. "party" .. index] or error("no point " .. prefix .. "party" .. index)
+    cx, cz = cx + point.position.x / count, cz + point.position.z / count
+  end
   for index, unit in ipairs(self.rules.heroes) do
     local e = options.heroes[unit.id]
     self.entities[unit] = e
-    local point = points[prefix .. "party" .. index] or error("no point " .. prefix .. "party" .. index)
-    self.home[unit] = { x = point.position.x, z = point.position.z }
+    local p = points[prefix .. "party" .. index].position
+    self.home[unit] = { x = cx + (p.x - cx) * 1.25, z = cz + (p.z - cz) * 1.3 }
   end
   for index, unit in ipairs(self.rules.enemies) do
     local e = options.enemies[index]
