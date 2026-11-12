@@ -8,6 +8,7 @@
 #include "engine/runtime/Engine.h"
 #include "engine/script/LuaHost.h"
 #include <IconsFontAwesome6.h>
+#include <SDL3/SDL.h>
 #include <algorithm>
 #include <imgui.h>
 #include <imgui_stdlib.h>
@@ -47,9 +48,11 @@ bool Editor::drawThumbnail(const std::string& path, AssetKind kind, float size) 
             const auto& rect = clip.directions.front().front().rect;
             const glm::vec2 atlas(sheet->size);
             const ImVec2 uv0(static_cast<float>(rect.x) / atlas.x, static_cast<float>(rect.y) / atlas.y);
-            const ImVec2 uv1(static_cast<float>(rect.x + rect.z) / atlas.x, static_cast<float>(rect.y + rect.w) / atlas.y);
+            const ImVec2 uv1(static_cast<float>(rect.x + rect.z) / atlas.x,
+                             static_cast<float>(rect.y + rect.w) / atlas.y);
             const float aspect = rect.w > 0 ? static_cast<float>(rect.z) / static_cast<float>(rect.w) : 1;
-            ImGui::Image(static_cast<ImTextureID>(sheet->color.idx + 1), ImVec2(size * aspect, size), uv0, uv1);
+            ImGui::Image(static_cast<ImTextureID>(sheet->color.idx + 1), ImVec2(size * aspect, size), uv0,
+                         uv1);
             return true;
         }
         if (kind == AssetKind::Model) {
@@ -59,8 +62,8 @@ bool Editor::drawThumbnail(const std::string& path, AssetKind kind, float size) 
                 return false;
             }
             const bool flip = bgfx::getCaps()->originBottomLeft;
-            ImGui::Image(static_cast<ImTextureID>(handle.idx + 1), ImVec2(size, size), ImVec2(0, flip ? 1 : 0),
-                         ImVec2(1, flip ? 0 : 1));
+            ImGui::Image(static_cast<ImTextureID>(handle.idx + 1), ImVec2(size, size),
+                         ImVec2(0, flip ? 1 : 0), ImVec2(1, flip ? 0 : 1));
             return true;
         }
         if (kind == AssetKind::Image) {
@@ -81,10 +84,12 @@ bool Editor::drawThumbnail(const std::string& path, AssetKind kind, float size) 
 }
 
 bool Editor::choicePicker(const char* label, std::string& value, const std::vector<std::string>& candidates,
-                          const std::vector<std::string>& labels, const char* hint, bool optional, AssetKind thumbnail) {
+                          const std::vector<std::string>& labels, const char* hint, bool optional,
+                          AssetKind thumbnail) {
     bool changed = false;
     ImGui::PushID(label);
-    const bool known = value.empty() || std::find(candidates.begin(), candidates.end(), value) != candidates.end();
+    const bool known =
+        value.empty() || std::find(candidates.begin(), candidates.end(), value) != candidates.end();
     if (!known) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 0.6f, 0.4f, 1));
     }
@@ -186,23 +191,74 @@ bool Editor::assetPicker(const char* label, std::string& value, AssetKind kind, 
         candidates.push_back(entry->path);
         labels.push_back(entry->path);
     }
-    const char* hints[] = {"(pick a sprite)", "(pick an image)", "(pick a model)", "(pick a sound)", "(pick a LUT)",
-                           "(pick a script)", "(pick a map)", "(pick a table)", "(pick a shader)", "(pick a font)",
-                           "(pick a file)", "(pick a file)"};
+    const char* hints[] = {"(pick a sprite)", "(pick an image)", "(pick a model)", "(pick a sound)",
+                           "(pick a LUT)",    "(pick a script)", "(pick a map)",   "(pick a table)",
+                           "(pick a shader)", "(pick a font)",   "(pick a file)",  "(pick a file)"};
     return choicePicker(label, value, candidates, labels, hints[static_cast<int>(kind)], optional,
-                        kind == AssetKind::Sprite || kind == AssetKind::Image ? kind : kind == AssetKind::Audio ? kind : kind);
+                        kind == AssetKind::Sprite || kind == AssetKind::Image ? kind
+                        : kind == AssetKind::Audio                            ? kind
+                                                                              : kind);
 }
 
-bool Editor::modulePicker(const char* label, std::string& value, const std::string& folder, bool optional) {
+bool Editor::modulePicker(const char* label, std::string& value, const std::string& folder, bool optional,
+                          const std::string& scriptTemplate, const std::string& suggestion) {
     const auto candidates = catalog_.modules(folder);
-    return choicePicker(label, value, candidates, candidates, "(pick a module)", optional, AssetKind::Other);
+    bool changed =
+        choicePicker(label, value, candidates, candidates, "(pick a module)", optional, AssetKind::Other);
+    const auto fileOf = [&](const std::string& module) {
+        auto relative = module;
+        std::replace(relative.begin(), relative.end(), '.', '/');
+        return relative + ".lua";
+    };
+    ImGui::PushID(label);
+    if (value.empty()) {
+        // A script of its own for this object: <folder>/<suggestion>.lua, written from the game's
+        // template for the field (the `template` of its spec) and picked at once.
+        if (ImGui::SmallButton(ICON_FA_PLUS " New script")) {
+            auto name = suggestion.empty() ? std::string("script") : suggestion;
+            for (auto& c : name) {
+                c = std::isalnum(static_cast<unsigned char>(c)) ? static_cast<char>(std::tolower(c)) : '_';
+            }
+            auto module = folder.empty() ? name : folder + "." + name;
+            for (int n = 2; std::find(candidates.begin(), candidates.end(), module) != candidates.end();
+                 ++n) {
+                module = (folder.empty() ? name : folder + "." + name) + std::to_string(n);
+            }
+            try {
+                const auto file = resolveInside(engine_.lua().gameRoot(), fileOf(module));
+                std::filesystem::create_directories(file.parent_path());
+                writeTextAtomic(file, scriptTemplate.empty() ? std::string("return function()\nend\n")
+                                                             : scriptTemplate);
+                catalog_.scan();
+                value = module;
+                changed = true;
+                status_ = "Created " + fileOf(module);
+            } catch (const std::exception& error) {
+                status_ = std::string("Cannot create the script: ") + error.what();
+            }
+        }
+    } else if (ImGui::SmallButton(ICON_FA_ARROW_UP_RIGHT_FROM_SQUARE " Open script")) {
+        try {
+            const auto file = resolveInside(engine_.lua().gameRoot(), fileOf(value));
+            if (!isFile(file)) {
+                status_ = fileOf(value) + " does not exist";
+            } else if (!SDL_OpenURL(("file://" + file.string()).c_str())) {
+                status_ = std::string("Cannot open the script: ") + SDL_GetError();
+            }
+        } catch (const std::exception& error) {
+            status_ = error.what();
+        }
+    }
+    ImGui::PopID();
+    return changed;
 }
 
 bool Editor::mapPicker(const char* label, std::string& value, bool optional) {
     std::vector<std::string> ids, labels;
     for (const auto& map : catalog_.maps()) {
         ids.push_back(map.id);
-        labels.push_back(map.id + "  (" + map.name + ", " + std::to_string(map.width) + "x" + std::to_string(map.depth) + ")");
+        labels.push_back(map.id + "  (" + map.name + ", " + std::to_string(map.width) + "x" +
+                         std::to_string(map.depth) + ")");
     }
     return choicePicker(label, value, ids, labels, "(pick a map)", optional, AssetKind::Other);
 }
@@ -213,14 +269,14 @@ std::vector<std::string> Editor::mapPoints(const std::string& mapId) {
         cached.first = Clock::now();
         cached.second.clear();
         try {
-            const auto json = parseJson(readFile(resolveInside(engine_.lua().gameRoot(), "maps/" + mapId + "/map.json")));
+            const auto json =
+                parseJson(readFile(resolveInside(engine_.lua().gameRoot(), "maps/" + mapId + "/map.json")));
             if (const auto points = json.find("points"); points != json.end() && points->is_object()) {
                 for (const auto& [name, point] : (*points).items()) {
                     cached.second.push_back(name);
                 }
             }
-        } catch (const std::exception&) {
-        }
+        } catch (const std::exception&) {}
     }
     return cached.second;
 }
@@ -236,31 +292,28 @@ std::vector<std::string> Editor::recordIds(const std::string& table) {
     if (Clock::now() - cached.first > std::chrono::seconds(2)) {
         cached.first = Clock::now();
         cached.second.clear();
+        // The ids of the records in the table's file, as the game's
+        // editor.describe hook names it ({name, file} under "tables").
         try {
-            auto& lua = engine_.lua();
-            const auto data = lua.require("fe.data");
-            if (data.get_type() == sol::type::table) {
-                sol::object has = data.as<sol::table>()["has_table"];
-                sol::object list = data.as<sol::table>()["list"];
-                if (has.get_type() == sol::type::function && list.get_type() == sol::type::function) {
-                    const auto loaded = lua.invoke(has, table);
-                    if (loaded.valid() && loaded.get<bool>()) {
-                        const auto records = lua.invoke(list, table);
-                        if (records.valid() && records.get_type() == sol::type::table) {
-                            for (const auto& [index, record] : records.get<sol::table>()) {
-                                if (record.is<sol::table>()) {
-                                    const sol::object id = record.as<sol::table>()["id"];
-                                    if (id.is<std::string>()) {
-                                        cached.second.push_back(id.as<std::string>());
-                                    }
-                                }
-                            }
+            for (const auto& described : jsonArray(schemas_, "tables")) {
+                if (jsonString(described, "name", {}) != table) {
+                    continue;
+                }
+                const auto records =
+                    readJson(resolveInside(engine_.lua().gameRoot(), jsonString(described, "file", {})));
+                if (records.is_array()) {
+                    for (const auto& record : records) {
+                        if (const auto id = jsonString(record, "id", {}); !id.empty()) {
+                            cached.second.push_back(id);
                         }
+                    }
+                } else if (records.is_object()) {
+                    for (const auto& [key, value] : records.items()) {
+                        cached.second.push_back(key);
                     }
                 }
             }
-        } catch (const std::exception&) {
-        }
+        } catch (const std::exception&) {}
         std::sort(cached.second.begin(), cached.second.end());
     }
     return cached.second;
@@ -318,7 +371,8 @@ void Editor::queueThumbnailDraws(std::vector<WorldDraw>& draws) {
     if (!thumbnailWorld_) {
         auto map = makeBlankMap("editor_thumbnail", "thumbnail", 2, 2);
         map.environment.sky.mode = "color";
-        map.environment.sky.top = map.environment.sky.horizon = map.environment.sky.bottom = {0.16f, 0.17f, 0.2f};
+        map.environment.sky.top = map.environment.sky.horizon =
+            map.environment.sky.bottom = {0.16f, 0.17f, 0.2f};
         map.environment.shadows = false;
         map.environment.fogDensity = 0;
         map.environment.post.bloom = false;

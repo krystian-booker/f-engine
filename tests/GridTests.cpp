@@ -372,7 +372,9 @@ TEST_CASE("rules.ladders = false keeps paths off ladders") {
     grid.setLinks({{2, 1, 0, 0, {0, -1}, LinkKind::Ladder}});
     StepRules rules;
     CHECK_FALSE(findRoute(grid, {0, 2, 0}, {0, 0, 0}, rules).steps.empty());
-    const auto reachesTop = [&] { return !findRoute(grid, {2, 1, 0}, {2, 0, 0}, rules).steps.empty(); };
+    const auto reachesTop = [&] {
+        return !findRoute(grid, {2, 1, 0}, {2, 0, 0}, rules).steps.empty();
+    };
     CHECK(reachesTop());
     rules.ladders = false;
     CHECK(findRoute(grid, {0, 2, 0}, {0, 0, 0}, rules).steps.empty());

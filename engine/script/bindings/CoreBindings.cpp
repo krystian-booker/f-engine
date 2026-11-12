@@ -175,12 +175,12 @@ sol::table displayTable(sol::state_view lua, const DisplayState& display) {
     return out;
 }
 
-// A path inside the game folder, or inside lualib/fe for '@fe/...' ('@fe/'
+// A path inside the game folder, or inside the engine's builtin folder for '@fe/...' ('@fe/'
 // alone is that folder).
 std::filesystem::path gameFile(const LuaHost& host, const std::string& path) {
     if (path.starts_with("@fe/")) {
         const auto rest = path.substr(4);
-        return resolveInside(host.libraryRoot() / "fe", rest.empty() ? "." : rest);
+        return resolveInside(host.builtinRoot(), rest.empty() ? "." : rest);
     }
     return resolveInside(host.gameRoot(), path);
 }
@@ -271,7 +271,8 @@ void bindDev(Engine& engine) {
                 return list;
             },
             "fun(): {message: string, time: number}[]", "Recent script errors.")
-        .fn("clear_errors", [&host] { host.clearErrors(); }, "fun()", "Clear the recorded script errors.")
+        .fn(
+            "clear_errors", [&host] { host.clearErrors(); }, "fun()", "Clear the recorded script errors.")
         .fn(
             "leave_map",
             [&engine](const std::string& world) {
@@ -280,8 +281,9 @@ void bindDev(Engine& engine) {
             },
             "fun(world: string): 'ok'|'pending'",
             "Ask the development editor whether the game may leave a world's map: 'ok' (also without an "
-            "editor), or 'pending' while it asks about unsaved edits; then poll leave_map_result. The field's "
-            "warp does this, so a door or a zone never discards map edits.")
+            "editor), or 'pending' while it asks about unsaved edits; then poll leave_map_result. Call "
+            "it before unloading a map the player walks out of, so a door or a zone never discards map "
+            "edits.")
         .fn(
             "leave_map_result",
             [&engine]() -> sol::optional<std::string> {
@@ -292,7 +294,8 @@ void bindDev(Engine& engine) {
                 return sol::nullopt;
             },
             "fun(): ('continue'|'cancel')?",
-            "The editor's answer to a pending leave_map: 'continue' (edits saved or discarded), 'cancel' (stay on "
+            "The editor's answer to a pending leave_map: 'continue' (edits saved or discarded), 'cancel' "
+            "(stay on "
             "the map), or nil while it is still asking.");
     if (engine.devBindings()) {
         ModuleBinder(host, engine.docs(), "fe.dev", "")
@@ -455,7 +458,7 @@ void bindData(Engine& engine) {
                 }
             },
             "fun(path: string): any",
-            "Read and parse a JSON file inside the game folder ('@fe/' for lualib).");
+            "Read and parse a JSON file inside the game folder ('@fe/' for builtin).");
     ModuleBinder(host, engine.docs(), "fe.fs", "Read-only access to files inside the game folder.")
         .fn(
             "read", [&host](const std::string& path) { return readFile(gameFile(host, path)); },
@@ -483,7 +486,7 @@ void bindData(Engine& engine) {
                 return out;
             },
             "fun(folder: string): string[]",
-            "Sorted entries of a folder inside the game folder ('@fe/' for lualib, like read and exists); "
+            "Sorted entries of a folder inside the game folder ('@fe/' for builtin, like read and exists); "
             "folders end with '/'.")
         .fn(
             "user_list",
@@ -631,7 +634,7 @@ void bindApp(Engine& engine) {
             "Change display settings; omitted fields stay. fullscreen = true means 'borderless' (a desktop-"
             "sized window); 'exclusive' switches the monitor to the display mode closest to width x height. "
             "Applied after the frame; fe.app.display() shows the request until then. The engine does not "
-            "store these: keep them in the player's settings (fe.config) and apply them at start.")
+            "store these: keep them in the player's settings (fe.save.write_config) and apply them at start.")
         .fn(
             "locale", [&engine] { return engine.locale(); }, "fun(): string",
             "The player's preferred language and region as a BCP 47 tag, such as 'en-US' or 'ja' (from the "
@@ -665,7 +668,8 @@ void bindApp(Engine& engine) {
                     throw std::runtime_error("Clipboard text is at most 64 KiB");
                 }
                 if (text.find('\0') != std::string::npos) {
-                    throw std::runtime_error("Clipboard text cannot contain NUL"); // the system clipboard is C-string text
+                    throw std::runtime_error(
+                        "Clipboard text cannot contain NUL"); // the system clipboard is C-string text
                 }
                 engine.clipboard().write(text);
             },
@@ -694,7 +698,7 @@ void bindApp(Engine& engine) {
             "tag (default fe.app.locale()), of which the language subtag chooses from a built-in table (en, "
             "de, fr, es, it, pt, ja, zh, ko, ru, pl, nl, sv, tr; others format as English; languages that "
             "group with a space use a no-break space). `decimals` (0 to 20) is 0 for a whole number and 2 "
-            "otherwise by default; the number is rounded to it. fe.i18n.number uses the current language.")
+            "otherwise by default; the number is rounded to it.")
         .fn(
             "capture",
             [&engine](const std::string& path) {
@@ -707,12 +711,18 @@ void bindApp(Engine& engine) {
         .fn(
             "preload",
             [&engine](sol::object paths) {
-                return engine.assets().preload(lua::strings(lua::tableArg(paths, "paths")));
+                return engine.preload(lua::strings(lua::tableArg(paths, "paths")));
             },
-            "fun(paths: string[]): integer", "Decode assets on a worker thread; returns a ticket.")
+            "fun(paths: string[]): integer",
+            "Get assets ready before they are drawn: models, sprite animations (.anim.json) and images "
+            "decode on a worker thread, and the models and sprite animations (with their atlases) are then "
+            "uploaded to the GPU a little each frame, so spawning what uses them does not stall a frame. "
+            "Returns a ticket for progress.")
         .fn(
-            "progress", [&engine](int ticket) { return engine.assets().progress(ticket); },
-            "fun(ticket: integer): number", "Preload progress 0..1.")
+            "progress", [&engine](int ticket) { return engine.preloadProgress(ticket); },
+            "fun(ticket: integer): number",
+            "Preload progress 0..1; 1 once everything is decoded and uploaded (the last tenth is the "
+            "upload). A finished ticket stays at 1.")
         .fn(
             "image_size",
             [&engine](const std::string& path) {
@@ -731,6 +741,21 @@ void bindApp(Engine& engine) {
             "Pixel size of an image, or of a render target ('rt:<name>'). A missing or unreadable image, or "
             "a "
             "target no world was drawn into, raises an error.")
+        .fn(
+            "model_animations",
+            [&engine](sol::this_state state, const std::string& path) {
+                sol::state_view lua(state);
+                auto out = lua.create_table();
+                const auto model = engine.assets().model(path);
+                for (const auto& animation : model->animations) {
+                    out[animation.name] = lua.create_table_with("length", animation.duration);
+                }
+                return out;
+            },
+            "fun(path: string): table<string, {length: number}>",
+            "The animations of a glTF model (.glb or .gltf) by name, with their length in seconds: what "
+            "entity:play and the mesh component's `animation` accept. A missing or invalid file raises an "
+            "error.")
         .fn(
             "sprite_clips",
             [&engine](sol::this_state state, const std::string& path) {

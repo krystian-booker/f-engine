@@ -1,8 +1,0 @@
-[
-  {"id": "wanderer", "name": "Wanderer", "growth": {"max_hp": 24, "max_mp": 2, "attack": 3, "defense": 2, "magic": 1, "spirit": 1, "speed": 1},
-   "skills": [{"skill": "cleave", "level": 3}, {"skill": "rally", "level": 5}],
-   "equip": ["sword", "armor", "helm", "trinket"], "commands": ["attack", "art", "item", "defend", "flee"]},
-  {"id": "sage", "name": "Sage", "growth": {"max_hp": 16, "max_mp": 6, "attack": 1, "defense": 1, "magic": 4, "spirit": 3, "speed": 1},
-   "skills": [{"skill": "fire", "level": 1}, {"skill": "heal", "level": 1}, {"skill": "revive", "level": 2}, {"skill": "blaze", "level": 4}],
-   "equip": ["staff", "robe", "hat", "trinket"], "commands": ["attack", "magic", "item", "defend", "flee"]}
-]

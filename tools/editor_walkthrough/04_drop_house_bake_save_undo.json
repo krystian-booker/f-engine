@@ -5,7 +5,7 @@
  },
  {
   "frame": 60,
-  "expect": "require('fe.field').world:placement('house') == nil"
+  "expect": "require('game.field').world:placement('house') == nil"
  },
  {
   "frame": 62,
@@ -20,7 +20,7 @@
  },
  {
   "frame": 70,
-  "drop": "/Users/krystian/repos/f-engine/samples/vale/fx/house.glb",
+  "drop": "/Users/krystian/repos/f-engine/samples/starfall/fx/house.glb",
   "at": [
    358,
    448
@@ -28,11 +28,11 @@
  },
  {
   "frame": 110,
-  "expect": "require('fe.field').world:placement('house') ~= nil and fe.world.get('field'):find('house') ~= nil"
+  "expect": "require('game.field').world:placement('house') ~= nil and fe.world.get('field'):find('house') ~= nil"
  },
  {
   "frame": 110,
-  "expect": "require('fe.field').world:placement('house').props.model == 'fx/house.glb'"
+  "expect": "require('game.field').world:placement('house').props.model == 'fx/house.glb'"
  },
  {
   "frame": 110,
@@ -66,7 +66,7 @@
  },
  {
   "frame": 136,
-  "expect": "require('fe.field').world:placement('house') == nil"
+  "expect": "require('game.field').world:placement('house') == nil"
  },
  {
   "frame": 136,

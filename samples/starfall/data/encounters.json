@@ -1,0 +1,56 @@
+[
+  {
+    "id": "plains",
+    "rate": 7,
+    "troops": [
+      {
+        "troop": "slimes",
+        "weight": 3
+      },
+      {
+        "troop": "pack",
+        "weight": 2
+      },
+      {
+        "troop": "mixed",
+        "weight": 1
+      }
+    ]
+  },
+  {
+    "id": "forest",
+    "rate": 11,
+    "troops": [
+      {
+        "troop": "pack",
+        "weight": 2
+      },
+      {
+        "troop": "embers",
+        "weight": 2
+      },
+      {
+        "troop": "mixed",
+        "weight": 1
+      }
+    ]
+  },
+  {
+    "id": "grotto",
+    "rate": 9,
+    "troops": [
+      {
+        "troop": "wisps",
+        "weight": 3
+      },
+      {
+        "troop": "embers",
+        "weight": 2
+      },
+      {
+        "troop": "golem",
+        "weight": 1
+      }
+    ]
+  }
+]

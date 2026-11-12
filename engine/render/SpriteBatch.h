@@ -15,8 +15,8 @@ public:
         bgfx::TextureHandle atlas = BGFX_INVALID_HANDLE, palette = BGFX_INVALID_HANDLE;
         // Images laid out like the atlas; invalid when the sheet has none.
         bgfx::TextureHandle normal = BGFX_INVALID_HANDLE, emissive = BGFX_INVALID_HANDLE;
-        glm::vec2 texel{0};       // 1 / atlas size, for outlines
-        float outlineWidth = 1;   // atlas texels the outline reaches out
+        glm::vec2 texel{0};     // 1 / atlas size, for outlines
+        float outlineWidth = 1; // atlas texels the outline reaches out
         bool paletteSwap = false;
         // A game sprite shader for the opaque and transparent passes; invalid = the engine's.
         bgfx::ProgramHandle program = BGFX_INVALID_HANDLE;
@@ -29,9 +29,8 @@ public:
             return atlas.idx == other.atlas.idx && palette.idx == other.palette.idx &&
                    normal.idx == other.normal.idx && emissive.idx == other.emissive.idx &&
                    texel == other.texel && outlineWidth == other.outlineWidth &&
-                   paletteSwap == other.paletteSwap &&
-                   program.idx == other.program.idx && shadowProgram.idx == other.shadowProgram.idx &&
-                   params == other.params;
+                   paletteSwap == other.paletteSwap && program.idx == other.program.idx &&
+                   shadowProgram.idx == other.shadowProgram.idx && params == other.params;
         }
     };
     struct MaterialHash {

@@ -1,0 +1,493 @@
+[
+  {
+    "id": "slash",
+    "name": "Attack",
+    "kind": "physical",
+    "target": "foe",
+    "power": 1.0,
+    "clip": "attack"
+  },
+  {
+    "id": "staff",
+    "name": "Attack",
+    "kind": "physical",
+    "target": "foe",
+    "power": 0.7,
+    "clip": "attack"
+  },
+  {
+    "id": "shot",
+    "name": "Attack",
+    "kind": "physical",
+    "target": "foe",
+    "power": 0.9,
+    "clip": "attack"
+  },
+  {
+    "id": "rod",
+    "name": "Attack",
+    "kind": "physical",
+    "target": "foe",
+    "power": 0.6,
+    "clip": "attack"
+  },
+  {
+    "id": "cleave",
+    "name": "Cleave",
+    "kind": "physical",
+    "target": "foes",
+    "power": 0.7,
+    "cost": 4,
+    "clip": "attack",
+    "about": "Strikes every foe."
+  },
+  {
+    "id": "ember_edge",
+    "name": "Ember Edge",
+    "kind": "physical",
+    "target": "foe",
+    "power": 1.3,
+    "cost": 5,
+    "element": "fire",
+    "clip": "attack",
+    "about": "A burning blade."
+  },
+  {
+    "id": "mend",
+    "name": "Mend",
+    "kind": "heal",
+    "target": "ally",
+    "power": 1.6,
+    "cost": 4,
+    "clip": "cast",
+    "about": "Restores an ally's HP."
+  },
+  {
+    "id": "radiance",
+    "name": "Radiance",
+    "kind": "magic",
+    "target": "foe",
+    "power": 1.3,
+    "cost": 5,
+    "element": "light",
+    "clip": "cast",
+    "about": "Searing light."
+  },
+  {
+    "id": "call_warden",
+    "name": "Call Warden",
+    "kind": "summon",
+    "target": "self",
+    "cost": 12,
+    "summon": "warden",
+    "clip": "cast",
+    "about": "A warden fights beside you for three turns."
+  },
+  {
+    "id": "piercing_shot",
+    "name": "Piercing Shot",
+    "kind": "physical",
+    "target": "foe",
+    "power": 1.1,
+    "cost": 4,
+    "clip": "attack",
+    "about": "Cracks a guard: heavy break damage.",
+    "break": 4
+  },
+  {
+    "id": "volt_arrow",
+    "name": "Volt Arrow",
+    "kind": "physical",
+    "target": "foe",
+    "power": 1.2,
+    "cost": 5,
+    "element": "bolt",
+    "clip": "attack",
+    "about": "A charged arrow.",
+    "break": 2
+  },
+  {
+    "id": "rime",
+    "name": "Rime",
+    "kind": "magic",
+    "target": "foe",
+    "power": 1.4,
+    "cost": 5,
+    "element": "ice",
+    "clip": "cast",
+    "about": "Freezing shards."
+  },
+  {
+    "id": "gloom",
+    "name": "Gloom",
+    "kind": "magic",
+    "target": "foes",
+    "power": 0.9,
+    "cost": 7,
+    "element": "dark",
+    "clip": "cast",
+    "about": "Shadow over every foe."
+  },
+  {
+    "id": "lull",
+    "name": "Lull",
+    "kind": "debuff",
+    "target": "foe",
+    "cost": 4,
+    "clip": "cast",
+    "status": {
+      "id": "sleep",
+      "chance": 0.75,
+      "turns": 2
+    },
+    "about": "May put a foe to sleep."
+  },
+  {
+    "id": "starbreaker",
+    "name": "Starbreaker",
+    "kind": "physical",
+    "target": "foes",
+    "power": 2.2,
+    "clip": "attack",
+    "about": "Aster's surge.",
+    "break": 4
+  },
+  {
+    "id": "aurora",
+    "name": "Aurora",
+    "kind": "heal",
+    "target": "allies",
+    "power": 2.4,
+    "revive": 0.5,
+    "clip": "cast",
+    "about": "Mira's surge: restores and raises the party."
+  },
+  {
+    "id": "meteor_volley",
+    "name": "Meteor Volley",
+    "kind": "physical",
+    "target": "foe",
+    "power": 3.2,
+    "clip": "attack",
+    "about": "Bram's surge.",
+    "break": 6
+  },
+  {
+    "id": "abyss",
+    "name": "Abyss",
+    "kind": "magic",
+    "target": "foes",
+    "power": 2.3,
+    "element": "dark",
+    "clip": "cast",
+    "about": "Sel's surge."
+  },
+  {
+    "id": "guard_break",
+    "name": "Guard Break",
+    "kind": "physical",
+    "target": "foe",
+    "power": 1.0,
+    "cost": 4,
+    "clip": "attack",
+    "about": "Shatters a guard.",
+    "break": 5
+  },
+  {
+    "id": "rally",
+    "name": "Rally",
+    "kind": "buff",
+    "target": "allies",
+    "cost": 6,
+    "clip": "cast",
+    "status": {
+      "id": "def_up",
+      "chance": 1,
+      "turns": 3
+    },
+    "about": "Raises the party's defence."
+  },
+  {
+    "id": "grace",
+    "name": "Grace",
+    "kind": "heal",
+    "target": "allies",
+    "power": 0.9,
+    "cost": 8,
+    "clip": "cast",
+    "about": "Restores the party's HP."
+  },
+  {
+    "id": "purify",
+    "name": "Purify",
+    "kind": "cure",
+    "target": "ally",
+    "cost": 3,
+    "clip": "cast",
+    "about": "Cures an ally's ailments."
+  },
+  {
+    "id": "spark",
+    "name": "Spark",
+    "kind": "magic",
+    "target": "foe",
+    "power": 1.5,
+    "cost": 5,
+    "element": "bolt",
+    "clip": "cast",
+    "about": "A bolt of lightning."
+  },
+  {
+    "id": "chain_bolt",
+    "name": "Chain Bolt",
+    "kind": "magic",
+    "target": "foes",
+    "power": 1.0,
+    "cost": 8,
+    "element": "bolt",
+    "clip": "cast",
+    "about": "Lightning through every foe."
+  },
+  {
+    "id": "frost_lance",
+    "name": "Frost Lance",
+    "kind": "magic",
+    "target": "foe",
+    "power": 1.5,
+    "cost": 5,
+    "element": "ice",
+    "clip": "cast",
+    "about": "A spear of ice."
+  },
+  {
+    "id": "hush",
+    "name": "Hush",
+    "kind": "debuff",
+    "target": "foe",
+    "cost": 4,
+    "clip": "cast",
+    "status": {
+      "id": "silence",
+      "chance": 0.8,
+      "turns": 3
+    },
+    "about": "May silence a foe."
+  },
+  {
+    "id": "flare",
+    "name": "Flare",
+    "kind": "magic",
+    "target": "foe",
+    "power": 1.5,
+    "cost": 5,
+    "element": "fire",
+    "clip": "cast",
+    "about": "A burst of flame."
+  },
+  {
+    "id": "wildfire",
+    "name": "Wildfire",
+    "kind": "magic",
+    "target": "foes",
+    "power": 1.0,
+    "cost": 8,
+    "element": "fire",
+    "clip": "cast",
+    "about": "Flame over every foe."
+  },
+  {
+    "id": "tide_mend",
+    "name": "Tide Mend",
+    "kind": "heal",
+    "target": "allies",
+    "power": 1.2,
+    "cost": 9,
+    "clip": "cast",
+    "about": "A wave that restores the party."
+  },
+  {
+    "id": "bulwark_chorus",
+    "name": "Bulwark Chorus",
+    "kind": "heal",
+    "target": "allies",
+    "power": 1.5,
+    "status": {
+      "id": "def_up",
+      "chance": 1,
+      "turns": 3
+    },
+    "clip": "cast",
+    "about": "Unison: mends the party and raises its guard."
+  },
+  {
+    "id": "dawn_chorus",
+    "name": "Dawn Chorus",
+    "kind": "heal",
+    "target": "allies",
+    "power": 2.2,
+    "cure": true,
+    "revive": 0.4,
+    "clip": "cast",
+    "about": "Unison: restores, raises and cleanses the party."
+  },
+  {
+    "id": "tempest_verse",
+    "name": "Tempest Verse",
+    "kind": "magic",
+    "target": "foes",
+    "power": 2.6,
+    "element": "bolt",
+    "clip": "cast",
+    "about": "Unison: a storm on every foe."
+  },
+  {
+    "id": "glacial_hymn",
+    "name": "Glacial Hymn",
+    "kind": "magic",
+    "target": "foes",
+    "power": 2.3,
+    "element": "ice",
+    "status": {
+      "id": "spd_down",
+      "chance": 1,
+      "turns": 3
+    },
+    "clip": "cast",
+    "about": "Unison: ice that slows every foe."
+  },
+  {
+    "id": "cinder_requiem",
+    "name": "Cinder Requiem",
+    "kind": "magic",
+    "target": "foes",
+    "power": 2.8,
+    "element": "fire",
+    "clip": "cast",
+    "about": "Unison: fire on every foe."
+  },
+  {
+    "id": "tidal_grace",
+    "name": "Tidal Grace",
+    "kind": "heal",
+    "target": "allies",
+    "power": 9,
+    "cure": true,
+    "revive": 1,
+    "clip": "cast",
+    "about": "Unison: the party is made whole."
+  },
+  {
+    "id": "tackle",
+    "name": "Tackle",
+    "kind": "physical",
+    "target": "foe",
+    "power": 0.9,
+    "clip": "attack"
+  },
+  {
+    "id": "bite",
+    "name": "Bite",
+    "kind": "physical",
+    "target": "foe",
+    "power": 1.0,
+    "clip": "attack"
+  },
+  {
+    "id": "ooze",
+    "name": "Ooze",
+    "kind": "physical",
+    "target": "foe",
+    "power": 0.6,
+    "status": {
+      "id": "poison",
+      "chance": 0.5,
+      "turns": 3
+    },
+    "clip": "attack"
+  },
+  {
+    "id": "howl",
+    "name": "Howl",
+    "kind": "buff",
+    "target": "self",
+    "status": {
+      "id": "atk_up",
+      "chance": 1,
+      "turns": 3
+    },
+    "clip": "cast"
+  },
+  {
+    "id": "will_o",
+    "name": "Will-o'-Flame",
+    "kind": "magic",
+    "target": "foe",
+    "power": 1.0,
+    "element": "fire",
+    "clip": "cast"
+  },
+  {
+    "id": "ember_burst",
+    "name": "Ember Burst",
+    "kind": "magic",
+    "target": "foes",
+    "power": 0.7,
+    "element": "fire",
+    "clip": "cast"
+  },
+  {
+    "id": "crush",
+    "name": "Crush",
+    "kind": "physical",
+    "target": "foe",
+    "power": 1.5,
+    "clip": "attack"
+  },
+  {
+    "id": "tail_sweep",
+    "name": "Tail Sweep",
+    "kind": "physical",
+    "target": "foes",
+    "power": 0.8,
+    "clip": "attack"
+  },
+  {
+    "id": "frost_breath",
+    "name": "Frost Breath",
+    "kind": "magic",
+    "target": "foes",
+    "power": 1.0,
+    "element": "ice",
+    "clip": "cast"
+  },
+  {
+    "id": "blinding_dust",
+    "name": "Blinding Dust",
+    "kind": "debuff",
+    "target": "foe",
+    "status": {
+      "id": "blind",
+      "chance": 0.6,
+      "turns": 3
+    },
+    "clip": "cast"
+  },
+  {
+    "id": "warden_strike",
+    "name": "Warden's Lance",
+    "kind": "magic",
+    "target": "foe",
+    "power": 1.3,
+    "element": "light",
+    "clip": "attack"
+  },
+  {
+    "id": "warden_finale",
+    "name": "Parting Light",
+    "kind": "magic",
+    "target": "foes",
+    "power": 2.0,
+    "element": "light",
+    "clip": "cast"
+  }
+]

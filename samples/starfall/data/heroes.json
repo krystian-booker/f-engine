@@ -1,0 +1,128 @@
+[
+  {
+    "id": "aster",
+    "name": "Aster",
+    "sprite": "sprites/aster.anim.json",
+    "portrait": "portraits/aster.png",
+    "stats": {
+      "hp": 110,
+      "mp": 18,
+      "atk": 15,
+      "def": 11,
+      "mag": 5,
+      "res": 7,
+      "spd": 10
+    },
+    "growth": {
+      "hp": 12,
+      "mp": 1.5,
+      "atk": 2,
+      "def": 1.5,
+      "mag": 0.5,
+      "res": 0.8,
+      "spd": 0.5
+    },
+    "attack": "slash",
+    "skills": [
+      "cleave",
+      "ember_edge"
+    ],
+    "surge": "starbreaker",
+    "echo": "vanguard"
+  },
+  {
+    "id": "mira",
+    "name": "Mira",
+    "sprite": "sprites/mira.anim.json",
+    "portrait": "portraits/mira.png",
+    "stats": {
+      "hp": 84,
+      "mp": 34,
+      "atk": 7,
+      "def": 7,
+      "mag": 14,
+      "res": 12,
+      "spd": 9
+    },
+    "growth": {
+      "hp": 9,
+      "mp": 3,
+      "atk": 0.6,
+      "def": 0.9,
+      "mag": 2,
+      "res": 1.6,
+      "spd": 0.5
+    },
+    "attack": "staff",
+    "skills": [
+      "mend",
+      "radiance",
+      "call_warden"
+    ],
+    "surge": "aurora",
+    "echo": "dawnlight"
+  },
+  {
+    "id": "bram",
+    "name": "Bram",
+    "sprite": "sprites/bram.anim.json",
+    "portrait": "portraits/bram.png",
+    "stats": {
+      "hp": 96,
+      "mp": 22,
+      "atk": 13,
+      "def": 9,
+      "mag": 6,
+      "res": 8,
+      "spd": 14
+    },
+    "growth": {
+      "hp": 10,
+      "mp": 2,
+      "atk": 1.8,
+      "def": 1.2,
+      "mag": 0.6,
+      "res": 1,
+      "spd": 0.8
+    },
+    "attack": "shot",
+    "skills": [
+      "piercing_shot",
+      "volt_arrow"
+    ],
+    "surge": "meteor_volley",
+    "echo": "stormcall"
+  },
+  {
+    "id": "sel",
+    "name": "Sel",
+    "sprite": "sprites/sel.anim.json",
+    "portrait": "portraits/sel.png",
+    "stats": {
+      "hp": 78,
+      "mp": 38,
+      "atk": 6,
+      "def": 6,
+      "mag": 16,
+      "res": 11,
+      "spd": 11
+    },
+    "growth": {
+      "hp": 8,
+      "mp": 3.2,
+      "atk": 0.5,
+      "def": 0.8,
+      "mag": 2.2,
+      "res": 1.4,
+      "spd": 0.6
+    },
+    "attack": "rod",
+    "skills": [
+      "rime",
+      "gloom",
+      "lull"
+    ],
+    "surge": "abyss",
+    "echo": "frostveil"
+  }
+]

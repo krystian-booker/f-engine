@@ -22,10 +22,10 @@ if(FENGINE_BUILD_TESTS)
     set_tests_properties(assetc_atlas PROPERTIES FIXTURES_REQUIRED assetc_clean FIXTURES_SETUP assetc_packed)
     set_tests_properties(assetc_atlas_output PROPERTIES FIXTURES_REQUIRED assetc_packed)
     if(TARGET bimg_encode)
-      # Cooks a copy of the vale rendering assets and checks the KTX files.
+      # Cooks a copy of the sample's rendering assets and checks the KTX files.
       set(cooked "${CMAKE_CURRENT_BINARY_DIR}/cook-test")
       add_test(NAME assetc_cook_copy COMMAND "${CMAKE_COMMAND}" -E copy_directory
-        "${PROJECT_SOURCE_DIR}/samples/vale/fx" "${cooked}/fx")
+        "${PROJECT_SOURCE_DIR}/samples/starfall/fx" "${cooked}/fx")
       add_test(NAME assetc_cook COMMAND fengine_assetc cook "${cooked}" --force)
       add_test(NAME assetc_cook_output
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_cook.py" "${cooked}/fx")

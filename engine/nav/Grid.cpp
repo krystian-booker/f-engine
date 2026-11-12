@@ -97,6 +97,7 @@ int Grid::addLayer(const std::string& name) {
     }
     layers_.push_back(std::move(layer));
     ++revision_;
+    ++topology_;
     return static_cast<int>(layers_.size()) - 1;
 }
 
@@ -113,6 +114,7 @@ void Grid::setWrap(bool wrap) {
     }
     wrap_ = wrap;
     ++revision_; // the seam joins or splits components
+    ++topology_;
 }
 
 GridCell& Grid::at(int x, int z, int layer) {
@@ -120,6 +122,7 @@ GridCell& Grid::at(int x, int z, int layer) {
         throw std::out_of_range("Grid cell outside the map");
     }
     ++revision_; // the caller may write through the reference
+    ++topology_;
     return layers_[static_cast<std::size_t>(layer)].cells[index(x, z)];
 }
 
@@ -131,6 +134,11 @@ void Grid::setCell(GridPos p, const GridCell& cell) {
     if (current == cell) {
         return;
     }
+    // Connectivity (component()) follows walkability alone: a cell whose
+    // height or tags change, a lift's deck say, relabels nothing.
+    if (current.walkable != cell.walkable) {
+        ++topology_;
+    }
     current = cell;
     ++revision_;
 }
@@ -139,7 +147,7 @@ int Grid::component(GridPos p) const {
     if (!contains(p) || !at(p).walkable) {
         return -1;
     }
-    if (!componentsBuilt_ || componentsRevision_ != revision_) {
+    if (!componentsBuilt_ || componentsRevision_ != topology_) {
         buildComponents();
     }
     const auto perLayer = static_cast<std::size_t>(width_) * static_cast<std::size_t>(depth_);
@@ -199,7 +207,7 @@ void Grid::buildComponents() const {
         }
     }
     componentsBuilt_ = true;
-    componentsRevision_ = revision_;
+    componentsRevision_ = topology_;
 }
 
 const GridCell& Grid::at(int x, int z, int layer) const {
@@ -293,6 +301,7 @@ void Grid::setLinks(std::vector<GridLink> links) {
     links_ = std::move(links);
     indexLinks();
     ++revision_;
+    ++topology_;
 }
 
 void Grid::indexLinks() {

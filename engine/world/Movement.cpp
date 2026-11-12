@@ -8,12 +8,12 @@
 
 namespace fe {
 namespace {
-constexpr float SubStep = 0.05f;             // longest collision-checked move
-constexpr float MinimumJumpSeconds = 0.05f;  // shortest arc jump() accepts
-constexpr float LandingSearchStep = 0.25f;   // ring spacing when a landing is blocked
-constexpr int LandingSearchAngles = 16;      // spots per ring
-constexpr float PlatformBoardHeight = 0.2f;  // how far above or below a platform's top a rider's feet may be
-constexpr int MaxAttachmentDepth = 64;       // longest parent chain followed before giving up
+constexpr float SubStep = 0.05f;            // longest collision-checked move
+constexpr float MinimumJumpSeconds = 0.05f; // shortest arc jump() accepts
+constexpr float LandingSearchStep = 0.25f;  // ring spacing when a landing is blocked
+constexpr int LandingSearchAngles = 16;     // spots per ring
+constexpr float PlatformBoardHeight = 0.2f; // how far above or below a platform's top a rider's feet may be
+constexpr int MaxAttachmentDepth = 64;      // longest parent chain followed before giving up
 
 glm::vec2 cellCentre(int x, int z) {
     return {static_cast<float>(x) + 0.5f, static_cast<float>(z) + 0.5f};
@@ -120,16 +120,25 @@ void MovementSystem::moveTo(entt::entity entity, glm::vec3 target, bool findPath
     planning.footprint = body.footprint;
     planning.fly = body.fly;
     if (blockedCells_ && !blockedCells_->empty()) {
-        // Static boxes: the route goes around them instead of into them.
-        planning.blocked.insert(blockedCells_->begin(), blockedCells_->end());
-        planning.blocked.erase(cellKey(from)); // a body already beside a box may leave
+        // Static boxes: the route goes around them instead of into them. The
+        // set is the world's, read in place (a large map has thousands of
+        // these cells; copying them into every plan cost more than the plan).
+        planning.sharedBlocked = blockedCells_;
+        planning.exempt = cellKey(from); // a body already beside a box may leave
     }
     const auto planned = findRoute(grid_, from, {to.x, to.z, goalLayer}, planning, routeVisitLimit_);
+    // The search may have run a script's cost function, and a script can
+    // destroy the entity it is planning for: nothing is left to move then,
+    // and `mover` above no longer refers to anything.
+    if (!registry_.valid(entity) || !registry_.all_of<Mover, Transform>(entity)) {
+        return;
+    }
+    auto& planner = registry_.get<Mover>(entity);
     const auto& path = planned.steps;
     // A search stopped by its visit cap may hold a detour (or nothing): the
     // mover does not follow it, and says so the way it does for no route.
     if (path.empty() || planned.truncated) {
-        reset(mover);
+        reset(planner);
         events_.push({WorldEvent::Kind::Blocked, entity, entt::null, {}});
         return;
     }
@@ -331,7 +340,8 @@ void MovementSystem::launch(entt::entity entity, glm::vec3 velocity) {
     events_.push({WorldEvent::Kind::JumpStart, entity, entt::null, {}});
 }
 
-MovementSystem::Surface MovementSystem::groundUnder(glm::vec2 position, const Body& body, float height) const {
+MovementSystem::Surface MovementSystem::groundUnder(glm::vec2 position, const Body& body,
+                                                    float height) const {
     std::optional<Surface> best;
     for (int l = 0; l < grid_.layerCount(); ++l) {
         const float surface = grid_.heightAt(position, l);
@@ -390,10 +400,9 @@ void MovementSystem::advanceLaunch(entt::entity entity, float dt) {
             const glm::vec3 probe(to.x, y1, to.y);
             const bool blocked =
                 !grid_.contains(floorCell(to.x), floorCell(to.y)) ||
-                (body.collide &&
-                 (grid_.heightAt(to, 0) > std::max(y0, y1) + mover.maxStep + 1e-4f ||
-                  collision_.blockedByBox(probe, body.radius, body.height) ||
-                  collision_.blocksMove(entity, start, probe, body.radius, body.height)));
+                (body.collide && (grid_.heightAt(to, 0) > std::max(y0, y1) + mover.maxStep + 1e-4f ||
+                                  collision_.blockedByBox(probe, body.radius, body.height) ||
+                                  collision_.blocksMove(entity, start, probe, body.radius, body.height)));
             if (blocked) {
                 flight.velocity.x = flight.velocity.z = 0;
                 horizontal = glm::vec2(0);
@@ -451,7 +460,8 @@ void MovementSystem::finishJump(entt::entity entity, bool interrupted) {
             const float rest = restY(mover, here, l);
             const float gap = std::abs(rest - transform.position.y);
             if ((!ground || gap < nearest) && supported(here, body, l) &&
-                (!body.collide || !collision_.blockedByBox({here.x, rest, here.y}, body.radius, body.height))) {
+                (!body.collide ||
+                 !collision_.blockedByBox({here.x, rest, here.y}, body.radius, body.height))) {
                 ground = l;
                 nearest = gap;
             }
@@ -536,7 +546,8 @@ bool MovementSystem::canOccupy(entt::entity entity, glm::vec3 position, int laye
 
 bool MovementSystem::supported(glm::vec2 p, const Body& body, int layer) const {
     const auto stands = [&](int on) {
-        return grid_.canStand(p, body.radius, on, body.footprint, body.fly, body.blockedTags, body.requiredTags);
+        return grid_.canStand(p, body.radius, on, body.footprint, body.fly, body.blockedTags,
+                              body.requiredTags);
     };
     if (stands(layer)) {
         return true;
@@ -654,8 +665,8 @@ void MovementSystem::advanceClimb(entt::entity entity, float dt) {
         const float distance = glm::length(offset);
         const float reach = std::max(speed, 0.01f) * budget;
         const glm::vec2 level(offset.x, offset.z);
-        transform.facing = glm::length(level) > 1e-4f && std::abs(offset.y) < 1e-4f ? glm::normalize(level)
-                                                                                    : climb.facing;
+        transform.facing =
+            glm::length(level) > 1e-4f && std::abs(offset.y) < 1e-4f ? glm::normalize(level) : climb.facing;
         if (distance > reach) {
             transform.position += offset / distance * reach;
             break;
@@ -796,7 +807,7 @@ void MovementSystem::update(double dt) {
                     const auto centre = cellCentre(to.x, to.z);
                     const glm::vec3 end{centre.x, grid_.heightAt(centre, to.layer), centre.y};
                     auto climb = mover.fly || std::as_const(grid_).at(to).walkable ? climbTo(entity, to, end)
-                                                                                    : std::nullopt;
+                                                                                   : std::nullopt;
                     if (climb) {
                         // A route being followed waits on the ladder and goes on from its end.
                         std::optional<Mover::Route> route;
@@ -869,10 +880,50 @@ void MovementSystem::updateAttachments() {
     }
 }
 
+// The cells a platform covers and the height it gives them: what
+// updatePlatforms writes into the grid for it.
+void MovementSystem::platformCells(const Transform& transform, glm::vec2 half,
+                                   std::vector<std::pair<GridPos, float>>& out) const {
+    const int x0 = std::max(0, ceilCell(transform.position.x - half.x - 0.5f));
+    const int x1 = std::min(grid_.width() - 1, floorCell(transform.position.x + half.x - 0.5f));
+    const int z0 = std::max(0, ceilCell(transform.position.z - half.y - 0.5f));
+    const int z1 = std::min(grid_.depth() - 1, floorCell(transform.position.z + half.y - 0.5f));
+    for (int z = z0; z <= z1; ++z) {
+        for (int x = x0; x <= x1; ++x) {
+            const GridPos cell{x, z, transform.layer};
+            if (grid_.contains(cell)) {
+                out.emplace_back(cell, transform.position.y);
+            }
+        }
+    }
+}
+
+// Takes last tick's overrides off the grid, except those of cells this
+// tick's platforms still cover: they move to kept_ and the grid is not
+// touched for them here. A platform at rest therefore changes nothing, so the
+// grid's revision, and everything cached against it (the cells under static
+// boxes, the connected components), holds still; one that moves rewrites
+// only the cells it leaves and enters.
 void MovementSystem::restoreCells() {
+    wanted_.clear();
+    for (const auto& [platform, ride] : rides_) {
+        platformCells(registry_.get<Transform>(platform), registry_.get<Platform>(platform).size * 0.5f,
+                      wanted_);
+    }
+    kept_.clear();
     for (auto it = overrides_.rbegin(); it != overrides_.rend(); ++it) {
-        if (grid_.contains(it->cell) && std::as_const(grid_).at(it->cell) == it->applied) {
-            grid_.setCell(it->cell, it->original); // unless a script changed the cell since
+        if (!grid_.contains(it->cell) || !(std::as_const(grid_).at(it->cell) == it->applied)) {
+            continue; // a script changed the cell since: it is the script's now
+        }
+        // Still under a platform, at this height or another: the cell stays
+        // overridden (a lift's deck only changes height, which is written in
+        // place, so the cell never passes through its unwalkable original).
+        const bool again = std::any_of(wanted_.begin(), wanted_.end(),
+                                       [&](const auto& want) { return want.first == it->cell; });
+        if (again && !kept_.contains(cellKey(it->cell))) {
+            kept_.emplace(cellKey(it->cell), *it);
+        } else {
+            grid_.setCell(it->cell, it->original);
         }
     }
     overrides_.clear();
@@ -962,21 +1013,28 @@ void MovementSystem::carryRiders() {
         }
         ride.last = transform.position;
         // Cells whose centre the platform covers, within the grid, written
-        // before its riders move so their footing is known.
-        const int x0 = std::max(0, ceilCell(transform.position.x - half.x - 0.5f));
-        const int x1 = std::min(grid_.width() - 1, floorCell(transform.position.x + half.x - 0.5f));
-        const int z0 = std::max(0, ceilCell(transform.position.z - half.y - 0.5f));
-        const int z1 = std::min(grid_.depth() - 1, floorCell(transform.position.z + half.y - 0.5f));
-        for (int z = z0; z <= z1; ++z) {
-            for (int x = x0; x <= x1; ++x) {
-                const GridPos cell{x, z, transform.layer};
-                if (!grid_.contains(cell)) {
+        // before its riders move so their footing is known. A cell that
+        // already holds what this platform writes (it has not moved) is left
+        // as it is.
+        cellScratch_.clear();
+        platformCells(transform, half, cellScratch_);
+        for (const auto& [cell, height] : cellScratch_) {
+            {
+                const auto& current = std::as_const(grid_).at(cell);
+                if (const auto kept = kept_.find(cellKey(cell));
+                    kept != kept_.end() && current == kept->second.applied) {
+                    auto entry = kept->second;
+                    if (entry.applied.height != height) {
+                        entry.applied.height = height;
+                        grid_.setCell(cell, entry.applied);
+                    }
+                    kept_.erase(kept); // a second platform over this cell overrides this one's write
+                    overrides_.push_back(entry);
                     continue;
                 }
-                const auto& current = std::as_const(grid_).at(cell);
                 CellOverride entry{cell, current, current};
                 entry.applied.walkable = true;
-                entry.applied.height = transform.position.y;
+                entry.applied.height = height;
                 entry.applied.ramp = Ramp::None;
                 entry.applied.rise = 1;
                 grid_.setCell(cell, entry.applied);

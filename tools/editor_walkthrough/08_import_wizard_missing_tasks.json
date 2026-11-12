@@ -102,7 +102,7 @@
  },
  {
   "frame": 150,
-  "expect": "require('fe.field').world:placement('villager').props.sprite == 'sprites/ghost.anim.json'"
+  "expect": "require('game.field').world:placement('villager').props.sprite == 'sprites/ghost.anim.json'"
  },
  {
   "frame": 150,
@@ -150,7 +150,7 @@
  },
  {
   "frame": 194,
-  "expect": "require('fe.field').world:placement('villager').props.sprite == 'sprites/villager.anim.json'"
+  "expect": "require('game.field').world:placement('villager').props.sprite == 'sprites/villager.anim.json'"
  },
  {
   "frame": 194,
@@ -158,7 +158,7 @@
  },
  {
   "frame": 196,
-  "expect": "(function() walk_probe = require('fe.task').named('walk_probe', function() require('fe.task').wait(100) end); return walk_probe ~= nil end)()"
+  "expect": "(function() walk_probe = require('game.task').spawn(function() require('game.task').wait(100) end, 'walk_probe'); return walk_probe ~= nil end)()"
  },
  {
   "frame": 200,
@@ -184,7 +184,7 @@
  },
  {
   "frame": 224,
-  "expect": "require('fe.devtools').tasks():find('walk_probe', 1, true) ~= nil"
+  "expect": "require('game.editor').tasks():find('walk_probe', 1, true) ~= nil"
  },
  {
   "frame": 225,

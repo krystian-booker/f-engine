@@ -3,12 +3,21 @@
 #include "engine/audio/PitchShift.h"
 #include "engine/core/Log.h"
 #include "engine/core/Paths.h"
+// Ogg Vorbis: miniaudio decodes it through stb_vorbis (shipped in its
+// extras) when that header is seen before the implementation; the decoder's
+// own implementation follows miniaudio's, at the end of this file's includes.
+#define STB_VORBIS_HEADER_ONLY
+#include <extras/stb_vorbis.c>
 #define MINIAUDIO_IMPLEMENTATION
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <map>
 #include <miniaudio.h>
+#undef STB_VORBIS_HEADER_ONLY
+#include <extras/stb_vorbis.c>
+// After miniaudio.h, whose types it uses.
+#include "engine/audio/PackVfs.h"
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -64,6 +73,7 @@ ma_node_vtable shiftVtable{processShift, nullptr, 1, 1, 0};
 } // namespace
 
 struct MiniAudio::Impl {
+    PackVfs vfs; // outlives `engine`, which reads every file through it
     struct Sound {
         enum class Cue { None, Group, Joining };
         ma_sound handle{};
@@ -283,7 +293,8 @@ struct MiniAudio::Impl {
         if (!isFile(file)) {
             throw std::runtime_error("Cannot load audio " + file.string());
         }
-        const auto local = localFile(file).string();
+        // By its own name: the mixer reads it through `vfs`, loose or packed.
+        const auto local = file.string();
         auto* target = bus(busName);
         auto sound = std::make_unique<Sound>();
         if (!target ||
@@ -329,7 +340,8 @@ struct MiniAudio::Impl {
     // Applies a pitch: through the shifter when the speed is to be kept and
     // the shifter can do it, as varispeed otherwise.
     void applyPitch(Sound& sound, float pitch, bool preserveSpeed) {
-        const bool shift = preserveSpeed && pitch != 1.0f && PitchShift::supports(pitch) && ensureShifter(sound);
+        const bool shift =
+            preserveSpeed && pitch != 1.0f && PitchShift::supports(pitch) && ensureShifter(sound);
         if (preserveSpeed && pitch != 1.0f && !PitchShift::supports(pitch) && !warnedVarispeed) {
             warnedVarispeed = true;
             log(LogLevel::Warning, "preserve_speed keeps the speed only for pitches 0.5 to 2; " +
@@ -622,6 +634,7 @@ MiniAudio::MiniAudio(bool openDevice) : impl_(std::make_unique<Impl>()) {
     config.channels = Channels;
     config.sampleRate = SampleRate;
     config.defaultVolumeSmoothTimeInPCMFrames = SampleRate / 200; // per-tick volume changes glide over 5 ms
+    config.pResourceManagerVFS = p.vfs.handle(); // packed audio is read in place, never extracted
     if (ma_engine_init(&config, &p.engine) != MA_SUCCESS) {
         log(LogLevel::Warning, "Audio mixer unavailable; continuing silently");
         return;
@@ -798,7 +811,7 @@ int MiniAudio::playSound(const std::filesystem::path& file, const SoundOptions& 
     // ones (voice-over, ambiences) stream, so a minute of speech does not
     // hold 23 MB of decoded audio.
     const bool stream = length(file) > p.streamThreshold;
-    const auto path = localFile(file).string();
+    const auto path = file.string();
     if (!stream) {
         const auto found = p.cached.find(path);
         if (found != p.cached.end()) {
@@ -878,16 +891,76 @@ double MiniAudio::position(int voice) const {
     return seconds;
 }
 
+namespace {
+// Seconds of an Ogg Vorbis file that is an archive entry, or nullopt.
+std::optional<double> packedVorbisSeconds(const std::filesystem::path& file) {
+    const auto measure = [](stb_vorbis* vorbis) -> std::optional<double> {
+        if (!vorbis) {
+            return std::nullopt;
+        }
+        const auto samples = stb_vorbis_stream_length_in_samples(vorbis);
+        const auto rate = stb_vorbis_get_info(vorbis).sample_rate;
+        stb_vorbis_close(vorbis);
+        return rate == 0 ? std::nullopt : std::optional(static_cast<double>(samples) / rate);
+    };
+    int error = 0;
+    if (const auto span = storedSpan(file); span && span->size <= 0xffffffffu) {
+#ifdef _WIN32
+        FILE* archive = _wfopen(span->archive.c_str(), L"rb");
+        const bool placed =
+            archive && _fseeki64(archive, static_cast<long long>(span->offset), SEEK_SET) == 0;
+#else
+        FILE* archive = std::fopen(span->archive.c_str(), "rb");
+        const bool placed = archive && fseeko(archive, static_cast<off_t>(span->offset), SEEK_SET) == 0;
+#endif
+        if (!placed) {
+            if (archive) {
+                std::fclose(archive);
+            }
+            return std::nullopt;
+        }
+        // The section is closed with the decoder.
+        auto* vorbis =
+            stb_vorbis_open_file_section(archive, 1, &error, nullptr, static_cast<unsigned int>(span->size));
+        if (!vorbis) {
+            std::fclose(archive);
+        }
+        return measure(vorbis);
+    }
+    try {
+        const auto bytes = readFile(file); // a compressed entry
+        return measure(stb_vorbis_open_memory(reinterpret_cast<const unsigned char*>(bytes.data()),
+                                              static_cast<int>(bytes.size()), &error, nullptr));
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+} // namespace
+
 double MiniAudio::length(const std::filesystem::path& file) {
     auto& p = *impl_;
     const auto path = file.string();
     if (const auto found = p.lengths.find(path); found != p.lengths.end()) {
         return found->second;
     }
+    if (!isFile(file)) {
+        throw std::runtime_error("Cannot load audio " + path);
+    }
+    // A loose file is measured by name. A packed one is read through the
+    // archive; Vorbis read that way decodes as a forward-only stream, which
+    // has no length, so stb_vorbis is asked directly (it seeks to the last
+    // page of the entry: no decoding).
+    const bool inArchive = isPacked(file);
+    if (inArchive && file.extension() == ".ogg") {
+        if (const auto seconds = packedVorbisSeconds(file)) {
+            return p.lengths[path] = *seconds;
+        }
+        throw std::runtime_error("Cannot measure audio " + path);
+    }
     ma_decoder decoder;
     const auto config = ma_decoder_config_init(ma_format_f32, 0, 0);
-    if (!isFile(file) ||
-        ma_decoder_init_file(localFile(file).string().c_str(), &config, &decoder) != MA_SUCCESS) {
+    if ((inArchive ? ma_decoder_init_vfs(p.vfs.handle(), path.c_str(), &config, &decoder)
+                   : ma_decoder_init_file(path.c_str(), &config, &decoder)) != MA_SUCCESS) {
         throw std::runtime_error("Cannot load audio " + path);
     }
     ma_uint64 frames = 0;
@@ -1113,7 +1186,7 @@ std::size_t MiniAudio::soundCacheBytes() const {
 }
 
 bool MiniAudio::soundCached(const std::filesystem::path& file) const {
-    return isFile(file) && impl_->cached.contains(localFile(file).string());
+    return isFile(file) && impl_->cached.contains(file.string());
 }
 
 void MiniAudio::setSoundStreamThreshold(double seconds) {

@@ -304,6 +304,18 @@ std::vector<std::string> listFilesBelow(const std::filesystem::path& folder) {
     return files;
 }
 
+std::optional<StoredSpan> storedSpan(const std::filesystem::path& path) {
+    const auto source = packed(path);
+    if (!source.entry || source.entry->method != 0) {
+        return std::nullopt;
+    }
+    return StoredSpan{source.mount->archive.file(), source.entry->offset, source.entry->size};
+}
+
+bool isPacked(const std::filesystem::path& path) {
+    return packed(path).entry != nullptr;
+}
+
 std::filesystem::path localFile(const std::filesystem::path& path) {
     if (const auto source = packed(path); source.entry) {
         return extracted.file(*source.mount, *source.entry);

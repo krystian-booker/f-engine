@@ -1,4 +1,5 @@
 #include "engine/editor/MapEdits.h"
+#include "engine/nav/Query.h"
 #include "engine/runtime/Engine.h"
 #include "engine/script/LuaHost.h"
 #include "engine/world/Animation.h"
@@ -7,6 +8,8 @@
 #include <doctest/doctest.h>
 #include <fstream>
 #include <limits>
+#include <unordered_set>
+#include <utility>
 
 using namespace fe;
 
@@ -27,7 +30,7 @@ struct Scratch {
     AssetCache assets;
     World world;
     Scratch(const std::string& name, const Json& grid, const std::map<std::string, std::string>& files = {})
-        : root(prepare(name, files)), assets(root, FENGINE_LUALIB),
+        : root(prepare(name, files)), assets(root, FENGINE_BUILTIN),
           world("scratch", MapData::fromJson({{"format", 2}, {"id", "scratch"}, {"grid", grid}}), assets, 3) {
     }
     static std::filesystem::path prepare(const std::string& name,
@@ -48,7 +51,7 @@ struct Scratch {
     }
 };
 struct Fixture {
-    AssetCache assets{FENGINE_TEST_GAME, FENGINE_LUALIB};
+    AssetCache assets{FENGINE_TEST_GAME, FENGINE_BUILTIN};
     World world{"test", MapData::load(std::filesystem::path(FENGINE_TEST_GAME) / "maps/arena/map.json"),
                 assets, 7};
 
@@ -307,7 +310,7 @@ TEST_CASE("can_occupy sees colliders added, moved and removed during the script 
 TEST_CASE("can_occupy sees a collider grown during the script update") {
     EngineOptions options;
     options.gameRoot = FENGINE_TEST_GAME;
-    options.libraryRoot = FENGINE_LUALIB;
+    options.builtinRoot = FENGINE_BUILTIN;
     options.userData = std::filesystem::temp_directory_path() / "fengine-world-collider-grow";
     Engine engine(std::move(options));
     REQUIRE(engine.start());
@@ -476,7 +479,7 @@ TEST_CASE("a wide mover descends a rise-1 ramp through its directed link on a pl
 }
 
 TEST_CASE("static boxes come from the map's authored and baked lists") {
-    AssetCache assets{FENGINE_TEST_GAME, FENGINE_LUALIB};
+    AssetCache assets{FENGINE_TEST_GAME, FENGINE_BUILTIN};
     auto map = MapData::load(std::filesystem::path(FENGINE_TEST_GAME) / "maps/arena/map.json");
     map.colliders.push_back({{2, 0, 6}, {3, 1, 7}});
     map.bake.colliders.push_back({{4, 0, 6}, {5, 1, 7}});
@@ -496,7 +499,7 @@ TEST_CASE("walkers climb onto the arena bridge deck and back down along the plan
     // The arena's directed link at (6, 7) joins the ground to a deck one unit
     // up on layer 1 (cells 6..8 of row 7).
     const auto game = std::filesystem::path(FENGINE_TEST_GAME);
-    AssetCache assets(game, FENGINE_LUALIB);
+    AssetCache assets(game, FENGINE_BUILTIN);
     World world("arena", MapData::load(game / "maps/arena/map.json"), assets, 1);
     const auto e = world.spawn("", {2.5f, 0, 7.5f});
     world.registry().emplace<Mover>(e);
@@ -820,7 +823,7 @@ TEST_CASE("maps reject tilt-shift focus outside 0..1 and negative weather intens
 TEST_CASE("the engine skips paused worlds and scales their time") {
     EngineOptions options;
     options.gameRoot = FENGINE_TEST_GAME;
-    options.libraryRoot = FENGINE_LUALIB;
+    options.builtinRoot = FENGINE_BUILTIN;
     options.userData = std::filesystem::temp_directory_path() / "fengine-world-pause";
     options.seed = 5;
     Engine engine(std::move(options));
@@ -847,7 +850,6 @@ TEST_CASE("the engine skips paused worlds and scales their time") {
               .console("fe.world.get('main'):path({x=2,z=2}, {x=3,z=2}, {max_step=-1})")
               .find("non-negative") != std::string::npos);
 }
-
 
 namespace {
 std::vector<WorldEvent::Kind> kinds(const std::vector<WorldEvent>& events) {
@@ -1124,7 +1126,7 @@ TEST_CASE("editor edits to map emitters and colliders apply without a reload") {
 TEST_CASE("Lua opts into diagonal gap jumps and raycasts through triggers") {
     EngineOptions options;
     options.gameRoot = FENGINE_TEST_GAME;
-    options.libraryRoot = FENGINE_LUALIB;
+    options.builtinRoot = FENGINE_BUILTIN;
     options.userData = std::filesystem::temp_directory_path() / "fengine-world-diagonal-lua";
     options.seed = 5;
     Engine engine(std::move(options));
@@ -1154,7 +1156,7 @@ TEST_CASE("Lua opts into diagonal gap jumps and raycasts through triggers") {
 TEST_CASE("Lua sees jump and climb marks, cost callbacks, routes and raycasts") {
     EngineOptions options;
     options.gameRoot = FENGINE_TEST_GAME;
-    options.libraryRoot = FENGINE_LUALIB;
+    options.builtinRoot = FENGINE_BUILTIN;
     options.userData = std::filesystem::temp_directory_path() / "fengine-world-nav-lua";
     options.seed = 5;
     Engine engine(std::move(options));
@@ -1232,7 +1234,7 @@ TEST_CASE("Lua path rules can leave ladders out") {
           "kind": "ladder"}]}})"}});
     EngineOptions options;
     options.gameRoot = game;
-    options.libraryRoot = FENGINE_LUALIB;
+    options.builtinRoot = FENGINE_BUILTIN;
     options.userData = game / "user";
     Engine engine(std::move(options));
     REQUIRE(engine.start());
@@ -1247,7 +1249,7 @@ TEST_CASE("Lua path rules can leave ladders out") {
 TEST_CASE("sprites and meshes name game shaders by validated names") {
     EngineOptions options;
     options.gameRoot = FENGINE_TEST_GAME;
-    options.libraryRoot = FENGINE_LUALIB;
+    options.builtinRoot = FENGINE_BUILTIN;
     options.userData = std::filesystem::temp_directory_path() / "fengine-world-shader-names";
     Engine engine(std::move(options));
     REQUIRE(engine.start());
@@ -1264,7 +1266,6 @@ TEST_CASE("sprites and meshes name game shaders by validated names") {
     const auto entity = world.registry().view<MeshInstance>().front();
     CHECK(world.registry().get<MeshInstance>(entity).shader == "glint");
 }
-
 
 namespace {
 std::vector<GridPos> cellsEntered(const std::vector<WorldEvent>& events, entt::entity who) {
@@ -1398,6 +1399,62 @@ TEST_CASE("a climb interrupted part-way steps off at the nearer end, on that end
     CHECK(count(events, WorldEvent::Kind::ClimbEnd) == 1);
 }
 
+TEST_CASE("a platform touches the grid only when what it covers changes") {
+    Json grid = flatGrid(8, 3);
+    grid["layers"][0]["walk"] = {"10000001", "10000001", "10000001"};
+    Scratch s("still", grid);
+    auto& registry = s.world.registry();
+    const auto raft = s.world.spawn("", centre(1, 1, 0.2f));
+    registry.emplace<Platform>(raft);
+    registry.emplace<Mover>(raft, Mover{.speed = 1, .collide = false});
+    s.step();
+    REQUIRE(std::as_const(s.world.grid()).at(1, 1).walkable);
+    // At rest: tick after tick, nothing is written, so nothing cached against
+    // the grid (cells under boxes, connected components) is rebuilt.
+    const auto revision = s.world.grid().revision();
+    const auto topology = s.world.grid().topologyRevision();
+    s.step(120);
+    CHECK(s.world.grid().revision() == revision);
+    CHECK(s.world.grid().topologyRevision() == topology);
+    // Rising in place (a lift) changes its cells' height, not what connects to what.
+    registry.get<Transform>(raft).position.y = 0.6f;
+    s.step();
+    CHECK(s.world.grid().revision() != revision);
+    CHECK(s.world.grid().topologyRevision() == topology);
+    CHECK(std::as_const(s.world.grid()).at(1, 1).height == doctest::Approx(0.6f));
+    // Crossing into new cells does: water becomes deck, deck becomes water.
+    s.world.moveTo(raft, centre(4, 1, 0.6f), false);
+    s.step(300);
+    CHECK(s.world.grid().topologyRevision() != topology);
+    CHECK_FALSE(std::as_const(s.world.grid()).at(1, 1).walkable);
+    CHECK(std::as_const(s.world.grid()).at(4, 1).walkable);
+    // And at rest again, it is quiet again.
+    const auto settled = s.world.grid().revision();
+    s.step(60);
+    CHECK(s.world.grid().revision() == settled);
+    // A cell a script rewrote under the platform is the script's: it is not put back.
+    auto cell = std::as_const(s.world.grid()).at(4, 1); // a copy
+    cell.height = 3;
+    s.world.grid().setCell({4, 1, 0}, cell);
+    registry.remove<Platform>(raft);
+    s.step();
+    CHECK(std::as_const(s.world.grid()).at(4, 1).height == doctest::Approx(3.0f));
+}
+
+TEST_CASE("route planning reads the world's blocked cells in place, exempting the start") {
+    Grid grid(5, 1);
+    std::unordered_set<std::int64_t> boxed{cellKey({0, 0, 0}), cellKey({2, 0, 0})};
+    StepRules rules;
+    rules.sharedBlocked = &boxed;
+    CHECK(findRoute(grid, {0, 0, 0}, {4, 0, 0}, rules).steps.empty()); // cell 2 bars the corridor
+    boxed.erase(cellKey({2, 0, 0}));
+    rules.exempt = cellKey({0, 0, 0}); // a body may leave the boxed cell it stands in
+    CHECK(findRoute(grid, {0, 0, 0}, {4, 0, 0}, rules).steps.size() == 4);
+    CHECK(findRoute(grid, {4, 0, 0}, {0, 0, 0}, rules).steps.size() == 4); // and return to it: it is exempt
+    rules.exempt = -1;
+    CHECK(findRoute(grid, {4, 0, 0}, {0, 0, 0}, rules).steps.empty());
+}
+
 TEST_CASE("platform carry stops at static boxes and only moves this tick's riders") {
     Json grid = flatGrid(8, 3);
     grid["layers"][0]["walk"] = {"11111111", "10000001", "11111111"};
@@ -1414,7 +1471,8 @@ TEST_CASE("platform carry stops at static boxes and only moves this tick's rider
     s.world.moveTo(raft, centre(6, 1, 0.2f), false);
     s.step(400);
     CHECK(registry.get<Transform>(raft).position.x == doctest::Approx(6.5f).epsilon(0.01));
-    CHECK(registry.get<Transform>(rider).position.x == doctest::Approx(3.8f).epsilon(0.01)); // held at the box
+    CHECK(registry.get<Transform>(rider).position.x ==
+          doctest::Approx(3.8f).epsilon(0.01)); // held at the box
     // A rider that steps ashore in the tick the raft leaves is not dragged along.
     Scratch q("raft-ashore", grid);
     auto& r2 = q.world.registry();
@@ -1802,7 +1860,8 @@ TEST_CASE("launches fly ballistic arcs under gravity, fall, and land with events
     s.step(12);
     REQUIRE(t.position.y > 0.3f);
     s.world.launch(e, {0, 2, 0});
-    CHECK(kinds(s.world.takeEvents()) == std::vector{WorldEvent::Kind::JumpStart, WorldEvent::Kind::JumpStart});
+    CHECK(kinds(s.world.takeEvents()) ==
+          std::vector{WorldEvent::Kind::JumpStart, WorldEvent::Kind::JumpStart});
     const float x = t.position.x;
     s.step(60);
     CHECK(t.position.x == doctest::Approx(x));
@@ -1820,8 +1879,8 @@ TEST_CASE("launches fly ballistic arcs under gravity, fall, and land with events
 
 TEST_CASE("launched bodies stop at boxes, cliff faces and the grid's edge and drop straight down") {
     Json grid = flatGrid(12, 4);
-    grid["layers"][0]["height"] = {"0 0 0 0 0 0 0 0 2 2 2 2", "0 0 0 0 0 0 0 0 2 2 2 2", "0 0 0 0 0 0 0 0 2 2 2 2",
-                                   "0 0 0 0 0 0 0 0 2 2 2 2"};
+    grid["layers"][0]["height"] = {"0 0 0 0 0 0 0 0 2 2 2 2", "0 0 0 0 0 0 0 0 2 2 2 2",
+                                   "0 0 0 0 0 0 0 0 2 2 2 2", "0 0 0 0 0 0 0 0 2 2 2 2"};
     Scratch s("launch-walls", grid);
     s.world.map().colliders.push_back({{4, 0, 0}, {5, 3, 1}});
     s.world.rebuildStatic();

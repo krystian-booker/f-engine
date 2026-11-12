@@ -1,0 +1,54 @@
+[
+  {
+    "id": "slimes",
+    "enemies": [
+      "slime",
+      "slime"
+    ]
+  },
+  {
+    "id": "pack",
+    "enemies": [
+      "wolf",
+      "wolf"
+    ]
+  },
+  {
+    "id": "mixed",
+    "enemies": [
+      "slime",
+      "wolf",
+      "slime"
+    ]
+  },
+  {
+    "id": "wisps",
+    "enemies": [
+      "wisp",
+      "wisp"
+    ]
+  },
+  {
+    "id": "embers",
+    "enemies": [
+      "ember",
+      "wisp",
+      "ember"
+    ]
+  },
+  {
+    "id": "golem",
+    "enemies": [
+      "golem",
+      "wisp"
+    ]
+  },
+  {
+    "id": "guardian",
+    "enemies": [
+      "drake"
+    ],
+    "boss": true,
+    "music": "boss"
+  }
+]

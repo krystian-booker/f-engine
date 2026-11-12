@@ -185,8 +185,7 @@ void log(LogLevel level, std::string_view message) {
         inSink = true;
         try {
             (*sink)(level, message);
-        } catch (...) {
-        }
+        } catch (...) {}
         inSink = false;
     }
 }

@@ -11,8 +11,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <string_view>
 #include <imgui.h>
+#include <string_view>
 #if FENGINE_DEV
 #include <IconsFontAwesome6.h>
 #include <filesystem>
@@ -90,7 +90,8 @@ struct Renderer::Callback final : bgfx::CallbackI {
     // An HDR back buffer's pixel back in the sRGB the frame was composed in,
     // so a screenshot under --hdr still looks like the SDR one (what exceeds
     // the paper white clips).
-    [[nodiscard]] std::array<std::uint8_t, 3> decode(const std::uint8_t* pixel, bgfx::TextureFormat::Enum format) const {
+    [[nodiscard]] std::array<std::uint8_t, 3> decode(const std::uint8_t* pixel,
+                                                     bgfx::TextureFormat::Enum format) const {
         glm::vec3 linear;
         if (format == bgfx::TextureFormat::RGBA16F) {
             std::uint16_t halves[3];
@@ -105,7 +106,8 @@ struct Renderer::Callback final : bgfx::CallbackI {
             };
             linear = rec2020ToRec709(glm::vec3(channel(0), channel(10), channel(20)) / output.paperWhite);
         }
-        return {toByte(linearToSrgb(linear.x)), toByte(linearToSrgb(linear.y)), toByte(linearToSrgb(linear.z))};
+        return {toByte(linearToSrgb(linear.x)), toByte(linearToSrgb(linear.y)),
+                toByte(linearToSrgb(linear.z))};
     }
 
     void screenShot(const char* path, std::uint32_t width, std::uint32_t height, std::uint32_t pitch,
@@ -218,10 +220,11 @@ Renderer::Renderer(Window& window, const std::filesystem::path& root, const Outp
                 std::string("HDR output unavailable on ") + name() + ": the back buffer stays 8-bit");
         } else {
             const bool headroom = (bgfx::getCaps()->supported & BGFX_CAPS_HDR10) != 0;
-            log(LogLevel::Info, std::string("HDR output: ") +
-                                    (output_.encoding == OutputEncoding::ScRgb ? "RGBA16F scRGB" : "RGB10A2 HDR10") +
-                                    ", paper white " + std::to_string(static_cast<int>(output_.paperWhite)) +
-                                    " nits" + (headroom ? "" : " (the display reports no HDR headroom)"));
+            log(LogLevel::Info,
+                std::string("HDR output: ") +
+                    (output_.encoding == OutputEncoding::ScRgb ? "RGBA16F scRGB" : "RGB10A2 HDR10") +
+                    ", paper white " + std::to_string(static_cast<int>(output_.paperWhite)) + " nits" +
+                    (headroom ? "" : " (the display reports no HDR headroom)"));
         }
     }
     callback_->output = output_;

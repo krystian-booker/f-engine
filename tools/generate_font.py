@@ -2,13 +2,13 @@
 """Generate the engine's built-in 5x7 pixel font (BMFont text + PNG).
 
 The glyphs are original and hand-drawn here, so the engine can show text
-before a game supplies its own font. Output: lualib/fe/assets/fonts/pixel.*
+before a game supplies its own font. Output: builtin/assets/fonts/pixel.*
 """
 import struct
 import zlib
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parents[1] / "lualib" / "fe" / "assets" / "fonts"
+OUT = Path(__file__).resolve().parents[1] / "builtin" / "assets" / "fonts"
 
 # Each glyph: rows top to bottom, 5 columns ('#' = ink). Rows 0-6 sit above the
 # baseline; rows 7-8 are descenders. Missing rows are blank.

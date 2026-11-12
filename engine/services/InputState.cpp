@@ -151,15 +151,32 @@ void InputState::feed(const std::string& input, float value) {
             queue.erase(queue.end() - 3, queue.end() - 1);
         }
     }
+    // The device in use follows what the player does on purpose: a key or
+    // mouse button going down, or a gamepad control crossing well past rest.
+    // Releases never switch (letting go of a key after picking up the pad),
+    // and a control already past the threshold doesn't switch again until it
+    // has come back to rest, so a drifting or held stick cannot fight the
+    // keyboard for the prompts.
     const int pad = padNumber(input);
-    if (input.starts_with("key:")) {
-        setDevice("keyboard");
-    } else if (pad > 0 && std::abs(value) > 0.3f) {
-        usePad(pad);
-    } else if (pad == 0 && std::abs(value) > 0.3f) {
-        setDevice("gamepad");
-    } else if (input.starts_with("mouse:")) {
-        setDevice("mouse");
+    if (pad >= 0) {
+        const float magnitude = std::abs(value);
+        if (magnitude >= DeviceSwitchOn) {
+            if (engagedPadInputs_.insert(input).second) {
+                if (pad > 0) {
+                    usePad(pad);
+                } else {
+                    setDevice("gamepad");
+                }
+            }
+        } else if (magnitude <= DeviceSwitchOff) {
+            engagedPadInputs_.erase(input);
+        }
+    } else if (value != 0) {
+        if (input.starts_with("key:")) {
+            setDevice("keyboard");
+        } else if (input.starts_with("mouse:")) {
+            setDevice("mouse");
+        }
     }
 }
 
@@ -167,7 +184,14 @@ void InputState::feedMouse(glm::vec2 position) {
     if (recorder_) {
         recorder_->mouse(position);
     }
-    if (glm::length(position - mouse_) > 0.5f) {
+    if (lastDevice_ == "gamepad") {
+        // A nudged mouse (a bumped desk, a Steam Deck trackpad at rest) is not
+        // a change of device: the pointer has to travel from where it was when
+        // the gamepad took over.
+        if (glm::length(position - mouseAnchor_) > MouseSwitchDistance) {
+            setDevice("mouse");
+        }
+    } else if (glm::length(position - mouse_) > 0.5f) {
         setDevice("mouse");
     }
     mouse_ = position;
@@ -181,6 +205,12 @@ void InputState::feedWheel(float delta) {
 }
 
 void InputState::setDevice(const std::string& device, const std::string& name) {
+    if (device == "gamepad" && lastDevice_ != "gamepad") {
+        mouseAnchor_ = mouse_;
+    }
+    if (device != "gamepad") {
+        activePad_ = 0;
+    }
     lastDevice_ = device;
     if (!name.empty()) {
         deviceName_ = name;
@@ -188,7 +218,11 @@ void InputState::setDevice(const std::string& device, const std::string& name) {
 }
 
 void InputState::usePad(int number) {
+    if (lastDevice_ != "gamepad") {
+        mouseAnchor_ = mouse_;
+    }
     lastDevice_ = "gamepad";
+    activePad_ = number;
     if (const auto found = pads_.find(number); found != pads_.end()) {
         deviceName_ = found->second.name;
         deviceType_ = found->second.type;
@@ -196,8 +230,11 @@ void InputState::usePad(int number) {
 }
 
 void InputState::connectPad(Pad pad) {
-    pads_[pad.number] = pad;
+    const int number = pad.number;
+    pads_[number] = pad;
     queuePadEvent({true, std::move(pad)});
+    // Plugging a controller in is picking it up: prompts follow it at once.
+    usePad(number);
 }
 
 void InputState::disconnectPad(int number) {
@@ -207,7 +244,18 @@ void InputState::disconnectPad(int number) {
     }
     PadEvent event{false, std::move(found->second)};
     pads_.erase(found);
+    const auto prefix = "pad" + std::to_string(number) + ":";
+    std::erase_if(engagedPadInputs_, [&](const std::string& input) { return input.starts_with(prefix); });
     queuePadEvent(std::move(event));
+    // The pad in use is gone: fall back to another one, else to the keyboard,
+    // so prompts never show the buttons of a controller that isn't there.
+    if (lastDevice_ == "gamepad" && (activePad_ == number || activePad_ == 0)) {
+        if (pads_.empty()) {
+            setDevice("keyboard");
+        } else {
+            usePad(pads_.begin()->first);
+        }
+    }
 }
 
 void InputState::queuePadEvent(PadEvent event) {
@@ -233,6 +281,16 @@ void InputState::setRecorder(InputRecorder* recorder) {
 
 std::string InputState::deviceType() const {
     return lastDevice_ == "gamepad" ? deviceType_ : "keyboard";
+}
+
+std::string InputState::label(const std::string& input) const {
+    if (labeler_) {
+        if (auto text = labeler_(input); !text.empty()) {
+            return text;
+        }
+    }
+    const auto colon = input.find(':');
+    return colon == std::string::npos ? input : input.substr(colon + 1);
 }
 
 void InputState::feedText(std::string_view utf8) {
@@ -334,6 +392,11 @@ void InputState::applyPending() {
         }
         it = queue.empty() ? pending_.erase(it) : std::next(it);
     }
+    // What prompts should show, compared tick to tick: a game redraws cached
+    // glyphs when this turns true instead of comparing strings every frame.
+    auto shown = deviceType();
+    deviceChanged_ = shown != shownDevice_;
+    shownDevice_ = std::move(shown);
     text_ = std::exchange(pendingText_, {});
     padEvents_ = std::exchange(pendingPads_, {});
     recordedPads_ = 0;

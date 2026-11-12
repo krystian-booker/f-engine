@@ -166,6 +166,13 @@ SaveStore::SaveStore(std::filesystem::path directory, std::unique_ptr<SaveBacken
       backend_(backend ? std::move(backend) : std::make_unique<FileSaveBackend>(directory_)) {
 }
 
+void SaveStore::flush() {
+    backend_->flush();
+    if (const auto error = backend_->takeError()) {
+        throw std::runtime_error(*error);
+    }
+}
+
 std::string SaveStore::key(const std::string& slot) {
     validateSlot(slot);
     return std::string(SavesFolder) + "/" + slot + std::string(SlotSuffix);
@@ -207,8 +214,7 @@ void SaveStore::write(const std::string& slot, const Json& data, const Json& met
     backend_->write(key(slot), document, true);
     // The sidecar follows the slot; list() trusts it only while the sizes agree.
     try {
-        backend_->write(metaKey(slot), Json{{"meta", meta}, {"size", document.size()}}.dump(2) + "\n",
-                        false);
+        backend_->write(metaKey(slot), Json{{"meta", meta}, {"size", document.size()}}.dump(2) + "\n", false);
     } catch (const std::exception& error) {
         log(LogLevel::Warning, "Save '" + slot + "' was written but its summary was not: " + error.what());
     }

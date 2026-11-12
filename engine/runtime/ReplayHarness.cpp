@@ -28,7 +28,8 @@ void applyPads(Engine& engine, const Json& pads) {
     for (const auto& entry : pads) {
         const int number = entry.at("pad").get<int>();
         if (number < 1 || number > 64) {
-            throw std::runtime_error("Replay pads: gamepad numbers are 1 to 64, got " + std::to_string(number));
+            throw std::runtime_error("Replay pads: gamepad numbers are 1 to 64, got " +
+                                     std::to_string(number));
         }
         if (!entry.value("connected", true)) {
             engine.input().disconnectPad(number);
@@ -357,7 +358,7 @@ Json ReplayRecorder::toJson(std::uint64_t lastTick) const {
     return {{"seed", seed_}, {"commands", std::move(commands)}};
 }
 
-int runHeadlessReplay(const std::filesystem::path& game, const std::filesystem::path& lualib,
+int runHeadlessReplay(const std::filesystem::path& game, const std::filesystem::path& builtin,
                       const std::filesystem::path& file, std::filesystem::path userData,
                       std::optional<std::uint64_t> seed) {
     ReplayHarness replay(file);
@@ -371,10 +372,11 @@ int runHeadlessReplay(const std::filesystem::path& game, const std::filesystem::
     {
         EngineOptions options;
         options.gameRoot = game;
-        options.libraryRoot = lualib;
+        options.builtinRoot = builtin;
         options.userData = userData;
         options.development = true;
         options.testHooks = true;
+        options.blockingLoads = true;
         options.seed = seed ? seed : replay.seed() ? replay.seed() : std::optional<std::uint64_t>(1);
         Engine engine(std::move(options));
         engine.setViewport(engine.config().windowWidth, engine.config().windowHeight);

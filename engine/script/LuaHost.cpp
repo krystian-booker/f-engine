@@ -35,7 +35,8 @@ namespace {
 const char hostKey = 0;
 
 void raiseWatchdog(lua_State* state, const LuaHost& host) {
-    luaL_error(state, "script watchdog: a frame ran longer than %f seconds (infinite loop?)", host.watchdog());
+    luaL_error(state, "script watchdog: a frame ran longer than %f seconds (infinite loop?)",
+               host.watchdog());
 }
 
 // Pattern matching, plain string.find and table.move run in C without
@@ -190,12 +191,11 @@ bool isSolMetatable(lua_State* state, int key, int value) {
            std::strncmp(lua_tostring(state, key), "sol.", 4) == 0;
 }
 
-
 } // namespace
 
-LuaHost::LuaHost(std::filesystem::path gameRoot, std::filesystem::path libraryRoot, bool development)
+LuaHost::LuaHost(std::filesystem::path gameRoot, std::filesystem::path builtinRoot, bool development)
     : gameRoot_(std::filesystem::weakly_canonical(gameRoot)),
-      libraryRoot_(std::filesystem::weakly_canonical(libraryRoot)), start_(std::chrono::steady_clock::now()),
+      builtinRoot_(std::filesystem::weakly_canonical(builtinRoot)), start_(std::chrono::steady_clock::now()),
       frameStart_(start_) {
     lua_ = std::make_unique<sol::state>();
     lua_pushlightuserdata(lua_->lua_state(), this);
@@ -233,7 +233,7 @@ LuaHost::LuaHost(std::filesystem::path gameRoot, std::filesystem::path libraryRo
     handler_ = sol::make_object(*lua_, tracebackHandler).as<sol::function>();
     fe_ = lua_->create_named_table("fe");
     // The module cache is a registry reference only: scripts cannot reach it
-    // (a script that could would split a kit's state in two).
+    // (a script that could would split a module's state in two).
     loaded_ = lua_->create_table();
     lua_->set_function("require", [this](const std::string& name) { return require(name); });
     lua_pushliteral(lua_->lua_state(), "");
@@ -390,22 +390,17 @@ std::optional<std::filesystem::path> LuaHost::resolve(const std::string& name) c
     }
     std::string relative = name;
     std::replace(relative.begin(), relative.end(), '.', '/');
-    for (const auto& root : {gameRoot_, libraryRoot_}) {
-        for (const auto& candidate : {root / (relative + ".lua"), root / relative / "init.lua"}) {
-            if (isFile(candidate)) {
-                return candidate;
-            }
+    // Only the game folder: the engine ships no Lua modules of its own.
+    for (const auto& candidate : {gameRoot_ / (relative + ".lua"), gameRoot_ / relative / "init.lua"}) {
+        if (isFile(candidate)) {
+            return candidate;
         }
     }
     return std::nullopt;
 }
 
 std::string LuaHost::chunkName(const std::filesystem::path& file) const {
-    auto relative = relativeTo(gameRoot_, file);
-    if (relative.empty()) {
-        relative = "lualib/" + relativeTo(libraryRoot_, file);
-    }
-    return "@" + relative;
+    return "@" + relativeTo(gameRoot_, file);
 }
 
 sol::object LuaHost::load(const std::string& name, const std::filesystem::path& file) {
@@ -444,7 +439,7 @@ sol::object LuaHost::require(const std::string& name) {
     }
     const auto file = resolve(name);
     if (!file) {
-        throw std::runtime_error("Module '" + name + "' not found in the game folder or lualib");
+        throw std::runtime_error("Module '" + name + "' not found in the game folder");
     }
     // The entry lives only while the module loads, whatever the outcome.
     const auto loading = loading_.emplace(name, 1).first;
@@ -459,9 +454,23 @@ sol::object LuaHost::require(const std::string& name) {
     return value;
 }
 
-
 void LuaHost::report(const std::string& message) {
-    log(LogLevel::Error, message);
+    // An update that fails every tick would write (and flush) the same
+    // traceback sixty times a second: the log gets it once a second, with a
+    // count of what it left out. The error list below still records each.
+    const auto time = std::chrono::steady_clock::now();
+    if (message == lastLogged_ && time - lastLoggedAt_ < std::chrono::seconds(1)) {
+        ++suppressedLogs_;
+    } else {
+        if (suppressedLogs_ > 0) {
+            log(LogLevel::Error,
+                "(the previous script error repeated " + std::to_string(suppressedLogs_) + " more time(s))");
+        }
+        log(LogLevel::Error, message);
+        lastLogged_ = message;
+        lastLoggedAt_ = time;
+        suppressedLogs_ = 0;
+    }
     errors_.push_back({message, now()});
     while (errors_.size() > 50) {
         errors_.pop_front();

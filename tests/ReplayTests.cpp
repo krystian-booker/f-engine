@@ -23,7 +23,7 @@ std::filesystem::path writeReplay(const std::string& name, const Json& replay) {
 std::unique_ptr<Engine> fixtureEngine() {
     EngineOptions options;
     options.gameRoot = FENGINE_TEST_GAME;
-    options.libraryRoot = FENGINE_LUALIB;
+    options.builtinRoot = FENGINE_BUILTIN;
     options.userData = scratch("user");
     options.seed = 1;
     auto engine = std::make_unique<Engine>(std::move(options));
@@ -150,20 +150,20 @@ TEST_CASE("headless replays run Lua, waits and asserts without a window") {
                                               {{"tick", 2}, {"lua", "replay_counter = replay_counter + 1"}},
                                               {{"tick", 3}, {"wait_for", "replay_counter == 1"}},
                                               {{"tick", 4}, {"assert", "replay_counter == 1"}}}));
-    CHECK(runHeadlessReplay(FENGINE_TEST_GAME, FENGINE_LUALIB, pass, {}, std::nullopt) == 0);
+    CHECK(runHeadlessReplay(FENGINE_TEST_GAME, FENGINE_BUILTIN, pass, {}, std::nullopt) == 0);
     const auto fail = writeReplay("fail.json", Json::array({{{"tick", 1}, {"assert", "1 == 2"}}}));
-    CHECK(runHeadlessReplay(FENGINE_TEST_GAME, FENGINE_LUALIB, fail, {}, std::nullopt) == 1);
+    CHECK(runHeadlessReplay(FENGINE_TEST_GAME, FENGINE_BUILTIN, fail, {}, std::nullopt) == 1);
 }
 
 TEST_CASE("replay captures must be rendered frames and match the backend's references") {
-    const auto references =
-        std::filesystem::path(FENGINE_LUALIB) / ".." / "samples" / "vale" / "replays" / "reference" / "metal";
-    const auto live = Image::load(references / "postfx-live.png");
-    const auto custom = Image::load(references / "postfx-custom.png");
+    const auto references = std::filesystem::path(FENGINE_BUILTIN) / ".." / "samples" / "starfall" /
+                            "replays" / "reference" / "vulkan";
+    const auto live = Image::load(references / "explore-town.png");
+    const auto custom = Image::load(references / "battle-boss.png");
     CHECK(live.width == ReferenceWidth);
     // Rendered scenes, dark or sepia ones included, pass; black, cleared and
     // single-colour frames don't.
-    for (const auto* name : {"postfx-live.png", "postfx-custom.png", "postfx-shatter.png"}) {
+    for (const auto* name : {"explore-town.png", "battle-boss.png", "explore-dialogue.png"}) {
         CAPTURE(name);
         CHECK(blankFrameProblem(Image::load(references / name)).empty());
     }
@@ -228,7 +228,7 @@ TEST_CASE("recorded inputs replay in the order they happened; the object form st
     CHECK(engine->input().raw("key:X") == 1);
     CHECK(engine->input().raw("pad:a") == 1);
     replay.apply(2, *engine);
-    CHECK(engine->input().lastDevice() == "keyboard");
+    CHECK(engine->input().lastDevice() == "gamepad"); // releases never switch the device
 
     // A sorted object feeds in key order (key:X before pad:a).
     auto other = fixtureEngine();

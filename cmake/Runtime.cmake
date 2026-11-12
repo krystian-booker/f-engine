@@ -8,6 +8,7 @@ add_library(fengine_runtime STATIC
   engine/platform/Window.cpp
   engine/input/SdlInput.cpp
   engine/render/GpuAssets.cpp
+  engine/render/GpuWarmup.cpp
   engine/render/Renderer.cpp
   engine/render/ImGuiRenderer.cpp
   engine/render/RenderCommon.cpp
@@ -61,20 +62,20 @@ target_compile_definitions(fengine_runtime PRIVATE
 fengine_warnings(fengine_runtime)
 add_dependencies(fengine_runtime fengine_shaders)
 
-option(FENGINE_MACOS_BUNDLE "macOS: build fengine as an .app bundle with shaders and lualib in Resources" OFF)
+option(FENGINE_MACOS_BUNDLE "macOS: build fengine as an .app bundle with shaders and builtin in Resources" OFF)
 add_executable(fengine apps/runtime/main.cpp)
 target_link_libraries(fengine PRIVATE fengine_runtime)
 target_compile_definitions(fengine PRIVATE
   $<${FENGINE_DEV_ENABLED}:FENGINE_SHADER_DIR="${PROJECT_BINARY_DIR}/shaders">)
 fengine_warnings(fengine)
-# lualib is staged next to the executables (CMakeLists.txt); building only
+# builtin is staged next to the executables (CMakeLists.txt); building only
 # this target must stage it too.
-if(TARGET fengine_lualib)
-  add_dependencies(fengine fengine_lualib)
+if(TARGET fengine_builtin)
+  add_dependencies(fengine fengine_builtin)
 endif()
 # Compiled shaders are built into <build>/shaders. With a multi-configuration
 # generator the executable sits in a configuration folder, so they are staged
-# beside it the same way as lualib (nothing to do when the folders coincide;
+# beside it the same way as builtin (nothing to do when the folders coincide;
 # an app bundle carries its own copy in Resources).
 if(NOT (APPLE AND FENGINE_MACOS_BUNDLE))
   set(shader_stage_mode "-DLINK=ON")
@@ -103,8 +104,8 @@ if(APPLE AND FENGINE_MACOS_BUNDLE)
   add_custom_command(TARGET fengine POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_directory "${PROJECT_BINARY_DIR}/shaders"
       "$<TARGET_BUNDLE_CONTENT_DIR:fengine>/Resources/shaders"
-    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${PROJECT_SOURCE_DIR}/lualib/fe"
-      "$<TARGET_BUNDLE_CONTENT_DIR:fengine>/Resources/lualib/fe"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${PROJECT_SOURCE_DIR}/builtin/assets"
+      "$<TARGET_BUNDLE_CONTENT_DIR:fengine>/Resources/builtin/assets"
     VERBATIM)
   install(TARGETS fengine BUNDLE DESTINATION .)
 else()

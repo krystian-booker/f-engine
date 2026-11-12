@@ -1,5 +1,0 @@
-[{"id": "fading_crystal", "name": "The Fading Crystal", "kind": "main", "chapter": 1,
-  "description": "The Vale Crystal is dimming.",
-  "stages": [{"id": "talk", "text": "Speak with Elder Rowan in the plaza."},
-             {"id": "grotto", "text": "Find the crystal in the northern grotto."},
-             {"id": "report", "text": "Tell the elder the crystal is safe."}]}]

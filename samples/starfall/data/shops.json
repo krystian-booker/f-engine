@@ -1,0 +1,13 @@
+[
+  {
+    "id": "merchant",
+    "name": "Amber Vale Goods",
+    "items": [
+      "potion",
+      "ether",
+      "tonic",
+      "ash",
+      "tent"
+    ]
+  }
+]

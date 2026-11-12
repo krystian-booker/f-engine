@@ -6,10 +6,9 @@
 .DS_Store
 __pycache__/
 *.pyc
-/rom-dump/
-# Local FF6 sample and tooling.
-/samples/ff6_narshe/
-/tools/ff6/
 
 # Editor walkthrough screenshots
 tools/editor_walkthrough/out/
+
+# Screenshots a windowed replay writes into the working directory
+/replay-out/

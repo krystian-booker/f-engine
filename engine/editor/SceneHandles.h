@@ -45,9 +45,13 @@ struct HandleOptions {
     bool zones = true, points = true, lights = true, emitters = true, colliders = true, triggers = true,
          placements = true, labels = true;
     bool bakedBoxes = true; // the boxes the walkability bake derived (not selectable)
-    // Script badges over placements that have pages: a label per trigger
-    // kind ("action", "touch", "auto", "parallel"); empty = no badges.
-    std::map<std::string, std::string> triggerBadges;
+    // Badges over placements and zones for what their props link to: a
+    // script (a `module` field of the game's schemas) or another map (a
+    // `map_id` field). `schemas` is the game's description (PropLinks.h);
+    // without one nothing is known to be a link and no badge is drawn.
+    bool linkBadges = true;
+    const Json* schemas = nullptr;
+    std::string scriptBadge = "script", mapBadge = "to"; // text (an icon) before the link
     int layer = 0; // zones on every layer (-1) are drawn at this layer's height
 };
 
@@ -65,8 +69,9 @@ inline constexpr glm::vec4 Selected{1, 0.6f, 0.1f, 1};
 inline constexpr glm::vec4 Hovered{1, 1, 1, 0.9f};
 } // namespace handleColors
 
-void buildHandles(World& world, const HandleOptions& options, const Selection& selected, const Selection& hovered,
-                  double alpha, HandleBatch& out, const std::vector<Selection>& extras = {});
+void buildHandles(World& world, const HandleOptions& options, const Selection& selected,
+                  const Selection& hovered, double alpha, HandleBatch& out,
+                  const std::vector<Selection>& extras = {});
 // Twelve edges of a box.
 void addBoxLines(HandleBatch& out, glm::vec3 min, glm::vec3 max, glm::vec4 color, float thickness = 1);
 } // namespace fe

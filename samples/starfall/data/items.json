@@ -1,0 +1,56 @@
+[
+  {
+    "id": "potion",
+    "name": "Potion",
+    "price": 30,
+    "about": "Restores 60 HP.",
+    "effect": {
+      "kind": "heal",
+      "amount": 60
+    },
+    "target": "ally"
+  },
+  {
+    "id": "ether",
+    "name": "Ether",
+    "price": 80,
+    "about": "Restores 20 MP.",
+    "effect": {
+      "kind": "mp",
+      "amount": 20
+    },
+    "target": "ally"
+  },
+  {
+    "id": "tonic",
+    "name": "Tonic",
+    "price": 40,
+    "about": "Cures ailments.",
+    "effect": {
+      "kind": "cure"
+    },
+    "target": "ally"
+  },
+  {
+    "id": "ash",
+    "name": "Phoenix Ash",
+    "price": 150,
+    "about": "Raises a fallen ally.",
+    "effect": {
+      "kind": "revive",
+      "fraction": 0.4
+    },
+    "target": "ally"
+  },
+  {
+    "id": "tent",
+    "name": "Tent",
+    "price": 120,
+    "about": "Rests the whole party. Field only.",
+    "effect": {
+      "kind": "tent"
+    },
+    "target": "party",
+    "field_only": true
+  }
+]

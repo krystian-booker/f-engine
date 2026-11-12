@@ -46,6 +46,14 @@ private:
         int shader = -1;       // CustomShaders slot; -1 = the engine's
         int shadowShader = -1; // `shader` when it has a shadow variant, else -1
         const ShaderParams* params = nullptr;
+        // Index into skinned_ of this frame's skinned vertices, drawn in
+        // place of the part's static buffer; -1 = the part's own.
+        int skinned = -1;
+        // The transform mirrors (negative determinant): the winding the GPU
+        // sees is reversed, so the other face is culled.
+        bool mirrored = false;
+        // Draws that may share an instanced call agree in this too.
+        [[nodiscard]] int variant() const { return (skinned + 1) * 2 + (mirrored ? 1 : 0); }
     };
     struct Caster {
         PartDraw draw;
@@ -56,14 +64,23 @@ private:
         bool sprite = false;
         int index = 0; // into parts_ or the sprite batch's quads
     };
-    using InstanceKey = std::tuple<const GpuPart*, int, const ShaderParams*>; // part, shader, params
+    // part, shader, params, PartDraw::variant()
+    using InstanceKey = std::tuple<const GpuPart*, int, const ShaderParams*, int>;
 
     void setupViews(World& world, const SceneViews& views, const SceneTarget& target, const glm::mat4& view,
                     const glm::mat4& projection) const;
     void drawSky(World& world, glm::vec3 focus);
     // `shader`: a CustomShaders slot for every part (-1 = each material's own).
+    // `skinned` is an index into skinned_ (-1: the part's static vertices);
+    // `bounds` replaces the part's own bounds (a skinned part's, this frame).
     void addPart(const GpuPart& part, const glm::mat4& transform, const glm::vec4& tint, bool castShadow,
-                 std::optional<BlendMode> blend, int shader, const ShaderParams* params);
+                 std::optional<BlendMode> blend, int shader, const ShaderParams* params, int skinned = -1,
+                 const std::pair<glm::vec3, glm::vec3>* bounds = nullptr);
+    // Skins a part's vertices under joints_ into a transient vertex buffer;
+    // returns its index in skinned_, or -1 when the frame has no room left
+    // (the part then draws at rest). `bounds` receives the skinned extent.
+    int skinPart(const GpuPart& part, const Model& model, std::pair<glm::vec3, glm::vec3>& bounds);
+    void setPartVertices(const PartDraw& draw) const;
     // Binds a part's buffers, textures and uniforms (u_material without the tint when `instanced`).
     void bindPart(const PartDraw& draw, std::uint64_t state, bool instanced);
     [[nodiscard]] bgfx::ProgramHandle partProgram(const PartDraw& draw, bool instanced);
@@ -97,7 +114,8 @@ private:
     const Uniforms& uniforms_;
     CustomShaders& custom_;
     int pixelsPerUnit_;
-    Program world_, worldInstanced_, sprite_, water_, shadow_, shadowInstanced_, sky_, overlay_, distort_, spriteMask_;
+    Program world_, worldInstanced_, sprite_, water_, shadow_, shadowInstanced_, sky_, overlay_, distort_,
+        spriteMask_;
     Uniform distortUniform_;
     ShadowAtlas atlas_;
     std::vector<std::unique_ptr<SceneLighting>> lightingSlots_;
@@ -114,10 +132,16 @@ private:
     // Script-set u_params per entity, per world (the world's address keys it).
     std::unordered_map<const World*, std::unordered_map<entt::entity, ShaderParams>> shaderParams_;
     const std::unordered_map<entt::entity, ShaderParams>* params_ = nullptr; // this render's world
-    const entt::registry* registry_ = nullptr;                                // this render's world
+    const entt::registry* registry_ = nullptr;                               // this render's world
     std::vector<Transparent> transparent_;
     std::vector<int> quadList_;
     std::vector<glm::mat4> pose_;
+    // Skeletal animation scratch, kept between frames: the two poses a
+    // crossfade blends, a skin's joint matrices, and this frame's skinned
+    // vertex buffers (transient: valid until the frame is submitted).
+    std::vector<NodePose> blendTo_, blendFrom_;
+    std::vector<glm::mat4> joints_;
+    std::vector<bgfx::TransientVertexBuffer> skinned_;
     struct DistortQuad {
         bgfx::TextureHandle atlas = BGFX_INVALID_HANDLE;
         bgfx::ProgramHandle program = BGFX_INVALID_HANDLE; // a game shader's distortion variant

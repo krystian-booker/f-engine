@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the editor walkthrough scripts against samples/vale and report."""
+"""Run the editor walkthrough scripts against samples/starfall and report."""
 import json
 import os
 import pathlib
@@ -11,7 +11,7 @@ import tempfile
 here = pathlib.Path(__file__).resolve().parent
 root = here.parent.parent
 runtime = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else root / "build" / "fengine")
-game = root / "samples" / "vale"
+game = root / "samples" / "starfall"
 town = game / "maps" / "town" / "map.json"
 out = here / "out"
 out.mkdir(exist_ok=True)

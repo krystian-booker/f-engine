@@ -7,6 +7,20 @@
 
 namespace fe {
 SdlInput::SdlInput(InputState& state) : state_(state) {
+    // Raw inputs are named by scancode (a position on the keyboard), which is
+    // what bindings should store; what the player reads on that key depends
+    // on their layout.
+    state_.setLabeler([](const std::string& input) -> std::string {
+        if (!input.starts_with("key:")) {
+            return {};
+        }
+        const auto scancode = SDL_GetScancodeFromName(input.c_str() + 4);
+        if (scancode == SDL_SCANCODE_UNKNOWN) {
+            return {};
+        }
+        const char* name = SDL_GetKeyName(SDL_GetKeyFromScancode(scancode, SDL_KMOD_NONE, false));
+        return name ? std::string(name) : std::string();
+    });
     int count = 0;
     if (auto* ids = SDL_GetGamepads(&count)) {
         for (int i = 0; i < count; ++i) {

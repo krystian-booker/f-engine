@@ -1,7 +1,7 @@
 #include "engine/world/Collision.h"
-#include "engine/world/Geometry.h"
-#include "engine/nav/Query.h"
 #include "engine/nav/Grid.h"
+#include "engine/nav/Query.h"
+#include "engine/world/Geometry.h"
 #include <algorithm>
 #include <cmath>
 
@@ -27,7 +27,6 @@ std::int64_t bucketKey(int x, int z) {
 std::int64_t bucketKey(glm::vec3 p) {
     return bucketKey(bucketCoord(p.x), bucketCoord(p.z));
 }
-
 
 // Whether two upright bodies share any height (feet at `ay` and `by`).
 // Heights below a hair count as a hair, so flat colliders still touch.
@@ -148,7 +147,8 @@ void CollisionSystem::indexBoxes() {
         }
         for (std::int64_t z = z0; z <= z1; ++z) {
             for (std::int64_t x = x0; x <= x1; ++x) {
-                boxBuckets_[bucketKey(static_cast<int>(x), static_cast<int>(z))].push_back(static_cast<int>(i));
+                boxBuckets_[bucketKey(static_cast<int>(x), static_cast<int>(z))].push_back(
+                    static_cast<int>(i));
             }
         }
     }
@@ -419,20 +419,23 @@ void updateZones(entt::registry& registry, const std::vector<Zone>& zones, Event
     }
 }
 
-std::unordered_set<std::int64_t> boxBlockedCells(const Grid& grid, const std::vector<Box>& boxes, float radius,
-                                                 float stepUp, float bodyHeight) {
+std::unordered_set<std::int64_t> boxBlockedCells(const Grid& grid, const std::vector<Box>& boxes,
+                                                 float radius, float stepUp, float bodyHeight) {
     std::unordered_set<std::int64_t> blocked;
     for (const auto& box : boxes) {
         const auto lo = glm::min(box.min, box.max), hi = glm::max(box.min, box.max);
         // Cells whose centre disc can reach the box horizontally.
-        const int x0 = std::max(0, floorCell(lo.x - radius - 0.5f)), x1 = std::min(grid.width() - 1, floorCell(hi.x + radius + 0.5f));
-        const int z0 = std::max(0, floorCell(lo.z - radius - 0.5f)), z1 = std::min(grid.depth() - 1, floorCell(hi.z + radius + 0.5f));
+        const int x0 = std::max(0, floorCell(lo.x - radius - 0.5f)),
+                  x1 = std::min(grid.width() - 1, floorCell(hi.x + radius + 0.5f));
+        const int z0 = std::max(0, floorCell(lo.z - radius - 0.5f)),
+                  z1 = std::min(grid.depth() - 1, floorCell(hi.z + radius + 0.5f));
         for (int layer = 0; layer < grid.layerCount(); ++layer) {
             for (int z = z0; z <= z1; ++z) {
                 for (int x = x0; x <= x1; ++x) {
                     const glm::vec2 centre(static_cast<float>(x) + 0.5f, static_cast<float>(z) + 0.5f);
                     // Nearest point of the box's footprint to the centre.
-                    const glm::vec2 nearest(std::clamp(centre.x, lo.x, hi.x), std::clamp(centre.y, lo.z, hi.z));
+                    const glm::vec2 nearest(std::clamp(centre.x, lo.x, hi.x),
+                                            std::clamp(centre.y, lo.z, hi.z));
                     if (glm::length(nearest - centre) >= radius) {
                         continue;
                     }

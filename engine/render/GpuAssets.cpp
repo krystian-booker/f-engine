@@ -367,14 +367,15 @@ void GpuAssets::sync() {
         }
     }
     // An asset the cache no longer holds (evicted) or replaced (reloaded)
-    // takes its GPU copy with it. loaded() starts no load, so an evicted
-    // asset stays evicted until something uses it again.
+    // takes its GPU copy with it. loaded() and the cached lookups start no
+    // load and do not count as a use, so an evicted asset stays evicted and
+    // the cache's least-recently-used order is left as the game made it.
     const auto imageGone = [&](const std::string& path, const std::shared_ptr<const Image>& image) {
-        return !assets_.loaded(path) || assets_.tryImage(path) != image;
+        return !assets_.loaded(path) || assets_.cachedImage(path) != image;
     };
     for (auto& [path, uses] : images_) {
         const bool loaded = assets_.loaded(path);
-        const auto current = loaded ? assets_.tryImage(path) : nullptr;
+        const auto current = loaded ? assets_.cachedImage(path) : nullptr;
         for (auto& entry : uses) {
             if (entry.source && (!loaded || entry.source != current)) {
                 entry = {};
@@ -386,13 +387,14 @@ void GpuAssets::sync() {
         const auto replaced = [&](const std::string& path, const std::shared_ptr<const Image>& image) {
             return !path.empty() && imageGone(path, image);
         };
-        return !assets_.loaded(entry.first) || assets_.trySprite(entry.first) != sheet.animation ||
+        return !assets_.loaded(entry.first) || assets_.cachedSprite(entry.first) != sheet.animation ||
                (sheet.animation &&
                 (replaced(sheet.atlasPath, sheet.atlas) || replaced(sheet.normalPath, sheet.normalImage) ||
                  replaced(sheet.emissivePath, sheet.emissiveImage)));
     });
     std::erase_if(models_, [&](const auto& entry) {
-        return !assets_.loaded(entry.first.first) || assets_.tryModel(entry.first.first) != entry.second->source;
+        return !assets_.loaded(entry.first.first) ||
+               assets_.cachedModel(entry.first.first) != entry.second->source;
     });
     // A texture no model part holds any more belonged to dropped models only.
     std::erase_if(modelTextures_, [](const auto& entry) { return entry.second.use_count() == 1; });
@@ -516,17 +518,19 @@ bgfx::TextureHandle GpuAssets::lut(const std::string& path) {
     return luts_.emplace(path, std::move(entry)).first->second.texture.get();
 }
 
+std::string GpuAssets::modelTextureKey(const ModelImage& image) {
+    // Every model that references the same file shares the upload; an
+    // embedded (.glb) image is its own, identified by its address, which
+    // stays unique while the entry holds the image.
+    return image.file.empty() ? "#" + std::to_string(reinterpret_cast<std::uintptr_t>(image.image.get()))
+                              : image.file.generic_string();
+}
+
 std::shared_ptr<const ModelTexture> GpuAssets::modelTexture(const ModelImage& image, bool srgb, bool mips) {
     if (!image) {
         return nullptr;
     }
-    // Every model that references the same file shares the upload; an
-    // embedded (.glb) image is its own, identified by its address, which
-    // stays unique while the entry holds the image.
-    const std::string key = image.file.empty()
-                                ? "#" + std::to_string(reinterpret_cast<std::uintptr_t>(image.image.get()))
-                                : image.file.generic_string();
-    auto& entry = modelTextures_[{key, srgb, mips}];
+    auto& entry = modelTextures_[{modelTextureKey(image), srgb, mips}];
     if (!entry) {
         entry = std::make_shared<ModelTexture>();
         if (image.file.empty()) {
@@ -542,6 +546,33 @@ std::shared_ptr<const ModelTexture> GpuAssets::modelTexture(const ModelImage& im
     return entry;
 }
 
+bool GpuAssets::uploadNextModelTexture(const std::string& path) {
+    const auto source = assets_.cachedModel(path);
+    if (!source) {
+        return false;
+    }
+    const auto mips = [](const TextureSampler& sampler) {
+        return sampler.mips != TextureSampler::Mips::None;
+    };
+    for (const auto& part : source->parts) {
+        if (part.hidden) {
+            continue;
+        }
+        const auto& m = part.material;
+        const std::tuple<const ModelImage&, bool, bool> wanted[] = {
+            {m.albedo, true, mips(m.albedoSampler)},
+            {m.normal, false, mips(m.normalSampler)},
+            {m.emission, true, mips(m.emissionSampler)}};
+        for (const auto& [image, srgb, withMips] : wanted) {
+            if (image && !modelTextures_.contains({modelTextureKey(image), srgb, withMips})) {
+                modelTexture(image, srgb, withMips);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 const GpuModel* GpuAssets::model(const std::string& path, bool bakeChunks) {
     const auto key = std::make_pair(path, bakeChunks);
     if (const auto found = models_.find(key); found != models_.end()) {
@@ -553,10 +584,11 @@ const GpuModel* GpuAssets::model(const std::string& path, bool bakeChunks) {
     }
     auto gpu = std::make_unique<GpuModel>();
     gpu->source = source;
-    auto emit = [&](const ModelPart& part, const std::vector<WorldVertex>& vertices,
+    // False (and nothing added) when the GPU has no buffer left to give.
+    auto emit = [&](const Material& m, const std::vector<WorldVertex>& vertices,
                     const std::vector<std::uint32_t>& indices, glm::vec3 min, glm::vec3 max) {
         if (indices.empty()) {
-            return;
+            return true;
         }
         GpuPart out;
         out.vertices = VertexBuffer(bgfx::createVertexBuffer(
@@ -572,7 +604,9 @@ const GpuModel* GpuAssets::model(const std::string& path, bool bakeChunks) {
                            static_cast<std::uint32_t>(indices.size() * sizeof(std::uint32_t))),
                 BGFX_BUFFER_INDEX32));
         }
-        const auto& m = part.material;
+        if (!out.vertices.valid() || !out.indices.valid()) {
+            return false;
+        }
         const auto mips = [](const TextureSampler& sampler) {
             return sampler.mips != TextureSampler::Mips::None;
         };
@@ -582,54 +616,75 @@ const GpuModel* GpuAssets::model(const std::string& path, bool bakeChunks) {
         out.albedo = out.textures[0] ? out.textures[0]->texture.get() : white_.get();
         out.normal = out.textures[1] ? out.textures[1]->texture.get() : flatNormal_.get();
         out.emission = out.textures[2] ? out.textures[2]->texture.get() : white_.get();
-        out.material = part.material;
-        out.node = part.node;
+        out.material = m;
         out.min = min;
         out.max = max;
         gpu->parts.push_back(std::move(out));
+        return true;
     };
     auto pack = [](const MeshVertex& v) {
         return WorldVertex::pack(v.position, v.normal, v.uv, v.color, v.tangent);
     };
-    std::vector<glm::mat4> rest;
-    source->pose(-1, 0, rest);
-    for (const auto& part : source->parts) {
-        if (part.hidden) {
-            continue;
+    bool complete = true;
+    std::vector<WorldVertex> vertices;
+    if (bakeChunks) {
+        // One mesh per material, then one buffer per 8 x 8 square of it: a
+        // square is culled on its own, and what is left of a material in view
+        // is a handful of draws however many pieces the map was built from.
+        std::vector<glm::vec3> positions;
+        for (const auto& mesh : bakeGeometry(*source)) {
+            positions.clear();
+            positions.reserve(mesh.vertices.size());
+            for (const auto& v : mesh.vertices) {
+                positions.push_back(v.position);
+            }
+            for (const auto& chunk : splitChunks(positions, mesh.indices, ChunkSize)) {
+                vertices.clear();
+                glm::vec3 min(std::numeric_limits<float>::max()), max(-std::numeric_limits<float>::max());
+                for (const auto index : chunk.vertices) {
+                    vertices.push_back(pack(mesh.vertices[index]));
+                    min = glm::min(min, mesh.vertices[index].position);
+                    max = glm::max(max, mesh.vertices[index].position);
+                }
+                complete = emit(*mesh.material, vertices, chunk.indices, min, max) && complete;
+            }
         }
-        if (!bakeChunks) {
-            std::vector<WorldVertex> vertices;
+    } else {
+        std::vector<glm::mat4> rest, joints;
+        source->pose(-1, 0, rest);
+        std::vector<MeshVertex> skinnedRest;
+        for (const auto& part : source->parts) {
+            if (part.hidden) {
+                continue;
+            }
+            const bool skinned = part.skin >= 0;
+            if (skinned) {
+                // At rest, in model space: what a static buffer shows, and what
+                // a frame that cannot skin (no transient memory) falls back to.
+                source->jointMatrices(part.skin, rest, joints);
+                skinVertices(part, joints, skinnedRest);
+            }
+            vertices.clear();
             vertices.reserve(part.vertices.size());
-            for (const auto& v : part.vertices) {
+            for (const auto& v : skinned ? skinnedRest : part.vertices) {
                 vertices.push_back(pack(v));
             }
-            emit(part, vertices, part.indices, part.min, part.max);
-            continue;
-        }
-        const auto& matrix = rest[static_cast<std::size_t>(part.node)];
-        const auto normalMatrix = glm::transpose(glm::inverse(glm::mat3(matrix)));
-        std::vector<MeshVertex> world(part.vertices);
-        for (auto& v : world) {
-            v.position = glm::vec3(matrix * glm::vec4(v.position, 1));
-            v.normal = glm::normalize(normalMatrix * v.normal);
-            v.tangent = glm::vec4(glm::normalize(glm::mat3(matrix) * glm::vec3(v.tangent)), v.tangent.w);
-        }
-        std::vector<glm::vec3> positions;
-        positions.reserve(world.size());
-        for (const auto& v : world) {
-            positions.push_back(v.position);
-        }
-        std::vector<WorldVertex> vertices;
-        for (const auto& chunk : splitChunks(positions, part.indices, ChunkSize)) {
-            vertices.clear();
-            glm::vec3 min(std::numeric_limits<float>::max()), max(-std::numeric_limits<float>::max());
-            for (const auto source : chunk.vertices) {
-                vertices.push_back(pack(world[source]));
-                min = glm::min(min, world[source].position);
-                max = glm::max(max, world[source].position);
+            const auto before = gpu->parts.size();
+            complete = emit(part.material, vertices, part.indices, part.min, part.max) && complete;
+            if (gpu->parts.size() > before) {
+                auto& out = gpu->parts.back();
+                out.node = part.node;
+                if (skinned) {
+                    out.skin = part.skin;
+                    out.sourcePart = static_cast<int>(&part - source->parts.data());
+                    const auto* bytes = reinterpret_cast<const std::uint8_t*>(vertices.data());
+                    out.packed.assign(bytes, bytes + vertices.size() * sizeof(WorldVertex));
+                }
             }
-            emit(part, vertices, chunk.indices, min, max);
         }
+    }
+    if (!complete && failed_.insert(path).second) {
+        log(LogLevel::Error, path + ": the GPU ran out of vertex or index buffers; part of it is not drawn");
     }
     return models_.emplace(key, std::move(gpu)).first->second.get();
 }

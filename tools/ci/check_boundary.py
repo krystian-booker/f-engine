@@ -2,8 +2,8 @@
 """Fail when engine C++ contains JRPG game vocabulary.
 
 The engine is a set of generic services. Game rules (stats, battles, parties,
-items, shops, encounters, quests...) belong in Lua: either the shipped lualib
-kits or a game's own scripts. Code and string literals are both checked (a
+items, shops, encounters, quests...) belong in a game's own Lua; the engine
+ships none. Code and string literals are both checked (a
 `type == "battle"` test or a doc string about parties is game knowledge too);
 comments are not. Run with --report to list hits without failing.
 """
@@ -27,7 +27,7 @@ ALLOWED_LITERALS = {
 }
 # Third-party APIs whose names contain the words (JSON iteration, ImGui,
 # the exponential function) are not game vocabulary.
-THIRD_PARTY = re.compile(r"\.items\(\)|ImGui::\w+|std::exp\b")
+THIRD_PARTY = re.compile(r"(?:\.|->)items\(\)|ImGui::\w+|std::exp\b")
 RAW_STRING = re.compile(r'R"([^()\\ ]{0,16})\(')
 
 

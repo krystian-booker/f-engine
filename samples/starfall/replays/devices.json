@@ -1,0 +1,131 @@
+{
+ "seed": 7,
+ "commands": [
+  {
+   "tick": 10,
+   "lua": "require('game.title').new_game()"
+  },
+  {
+   "tick": 16,
+   "input": [
+    [
+     "key:Up",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 18,
+   "input": [
+    [
+     "key:Up",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 22,
+   "assert": "require('game.input').device() == 'keyboard'"
+  },
+  {
+   "tick": 52,
+   "capture": "replay-out/devices-keyboard.png",
+   "compare": "reference/{backend}/devices-keyboard.png",
+   "tolerance": 0.04
+  },
+  {
+   "tick": 54,
+   "pads": [
+    {
+     "connected": true,
+     "pad": 1,
+     "name": "Xbox Wireless Controller",
+     "type": "xbox",
+     "rumble": true,
+     "trigger_rumble": false
+    }
+   ]
+  },
+  {
+   "tick": 58,
+   "assert": "fe.input.device_type() == 'xbox'"
+  },
+  {
+   "tick": 78,
+   "capture": "replay-out/devices-gamepad.png",
+   "compare": "reference/{backend}/devices-gamepad.png",
+   "tolerance": 0.04
+  },
+  {
+   "tick": 82,
+   "input": [
+    [
+     "key:Up",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 84,
+   "input": [
+    [
+     "key:Up",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 88,
+   "assert": "fe.input.device_type() == 'keyboard'"
+  },
+  {
+   "tick": 92,
+   "input": [
+    [
+     "pad:y",
+     1
+    ],
+    [
+     "pad1:y",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 94,
+   "input": [
+    [
+     "pad:y",
+     0
+    ],
+    [
+     "pad1:y",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 100,
+   "assert": "fe.input.device_type() == 'xbox' and require('game.scenes').top() ~= require('game.field').scene"
+  },
+  {
+   "tick": 120,
+   "capture": "replay-out/devices-menu.png",
+   "compare": "reference/{backend}/devices-menu.png",
+   "tolerance": 0.04
+  },
+  {
+   "tick": 122,
+   "pads": [
+    {
+     "connected": false,
+     "pad": 1
+    }
+   ]
+  },
+  {
+   "tick": 126,
+   "assert": "fe.input.device_type() == 'keyboard'"
+  }
+ ]
+}

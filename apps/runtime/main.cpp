@@ -150,7 +150,7 @@ int main(int argc, char* argv[]) {
         if (options.shaders.empty()) {
             options.shaders = defaultShaders(base);
         }
-        options.lualib = fe::findLibraryRoot(base / "fengine");
+        options.builtin = fe::findBuiltinRoot(base / "fengine");
         auto config = fe::GameConfig::load(options.game);
         options.pauseOnFocusLoss = config.pauseOnFocusLoss;
         if (options.userData.empty()) {

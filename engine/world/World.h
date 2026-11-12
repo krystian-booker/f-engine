@@ -30,10 +30,10 @@ struct RayOptions {
     float maxDistance = 200;
     std::uint32_t layers = ~0u; // grid layers that can be hit (bit per layer)
     bool entities = true;
-    bool solidOnly = true;         // entities with a non-solid collider (triggers) are not hit
-    std::vector<std::string> tags; // when not empty, only entities with one of these tags are hit
-    int pixelsPerUnit = 32;        // for sprites whose animation does not set one
-    double alpha = 1;              // camera interpolation that orients sprites
+    bool solidOnly = true;          // entities with a non-solid collider (triggers) are not hit
+    std::vector<std::string> tags;  // when not empty, only entities with one of these tags are hit
+    int pixelsPerUnit = 32;         // for sprites whose animation does not set one
+    double alpha = 1;               // camera interpolation that orients sprites
     const Camera* camera = nullptr; // orients sprite quads instead of the world's camera (an editor view)
 };
 
@@ -123,7 +123,9 @@ public:
     void setRouteVisitLimit(int limit) { movement_.setRouteVisitLimit(limit); }
 
     void setClip(entt::entity entity, const std::string& clip, bool restart = true);
-    void playMesh(entt::entity entity, const std::string& animation, bool loop);
+    // Starts a mesh animation from its beginning. With `fade` > 0 the pose
+    // blends from the animation playing now into it over that many seconds.
+    void playMesh(entt::entity entity, const std::string& animation, bool loop, float fade = 0);
     void burst(glm::vec3 position, const EmitterSettings& settings, int count) {
         particles_.burst(position, settings, count);
     }

@@ -1,6 +1,6 @@
 #pragma once
-#include "engine/core/Json.h"
 #include "engine/assets/SpriteSheetBuilder.h"
+#include "engine/core/Json.h"
 #include "engine/editor/AssetCatalog.h"
 #include "engine/editor/EditorCamera.h"
 #include "engine/editor/MapEdits.h"
@@ -19,8 +19,8 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <sol/forward.hpp>
 #include <set>
+#include <sol/forward.hpp>
 #include <string>
 #include <vector>
 
@@ -69,8 +69,12 @@ struct EditorFrame {
 // with the per-kind forms in EditorMapObjects.cpp and EditorWorldTab.cpp),
 // EditorMapTab.cpp (the Map panel), EditorDataTab.cpp and
 // EditorToolsTabs.cpp. Everything it edits is generic engine data with forms
-// generated from the schemas scripts declare; game-specific actions are
-// fe.devtools functions the editor calls.
+// generated from the schemas the game declares; game-specific actions are
+// optional hooks the game's entry module offers in its `editor` table
+// (describe, play_from, placement_changed, inspect_entity, inspect_entities,
+// tasks, cancel_task, recent_events, validate_table, task_count, list, launch; see
+// docs/editor.md). Without them the editor still opens, previews, edits and
+// saves maps on its own.
 //
 // Map edits change a world's authored map and its live map together; Save
 // writes the authored map, so run-time changes scripts make never reach the
@@ -134,7 +138,7 @@ private:
     void edit(World& world, const std::function<void(MapData&)>& change);
     void undo(World& world, bool forward);
     void saveMap(World& world);
-    // An fe.devtools function, or nil when the game doesn't define it.
+    // A hook of the entry module's `editor` table, or nil when the game doesn't define it.
     sol::object devtool(const char* name);
     // True when a Lua call succeeded; otherwise its error goes to the status line.
     bool succeeded(const sol::protected_function_result& result);
@@ -150,7 +154,7 @@ private:
     void setMode(Mode mode);
     void select(const Selection& selection);
     // After an authored placement changed (not just moved): respawn its
-    // entity through fe.devtools.placement_changed, or note that a save will.
+    // entity through the game's editor.placement_changed hook (or the preview).
     void placementChanged(World& world, const std::string& id);
     // Respawns every placement that differs between two maps (undo, redo).
     void placementsChanged(World& world, const MapData& before);
@@ -169,6 +173,11 @@ private:
     // Runs `action` now, or after the unsaved-edits prompt when the map has edits.
     void confirmDiscard(World* world, const char* what, std::function<void()> action);
     void openMap(const std::string& id);
+    // The fallback of openMap for a game without an `editor.play_from` hook.
+    void openPreview(const std::string& id);
+    void respawnPreview(World& w, const std::string& id);
+    // The world openPreview loads maps into.
+    static constexpr const char* PreviewWorld = "editor_preview";
     void newMap();
     void drawPlayBar();
     void drawMenuBar(const EditorFrame& frame);
@@ -218,13 +227,17 @@ private:
     // what a field may hold, accept drops from the Assets panel and show a
     // thumbnail; each returns true when the value changed.
     bool assetPicker(const char* label, std::string& value, AssetKind kind, bool optional = false);
-    bool modulePicker(const char* label, std::string& value, const std::string& folder, bool optional = false);
+    // Besides picking: "New script" writes `scriptTemplate` (the field spec's `template`) to a
+    // new module named after `suggestion` in `folder`, and "Open script" hands the file to the OS.
+    bool modulePicker(const char* label, std::string& value, const std::string& folder, bool optional = false,
+                      const std::string& scriptTemplate = {}, const std::string& suggestion = {});
     bool mapPicker(const char* label, std::string& value, bool optional = false);
     bool pointPicker(const char* label, std::string& value, const std::string& mapId, bool optional = false);
     bool refPicker(const char* label, std::string& value, const std::string& table, bool optional = false);
     bool clipPicker(const char* label, std::string& value, const std::string& animation);
     bool choicePicker(const char* label, std::string& value, const std::vector<std::string>& candidates,
-                      const std::vector<std::string>& labels, const char* hint, bool optional, AssetKind thumbnail);
+                      const std::vector<std::string>& labels, const char* hint, bool optional,
+                      AssetKind thumbnail);
     // A sprite's first idle frame or an image, `size` points tall; false when
     // nothing could be shown (no GPU assets, or the file is missing).
     bool drawThumbnail(const std::string& path, AssetKind kind, float size);
@@ -289,6 +302,9 @@ private:
     unsigned int dockspaceId_ = 0;
     std::string worldName_, status_, layoutFile_;
     Json schemas_ = Json::object();
+    // The id of the placement or zone whose form is being drawn: what a
+    // script created from that form is named after.
+    std::string scriptSuggestion_;
     // Grid brush and overlays (rebuilt only when what they show changes)
     GridBrush brush_;
     int brushRadius_ = 0, layer_ = 0;
@@ -380,7 +396,7 @@ private:
     std::size_t scriptStep_ = 0;
     std::uint64_t scriptFrame_ = 0;
     int scriptPassed_ = 0, scriptFailed_ = 0;
-    std::optional<glm::vec2> scriptMouse_; // where the script put the mouse (points)
+    std::optional<glm::vec2> scriptMouse_;                // where the script put the mouse (points)
     std::vector<std::pair<int, bool>> scriptKeyReleases_; // keys to release next frame
     std::vector<int> scriptLateReleases_;                 // modifiers to release the frame after
 };

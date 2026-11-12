@@ -3,6 +3,7 @@
 #include "engine/core/Paths.h"
 #include "engine/editor/EditorWidgets.h"
 #include "engine/editor/MapFiles.h"
+#include "engine/editor/PropLinks.h"
 #include "engine/editor/SceneEdits.h"
 #include "engine/render/FrameRenderer.h"
 #include "engine/runtime/Engine.h"
@@ -11,15 +12,17 @@
 #include <IconsFontAwesome6.h>
 #include <cstdlib>
 #include <imgui.h>
-#include <ImGuizmo.h>
 #include <imgui_internal.h>
 #include <imgui_stdlib.h>
+
+// ImGuizmo needs imgui.h before it: a block of its own, so include sorting leaves it here.
+#include <ImGuizmo.h>
 
 namespace fe {
 using namespace editorui;
 
 Editor::Editor(Engine& engine)
-    : engine_(engine), catalog_(engine.lua().gameRoot(), engine.lua().libraryRoot()),
+    : engine_(engine), catalog_(engine.lua().gameRoot(), engine.lua().builtinRoot()),
       importQueue_(std::make_shared<ImportQueue>()) {
     // For screenshots and tests: the folder the Assets panel opens on.
     if (const char* folder = std::getenv("FENGINE_EDITOR_ASSET_FOLDER")) {
@@ -100,7 +103,8 @@ void Editor::setMode(Mode mode) {
     } else {
         paused_ = false;
         if (const auto w = world()) {
-            std::erase_if(w->overlays(), [](const auto& overlay) { return overlay.first.starts_with("editor:"); });
+            std::erase_if(w->overlays(),
+                          [](const auto& overlay) { return overlay.first.starts_with("editor:"); });
             w->cursor().visible = false;
         }
         gridOverlayKey_.clear();
@@ -180,16 +184,25 @@ std::shared_ptr<World> Editor::world() {
 }
 
 sol::object Editor::devtool(const char* name) {
+    // The game's editor hooks: the `editor` table of its entry module, read
+    // raw (no metamethod of the game's runs here). A game without the table,
+    // or without this hook, simply doesn't offer that action.
+    if (!engine_.hasMain()) {
+        return sol::lua_nil;
+    }
     try {
-        const auto module = engine_.lua().require("fe.devtools");
+        const auto module = engine_.lua().require(engine_.config().entry);
         if (module.get_type() == sol::type::table) {
-            sol::object fn = module.as<sol::table>()[name];
-            if (fn.get_type() == sol::type::function) {
-                return fn;
+            const auto hooks = module.as<sol::table>().raw_get<sol::object>("editor");
+            if (hooks.get_type() == sol::type::table) {
+                sol::object fn = hooks.as<sol::table>().raw_get<sol::object>(name);
+                if (fn.get_type() == sol::type::function) {
+                    return fn;
+                }
             }
         }
-    } catch (const std::exception& error) {
-        status_ = error.what();
+    } catch (const std::exception&) {
+        // The entry module failed to load; the error overlay already says so.
     }
     return sol::lua_nil;
 }
@@ -205,26 +218,38 @@ bool Editor::succeeded(const sol::protected_function_result& result) {
 
 void Editor::refreshSchemas() {
     schemasFetched_ = Clock::now();
-    schemas_ = Json::object();
+    // A game that describes nothing still gets forms: the editor's own
+    // minimal description (PropLinks.h), replaced by the game's as a whole.
+    schemas_ = defaultSchemas();
     const auto describe = devtool("describe");
     if (describe == sol::lua_nil) {
+        catalog_.setSchemas(schemas_);
         return;
     }
     const auto result = engine_.lua().invoke(describe);
     if (succeeded(result) && result.get_type() == sol::type::string) {
         const auto parsed = Json::parse(result.get<std::string>(), nullptr, false);
-        schemas_ = parsed.is_object() ? parsed : Json::object();
+        if (parsed.is_object()) {
+            schemas_ = parsed;
+        }
     }
-    log(LogLevel::Debug, "editor: schemas refreshed: " + std::to_string(jsonObject(schemas_, "entities").size()) +
-                             " placement type(s), " + std::to_string(jsonArray(schemas_, "tables").size()) +
-                             " table(s)" + (status_.empty() ? "" : "; status: " + status_));
+    catalog_.setSchemas(schemas_);
+    log(LogLevel::Debug,
+        "editor: schemas refreshed: " + std::to_string(jsonObject(schemas_, "entities").size()) +
+            " placement type(s), " + std::to_string(jsonArray(schemas_, "tables").size()) + " table(s)" +
+            (status_.empty() ? "" : "; status: " + status_));
 }
 
 std::string Editor::defaultType(const char* group) const {
-    const auto types = jsonObject(schemas_, group);
     const auto preferred = jsonString(jsonObject(schemas_, "defaults"), group, {});
     if (!preferred.empty()) {
         return preferred;
+    }
+    // "models": the placement type a dropped model becomes; a game that
+    // names none gets its default placement type for models too.
+    const auto types = jsonObject(schemas_, std::string_view(group) == "models" ? "entities" : group);
+    if (std::string_view(group) == "models") {
+        return defaultType("entities");
     }
     return types.empty() ? std::string{} : types.begin().key();
 }
@@ -291,7 +316,12 @@ void Editor::placementChanged(World& w, const std::string& id) {
     }
     const auto hook = devtool("placement_changed");
     if (hook == sol::lua_nil) {
-        status_ = "Placement edited; it respawns when the map is saved (fe.devtools.placement_changed is undefined)";
+        if (w.name() == PreviewWorld) {
+            respawnPreview(w, id); // the editor's own stand-in for a map no game code is running
+        } else {
+            status_ = "Placement edited; the game shows it when the map loads again (its main.lua has no "
+                      "editor.placement_changed hook)";
+        }
         return;
     }
     // The call-out may replace or destroy entities; nothing here holds one.
@@ -348,7 +378,8 @@ void Editor::deleteOne(World& w, const Selection& s) {
             w.destroy(s.entity);
         }
         break;
-    case Selection::Kind::None: break;
+    case Selection::Kind::None:
+        break;
     }
 }
 
@@ -365,7 +396,8 @@ void Editor::deleteSelection(World& w) {
         return a.kind != b.kind ? a.kind < b.kind : a.index > b.index;
     });
     all.erase(std::unique(all.begin(), all.end()), all.end());
-    const auto label = all.size() == 1 ? selectionLabel(w, all.front()) : std::to_string(all.size()) + " objects";
+    const auto label =
+        all.size() == 1 ? selectionLabel(w, all.front()) : std::to_string(all.size()) + " objects";
     gesture_ = false;
     for (const auto& s : all) {
         deleteOne(w, s);
@@ -473,6 +505,7 @@ void Editor::duplicateSelection(World& w) {
     case Selection::Kind::Point: {
         auto copy = map.points.at(s.id);
         copy.position.x += 1;
+        copy.position = clampToGrid(map.grid, copy.position);
         std::string name = s.id + "_copy";
         for (int n = 2; map.points.contains(name); ++n) {
             name = s.id + "_copy" + std::to_string(n);
@@ -504,7 +537,8 @@ void Editor::duplicateSelection(World& w) {
         break;
     }
     case Selection::Kind::Entity:
-    case Selection::Kind::None: return;
+    case Selection::Kind::None:
+        return;
     }
     gesture_ = false;
     status_ = "Duplicated as " + selectionLabel(w, selection_);
@@ -569,11 +603,11 @@ Json blankFor(const Json& spec) {
     return "";
 }
 AssetKind assetKindNamed(const std::string& kind) {
-    return kind == "sprite"  ? AssetKind::Sprite
-           : kind == "image" ? AssetKind::Image
-           : kind == "model" ? AssetKind::Model
-           : kind == "audio" ? AssetKind::Audio
-           : kind == "lut"   ? AssetKind::Lut
+    return kind == "sprite"   ? AssetKind::Sprite
+           : kind == "image"  ? AssetKind::Image
+           : kind == "model"  ? AssetKind::Model
+           : kind == "audio"  ? AssetKind::Audio
+           : kind == "lut"    ? AssetKind::Lut
            : kind == "shader" ? AssetKind::Shader
                               : AssetKind::Other;
 }
@@ -592,7 +626,8 @@ bool Editor::editValue(const char* label, const Json& spec, Json& value, int dep
         }
     } else if (type == "module" && (value.is_string() || value.is_null())) {
         std::string text = value.is_string() ? value.get<std::string>() : std::string{};
-        if (modulePicker(label, text, jsonString(spec, "folder", ""), optional)) {
+        if (modulePicker(label, text, jsonString(spec, "folder", ""), optional,
+                         jsonString(spec, "template", ""), scriptSuggestion_)) {
             value = text;
             changed = true;
         }
@@ -627,7 +662,8 @@ bool Editor::editValue(const char* label, const Json& spec, Json& value, int dep
             changed = true;
         }
     } else if (type == "enum" && (value.is_string() || value.is_null())) {
-        const std::string current = value.is_string() ? value.get<std::string>() : jsonString(spec, "default", {});
+        const std::string current =
+            value.is_string() ? value.get<std::string>() : jsonString(spec, "default", {});
         if (ImGui::BeginCombo(label, current.c_str())) {
             for (const auto& option : jsonArray(spec, "options")) {
                 if (!option.is_string()) {
@@ -647,10 +683,11 @@ bool Editor::editValue(const char* label, const Json& spec, Json& value, int dep
         }
         const auto of = jsonObject(spec, "of");
         const auto ofType = jsonString(of, "type", "any");
-        const bool rows = ofType == "record" || ofType == "list" || ofType == "map" || ofType == "any" ||
-                          ofType == "table";
+        const bool rows =
+            ofType == "record" || ofType == "list" || ofType == "map" || ofType == "any" || ofType == "table";
         const auto header = std::string(label) + " (" + std::to_string(value.size()) + ")";
-        if (ImGui::TreeNodeEx(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+        if (ImGui::TreeNodeEx(header.c_str(),
+                              ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
             int remove = -1, up = -1;
             for (std::size_t i = 0; i < value.size(); ++i) {
                 ImGui::PushID(static_cast<int>(i));
@@ -695,7 +732,8 @@ bool Editor::editValue(const char* label, const Json& spec, Json& value, int dep
         if (value.is_null()) {
             value = Json::object();
         }
-        if (depth == 0 || ImGui::TreeNodeEx(label, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+        if (depth == 0 ||
+            ImGui::TreeNodeEx(label, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
             const auto fields = spec.find("fields");
             changed |= editProps(fields != spec.end() ? &*fields : nullptr, value);
             if (depth != 0) {
@@ -708,7 +746,8 @@ bool Editor::editValue(const char* label, const Json& spec, Json& value, int dep
         }
         const auto of = jsonObject(spec, "of");
         const auto header = std::string(label) + " (" + std::to_string(value.size()) + ")";
-        if (ImGui::TreeNodeEx(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+        if (ImGui::TreeNodeEx(header.c_str(),
+                              ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
             std::string remove;
             for (auto& [key, child] : value.items()) {
                 ImGui::PushID(key.c_str());
@@ -775,7 +814,8 @@ bool Editor::editProps(const Json* schema, Json& props) {
             // Absent optional fields stay absent until asked for, so the
             // default applies and the file stays small.
             ImGui::TextDisabled("%s", name.c_str());
-            if (const auto doc = spec.find("doc"); doc != spec.end() && doc->is_string() && ImGui::IsItemHovered()) {
+            if (const auto doc = spec.find("doc");
+                doc != spec.end() && doc->is_string() && ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", doc->get<std::string>().c_str());
             }
             ImGui::SameLine();

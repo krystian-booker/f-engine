@@ -1,6 +1,6 @@
 #pragma once
-#include "engine/nav/Grid.h"
 #include "engine/editor/MapEdits.h"
+#include "engine/nav/Grid.h"
 #include "engine/world/MapData.h"
 #include <algorithm>
 #include <initializer_list>

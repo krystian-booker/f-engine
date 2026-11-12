@@ -168,15 +168,27 @@ struct Placement {
     Json props = Json::object();
 };
 
-// Fires zone_enter/zone_exit for entities with a mover or a collider.
+enum class ZoneShape { Box, Ellipse, Polygon };
+[[nodiscard]] const char* zoneShapeName(ZoneShape shape);
+
+// An area of the ground plane. Fires zone_enter/zone_exit for entities with
+// a mover or a collider. A box is the rectangle min..max, an ellipse the one
+// inscribed in it, a polygon the corners in `points` (x, z; 3 to 64, in
+// order, either winding), of which min..max are the bounds.
 struct Zone {
+    static constexpr std::size_t MaxPoints = 64;
     std::string id, type;
     glm::vec2 min{0}, max{0};
     int layer = -1; // -1 = every layer
     Json props = Json::object();
-    [[nodiscard]] bool contains(glm::vec3 p, int l) const {
-        return (layer < 0 || layer == l) && p.x >= min.x && p.x <= max.x && p.z >= min.y && p.z <= max.y;
-    }
+    ZoneShape shape = ZoneShape::Box;
+    std::vector<glm::vec2> points{};
+    [[nodiscard]] bool contains(glm::vec3 p, int l) const;
+    // The outline, corner by corner: the box's four corners, the polygon's
+    // points, or the ellipse as `segments` corners.
+    [[nodiscard]] std::vector<glm::vec2> outline(int segments = 32) const;
+    // A polygon's bounds from its points (no-op for the other shapes).
+    void fitBounds();
 };
 
 struct Box {

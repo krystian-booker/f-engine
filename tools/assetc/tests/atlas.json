@@ -4,7 +4,7 @@
   "directions": 1,
   "clips": {"blink": {"loop": false}},
   "frames": [
-    {"file": "../../../lualib/fe/assets/ui/cursor.png", "clip": "idle"},
-    {"file": "../../../lualib/fe/assets/ui/spark.png", "clip": "blink"}
+    {"file": "../../../builtin/assets/ui/cursor.png", "clip": "idle"},
+    {"file": "../../../builtin/assets/ui/spark.png", "clip": "blink"}
   ]
 }

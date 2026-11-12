@@ -3,6 +3,7 @@
 #include "engine/core/Log.h"
 #include "engine/render/Renderer.h"
 #include <algorithm>
+#include <chrono>
 #include <utility>
 
 namespace fe {
@@ -58,7 +59,7 @@ private:
 } // namespace
 
 FrameRenderer::FrameRenderer(Renderer& renderer, AssetCache& assets, int pixelsPerUnit)
-    : renderer_(renderer), gpu_(assets), custom_(assets.root(), renderer.shaderRoot()),
+    : renderer_(renderer), gpu_(assets), warmup_(gpu_), custom_(assets.root(), renderer.shaderRoot()),
       worlds_(gpu_, uniforms_, custom_, renderer.shaderRoot(), pixelsPerUnit),
       post_(gpu_, uniforms_, custom_, renderer.shaderRoot()), canvas_(gpu_, renderer.shaderRoot()),
       present_(loadProgram(renderer.shaderRoot(), "vs_screen", "fs_present")),
@@ -78,6 +79,17 @@ void FrameRenderer::reload() {
     canvas_.reload(root);
     present_ = std::move(present);
     custom_.reload(root);
+}
+
+void FrameRenderer::warm(const Engine& engine) {
+    gpu_.sync();
+    warmList_.clear();
+    engine.warmAssets(warmList_);
+    // Nothing on screen depends on what is being warmed (a loading screen,
+    // or a scene that preloads the next one), so a frame can give it a good
+    // part of its time; an idle queue costs one empty list.
+    constexpr std::chrono::duration<double, std::milli> Budget(4.0);
+    warmup_.run(warmList_, Budget);
 }
 
 void FrameRenderer::render(const std::vector<WorldDraw>& draws, const Canvas& canvas, const ScreenFx& screen,
@@ -196,7 +208,8 @@ void FrameRenderer::render(const std::vector<WorldDraw>& draws, const Canvas& ca
         auto& scene = scenes_.acquire({sceneSize.x, sceneSize.y}, [&] { return SceneTarget(sceneSize); });
         const float aspect = static_cast<float>(outSize.x) / static_cast<float>(outSize.y);
         const auto* camera =
-            draw.camera ? &drawCameras_.update(&world, draw.target, *draw.camera, tick, draw.snapCamera) : nullptr;
+            draw.camera ? &drawCameras_.update(&world, draw.target, *draw.camera, tick, draw.snapCamera)
+                        : nullptr;
         const DrawOverride drawn(world, camera, draw.post);
         const SceneViews views(next);
         for (std::uint16_t i = 0; i < SceneViews::Count; ++i) {
@@ -208,7 +221,7 @@ void FrameRenderer::render(const std::vector<WorldDraw>& draws, const Canvas& ca
 
     for (const auto& [target, key] : keepRequests_) {
         const auto* named = named_.find(target);
-        if (!named || next + 1 >= last) {
+        if (!named || next + 1u >= last) {
             continue;
         }
         auto copy = colorTexture(named->size, BGFX_TEXTURE_BLIT_DST | LinearClamp);

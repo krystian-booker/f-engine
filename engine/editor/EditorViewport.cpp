@@ -11,8 +11,10 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <imgui.h>
-#include <ImGuizmo.h>
 #include <imgui_internal.h>
+
+// ImGuizmo needs imgui.h before it: a block of its own, so include sorting leaves it here.
+#include <ImGuizmo.h>
 
 namespace fe {
 using namespace editorui;
@@ -70,7 +72,8 @@ void Editor::adjustDraws(std::vector<WorldDraw>& draws) {
     }
     if (!focus) {
         // Nothing drew it (a title screen, a battle on top): show the map anyway.
-        draws.push_back(WorldDraw{.world = w});
+        draws.emplace_back();
+        draws.back().world = w;
         focus = &draws.back();
     }
     focus->pixelRect = viewRect_.pixels;
@@ -101,8 +104,8 @@ void Editor::drawViewportToolbar(World& w) {
     }
     ImGui::SameLine();
     const auto& cam = editorCamera_.camera;
-    ImGui::TextDisabled("%s  yaw %.0f  pitch %.0f  dist %.1f", cam.orthographic ? "ortho" : "persp", cam.yaw, cam.pitch,
-                        cam.distance);
+    ImGui::TextDisabled("%s  yaw %.0f  pitch %.0f  dist %.1f", cam.orthographic ? "ortho" : "persp", cam.yaw,
+                        cam.pitch, cam.distance);
     if (!hovered_.empty() && selectionValid(w, hovered_)) {
         ImGui::SameLine();
         ImGui::TextDisabled("  " ICON_FA_HAND_POINTER " %s", selectionLabel(w, hovered_).c_str());
@@ -160,7 +163,8 @@ void Editor::drawHandles(World& w, ImDrawList* draw, double alpha) {
         return ImVec2(px->x / scale, px->y / scale);
     };
     const ImVec2 clipMin(viewportMinPoints_.x, viewportMinPoints_.y);
-    const ImVec2 clipMax(viewportMinPoints_.x + viewportSizePoints_.x, viewportMinPoints_.y + viewportSizePoints_.y);
+    const ImVec2 clipMax(viewportMinPoints_.x + viewportSizePoints_.x,
+                         viewportMinPoints_.y + viewportSizePoints_.y);
     draw->PushClipRect(clipMin, clipMax, true);
     for (const auto& line : handleBatch_.lines) {
         const auto a = toPoints(line.a), b = toPoints(line.b);
@@ -179,7 +183,8 @@ void Editor::drawHandles(World& w, ImDrawList* draw, double alpha) {
         switch (icon.shape) {
         case HandleBatch::Icon::Shape::Diamond:
             draw->AddQuadFilled({p->x, p->y - r}, {p->x + r, p->y}, {p->x, p->y + r}, {p->x - r, p->y}, dark);
-            draw->AddQuad({p->x, p->y - r}, {p->x + r, p->y}, {p->x, p->y + r}, {p->x - r, p->y}, color, 1.5f);
+            draw->AddQuad({p->x, p->y - r}, {p->x + r, p->y}, {p->x, p->y + r}, {p->x - r, p->y}, color,
+                          1.5f);
             break;
         case HandleBatch::Icon::Shape::Circle:
             draw->AddCircleFilled(*p, r, dark);
@@ -249,14 +254,17 @@ bool Editor::drawGizmo(World& w, ImDrawList* draw, const ImVec2& min, const ImVe
     const auto projection = camera.projection(viewRect_.aspect(), true, alpha);
     const float yaw = transform->facingOnly ? std::atan2(transform->facing.x, transform->facing.y)
                                             : glm::radians(transform->yawDegrees);
-    auto model = glm::translate(glm::mat4(1), transform->position) * glm::rotate(glm::mat4(1), yaw, glm::vec3(0, 1, 0)) *
+    auto model = glm::translate(glm::mat4(1), transform->position) *
+                 glm::rotate(glm::mat4(1), yaw, glm::vec3(0, 1, 0)) *
                  glm::scale(glm::mat4(1), transform->scale);
     const float translateSnap[3] = {0.5f, 0.25f, 0.5f};
     const float rotateSnap[3] = {15, 15, 15};
     const float scaleSnap[3] = {0.25f, 0.25f, 0.25f};
     const float* snap = nullptr;
     if (snap_ && !ImGui::GetIO().KeyCtrl) {
-        snap = operation == ImGuizmo::TRANSLATE ? translateSnap : operation == ImGuizmo::ROTATE_Y ? rotateSnap : scaleSnap;
+        snap = operation == ImGuizmo::TRANSLATE  ? translateSnap
+               : operation == ImGuizmo::ROTATE_Y ? rotateSnap
+                                                 : scaleSnap;
     }
     const bool changed = ImGuizmo::Manipulate(glm::value_ptr(view), glm::value_ptr(projection), operation,
                                               ImGuizmo::LOCAL, glm::value_ptr(model), nullptr, snap);
@@ -304,8 +312,10 @@ bool Editor::drawGizmo(World& w, ImDrawList* draw, const ImVec2& min, const ImVe
     if (selection.kind == Selection::Kind::Placement) {
         if (const auto* p = findPlacement(w.authored(), selection.id)) {
             syncPlacementEntity(w, *p);
-            if (transform->scale != next.scale && !w.registry().all_of<MeshInstance>(placementEntity(w, selection.id))) {
-                placementChanged(w, selection.id); // sprite scale needs a respawn (deferred to the gesture's end)
+            if (transform->scale != next.scale &&
+                !w.registry().all_of<MeshInstance>(placementEntity(w, selection.id))) {
+                placementChanged(
+                    w, selection.id); // sprite scale needs a respawn (deferred to the gesture's end)
             }
         }
     }
@@ -313,14 +323,15 @@ bool Editor::drawGizmo(World& w, ImDrawList* draw, const ImVec2& min, const ImVe
 }
 
 void Editor::groundDrag(World& w, bool hovered, bool active, double alpha) {
-    const bool draggable = selection_.kind == Selection::Kind::Placement || selection_.kind == Selection::Kind::Point ||
+    const bool draggable = selection_.kind == Selection::Kind::Placement ||
+                           selection_.kind == Selection::Kind::Point ||
                            selection_.kind == Selection::Kind::Entity;
     if (!groundDragging_) {
         if (tool_ == Tool::Paint || gizmoUsing_ || !hovered || !draggable || !selectionValid(w, selection_)) {
             return;
         }
-        if (!ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::GetIO().KeyAlt || hovered_ != selection_ ||
-            ImGuizmo::IsOver()) {
+        if (!ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::GetIO().KeyAlt ||
+            hovered_ != selection_ || ImGuizmo::IsOver()) {
             return;
         }
         groundDragging_ = true;
@@ -408,8 +419,10 @@ void Editor::acceptViewportDrop(World& w, double alpha) {
             return;
         }
         const auto model = kind == AssetKind::Model ? engine_.assets().tryModel(path) : nullptr;
-        const auto placement = placementForAsset(kind, path, hit->cell, w.authored().grid, defaultType("entities"),
-                                                 w.authored().placements, model.get(), hit->point);
+        const auto placement =
+            placementForAsset(kind, path, hit->cell, w.authored().grid,
+                              defaultType(kind == AssetKind::Model ? "models" : "entities"),
+                              w.authored().placements, model.get(), hit->point);
         if (!placement) {
             status_ = "Only sprites (.anim.json) and models (.glb) can be placed in the scene";
             return;
@@ -451,10 +464,11 @@ void Editor::drawViewport(const EditorFrame& /*frame*/) {
     }
     ImGui::SetNextWindowPos(node->Pos);
     ImGui::SetNextWindowSize(node->Size);
-    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                                   ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus |
-                                   ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoDocking |
-                                   ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoScrollbar;
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoDecoration |
+                                   ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                                   ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus |
+                                   ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoScrollWithMouse |
+                                   ImGuiWindowFlags_NoScrollbar;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     const bool begun = ImGui::Begin("##fe_scene", nullptr, flags);
     ImGui::PopStyleVar();
@@ -472,7 +486,8 @@ void Editor::drawViewport(const EditorFrame& /*frame*/) {
             viewportMinPoints_ = {min.x, min.y};
             viewportSizePoints_ = {avail.x, avail.y};
             const float scale = pixelScale();
-            viewRect_.pixels = {static_cast<int>(std::lround(min.x * scale)), static_cast<int>(std::lround(min.y * scale)),
+            viewRect_.pixels = {static_cast<int>(std::lround(min.x * scale)),
+                                static_cast<int>(std::lround(min.y * scale)),
                                 static_cast<int>(std::lround(avail.x * scale)),
                                 static_cast<int>(std::lround(avail.y * scale))};
             // The gizmo goes before the viewport's own button: ImGuizmo only
@@ -499,7 +514,8 @@ void Editor::drawViewport(const EditorFrame& /*frame*/) {
                 layer_ = std::clamp(layer_, 0, w->authored().grid.layerCount() - 1);
                 updateOverlays(*w);
                 viewportCamera(*w, hovered && !gizmoUsing_, active && !gizmoUsing_);
-                const bool clicked = hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::GetIO().KeyAlt;
+                const bool clicked =
+                    hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::GetIO().KeyAlt;
                 // Hover (what a click would pick), then dragging the selection
                 // along the ground, then selecting.
                 pickAndSelect(*w, hovered, false, alpha_);

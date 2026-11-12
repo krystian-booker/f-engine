@@ -13,10 +13,9 @@ int clipDirection(int rows, glm::vec2 facing, float cameraYaw) {
 SpritePlacement placeSpriteClip(const Sprite& s, const SpriteAnimation& animation, const SpriteClip& clip,
                                 glm::vec3 feet, glm::vec2 facing, const Camera& camera, double alpha,
                                 int pixelsPerUnit) {
-    const int direction =
-        s.direction >= 0
-            ? s.direction
-            : clipDirection(static_cast<int>(clip.directions.size()), facing, camera.interpolatedYaw(alpha));
+    const int direction = s.direction >= 0 ? s.direction
+                                           : clipDirection(static_cast<int>(clip.directions.size()), facing,
+                                                           camera.interpolatedYaw(alpha));
     SpritePlacement placement;
     placement.frame = &clip.frameAt(direction, glm::mix(s.previousTime, s.time, alpha));
     const float ppu =

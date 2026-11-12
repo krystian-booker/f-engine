@@ -22,7 +22,19 @@ void bindSave(Engine& engine) {
             "fun(slot: string, data: table, meta?: table)",
             "Atomically write a save slot, keeping the previous version as its .bak. Raises (writing "
             "nothing) for data that could not be read back: tables nested deeper than 127 levels (the save "
-            "file wraps them in one more) and the values fe.json.encode rejects.")
+            "file wraps them in one more) and the values fe.json.encode rejects. The call returns once the "
+            "save is checked and queued: the slow part, getting it onto storage, happens on a worker thread, "
+            "so saving on a door or a menu costs the frame nothing. The slot reads back, lists and deletes "
+            "as if written at once; fe.save.pending() and fe.save.flush() are for the moments that must "
+            "know (a 'Saving...' icon, quitting). The same holds for write_blob and write_config.")
+        .fn(
+            "pending", [&saves] { return saves.pending(); }, "fun(): integer",
+            "Writes (slots, blobs, settings) not yet on storage; 0 when everything is.")
+        .fn(
+            "flush", [&saves] { saves.flush(); }, "fun()",
+            "Wait until every queued write is on storage. Raises when one of them failed (a full disk, a "
+            "removed card): the message of the first failure since the last flush. Failures are also logged "
+            "when they happen. The engine flushes by itself when it shuts down.")
         .fn(
             "read",
             [&saves, &host](const std::string& slot) -> std::tuple<sol::object, sol::object, sol::object> {
@@ -247,7 +259,23 @@ void bindInput(Engine& engine) {
             "Raw inputs that went down this tick (for rebinding screens). Stick axes are left out.")
         .fn(
             "last_device", [&input] { return input.lastDevice(); }, "fun(): string",
-            "'keyboard', 'gamepad' or 'mouse': the kind of device used last.")
+            "'keyboard', 'gamepad' or 'mouse': the kind of device used last. A key or mouse button going "
+            "down, "
+            "the mouse travelling a little way, a gamepad button or a stick pushed past half way, and a "
+            "gamepad "
+            "being plugged in all count; releases, stick drift and a nudged mouse do not.")
+        .fn(
+            "device_changed", [&input] { return input.deviceChanged(); }, "fun(): boolean",
+            "True on the tick fe.input.device_type() changed: the player touched the keyboard or mouse after "
+            "a gamepad, pressed a button or moved a stick on a gamepad (or plugged one in) after the "
+            "keyboard, "
+            "picked up a gamepad of another layout, or unplugged the one in use. Redraw button prompts then.")
+        .fn(
+            "label", [&input](const std::string& name) { return input.label(name); },
+            "fun(input: string): string",
+            "What is printed on a raw input, for prompts and rebinding screens: a key's label under the "
+            "player's keyboard layout ('key:Z' reads 'Y' on a German keyboard; the scancode name in headless "
+            "runs and replays), otherwise the part after the colon ('pad:a' reads 'a').")
         .fn(
             "device_type",
             [&input](sol::object pad) -> sol::object {
@@ -301,8 +329,7 @@ void bindInput(Engine& engine) {
             },
             "fun(): {type: 'connected'|'disconnected', pad: integer, name: string}[]",
             "Gamepads connected or disconnected this tick, in order (fe.input.pads() already reflects "
-            "them). The fe.input kit turns them into its pad_connected and pad_disconnected signals; a "
-            "game that pauses when the player's pad is unplugged listens there.")
+            "them). A game that pauses when the player's pad is unplugged reads them every tick.")
         .fn(
             "rumble",
             [&input](float low, float high, double seconds, sol::object pad) {
@@ -398,9 +425,10 @@ void bindInput(Engine& engine) {
                     static constexpr std::string_view Types[] = {"xbox", "playstation", "switch", "steamdeck",
                                                                  "generic"};
                     if (std::find(std::begin(Types), std::end(Types), description.type) == std::end(Types)) {
-                        throw std::runtime_error("feed_pad type must be xbox, playstation, switch, steamdeck or "
-                                                 "generic, got '" +
-                                                 description.type + "'");
+                        throw std::runtime_error(
+                            "feed_pad type must be xbox, playstation, switch, steamdeck or "
+                            "generic, got '" +
+                            description.type + "'");
                     }
                     description.rumble = lua::get(*options, "rumble", false);
                     description.triggerRumble = lua::get(*options, "trigger_rumble", false);
@@ -409,7 +437,8 @@ void bindInput(Engine& engine) {
                 "fun(pad: integer, spec?: {name?: string, type?: 'xbox'|'playstation'|'switch'|'steamdeck'|"
                 "'generic', rumble?: boolean, trigger_rumble?: boolean})",
                 "Connect a virtual gamepad numbered `pad` described by `spec` (name 'Virtual' of at most 64 "
-                "bytes, type 'generic' and no rumble by default), or without a spec disconnect it; fe.input.pads() "
+                "bytes, type 'generic' and no rumble by default), or without a spec disconnect it; "
+                "fe.input.pads() "
                 "changes at once and the event arrives on the next tick. Only in development builds, "
                 "--test/--check runs and --replay/--record sessions.");
     }
@@ -686,7 +715,7 @@ void bindScreen(Engine& engine) {
     auto& host = engine.lua();
     auto& screen = engine.screen();
     ModuleBinder(host, engine.docs(), "fe.screen",
-                 "Full-screen effects. Scripts animate these values (see fe.tween); renderers apply them.")
+                 "Full-screen effects. Scripts animate these values; renderers apply them.")
         .fn(
             "set",
             [&screen](sol::table t) {

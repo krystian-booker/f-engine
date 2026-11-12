@@ -2,15 +2,15 @@
 """Bundle the runtime, compiled shaders, the engine's Lua library and one game
 folder into a standalone distribution for one target OS.
 
-The game and lualib ship as .pak archives (written by `fengine_assetc pack`):
-game.pak and lualib.pak stand in for the folders game/ and lualib/. Files the
+The game and the engine's builtin assets ship as .pak archives (written by `fengine_assetc pack`):
+game.pak and builtin.pak stand in for the folders game/ and builtin/. Files the
 GPU loaders open directly stay loose in game/: shaders compiled from the
 game's shaders/*.sc and cooked .ktx textures.
 
 Layouts:
-  Windows, Linux   bin/<runtime>, bin/shaders, bin/lualib.pak, game.pak, game/,
+  Windows, Linux   bin/<runtime>, bin/shaders, bin/builtin.pak, game.pak, game/,
                    play.cmd or play
-  macOS            <Title>.app (Contents/MacOS/fengine; shaders, lualib.pak,
+  macOS            <Title>.app (Contents/MacOS/fengine; shaders, builtin.pak,
                    game.pak and game/ in Contents/Resources)
 Every layout also holds licenses/, README.txt and manifest.json (SHA-256 of
 every file and of every pak entry), which is checked against the output and
@@ -335,9 +335,9 @@ def package(args):
     assetc = args.assetc.resolve(strict=True)
     platform = args.platform if args.platform != "auto" else detect_platform(runtime)
     shaders = args.shaders.resolve(strict=True)
-    lualib = args.lualib.resolve(strict=True)
-    if not (lualib / "fe" / "init.lua").is_file():
-        raise ValueError(f"Not an engine Lua library: {lualib}")
+    builtin = args.builtin.resolve(strict=True)
+    if not (builtin / "assets" / "weather.json").is_file():
+        raise ValueError(f"Not the engine's builtin asset folder: {builtin}")
     backends = check_shaders(shaders)
     if (args.sign_identity and platform != "macos") or (args.notarize_profile and not args.sign_identity):
         raise ValueError("--sign-identity is for macOS packages; --notarize-profile needs it")
@@ -362,7 +362,7 @@ def package(args):
         # their own, mounted over game.pak at start.
         copy_tree(game, sources / "game", skip_parts=("saves", "tests", "replays"),
                   skip_top=("shaders", "packs"), skip_suffixes=LOOSE_SUFFIXES)
-        copy_tree(lualib, sources / "lualib", skip_parts=("tests",))
+        copy_tree(builtin, sources / "builtin", skip_parts=("types",))
         for pack in sorted((game / "packs").glob("*.pak")) if (game / "packs").is_dir() else ():
             if pack.is_file():
                 (loose / "packs").mkdir(parents=True, exist_ok=True)
@@ -388,7 +388,7 @@ def package(args):
                 raise ValueError(f"Duplicate runtime dependency: {source.name}")
             shutil.copy2(source, executable_dir / source.name)
         shutil.copytree(shaders, engine / "shaders")
-        make_pak(assetc, sources / "lualib", engine / "lualib.pak")
+        make_pak(assetc, sources / "builtin", engine / "builtin.pak")
         make_pak(assetc, sources / "game", game_dir / "game.pak")
         if loose.is_dir():
             shutil.copytree(loose, game_dir / "game")
@@ -426,7 +426,8 @@ def main():
     parser.add_argument("--assetc", type=Path, required=True, help="fengine_assetc, which writes the .pak archives")
     parser.add_argument("--platform", choices=("auto", "windows", "macos", "linux"), default="auto",
                         help="Target layout (default: from the runtime executable's format)")
-    parser.add_argument("--lualib", type=Path, default=ROOT / "lualib", help="Engine Lua library (default: the repo's)")
+    parser.add_argument("--builtin", type=Path, default=ROOT / "builtin",
+                        help="Engine asset folder: default font, glyphs, weather presets (default: the repo's)")
     parser.add_argument("--validator", type=Path, help="fengine_headless, to run --check on the game first")
     parser.add_argument("--licenses", type=Path)
     parser.add_argument("--runtime-dependency", type=Path, action="append", default=[],

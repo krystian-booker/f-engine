@@ -48,12 +48,9 @@ Camera::State Camera::blend(double alpha) const {
     }
     const auto t = static_cast<float>(std::clamp(alpha, 0.0, 1.0));
     const auto now = current();
-    return {glm::mix(previous_.target, now.target, t),
-            lerpAngle(previous_.yaw, now.yaw, t),
-            glm::mix(previous_.pitch, now.pitch, t),
-            glm::mix(previous_.distance, now.distance, t),
-            glm::mix(previous_.fov, now.fov, t),
-            glm::mix(previous_.orthoHeight, now.orthoHeight, t)};
+    return {glm::mix(previous_.target, now.target, t), lerpAngle(previous_.yaw, now.yaw, t),
+            glm::mix(previous_.pitch, now.pitch, t),   glm::mix(previous_.distance, now.distance, t),
+            glm::mix(previous_.fov, now.fov, t),       glm::mix(previous_.orthoHeight, now.orthoHeight, t)};
 }
 
 float Camera::interpolatedYaw(double alpha) const {

@@ -1,11 +1,14 @@
 #include "engine/audio/MiniAudio.h"
 #include "engine/audio/PitchShift.h"
+#include "engine/core/Pack.h"
+#include "engine/core/Paths.h"
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <doctest/doctest.h>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <random>
 #include <string>
 #include <thread>
@@ -93,8 +96,8 @@ void mixUntil(MiniAudio& audio, const std::function<bool()>& done, double limit 
 // The frequency (Hz) with the largest DFT magnitude in the left channel of
 // interleaved stereo, over `frames` from `start`, scanning `from`..`to` in
 // 4 Hz steps.
-double peakFrequency(const std::vector<float>& stereo, std::size_t start, std::size_t frames, double from = 100,
-                     double to = 2000) {
+double peakFrequency(const std::vector<float>& stereo, std::size_t start, std::size_t frames,
+                     double from = 100, double to = 2000) {
     double bestHertz = 0, best = -1;
     for (double hertz = from; hertz <= to; hertz += 4) {
         double re = 0, im = 0;
@@ -224,6 +227,16 @@ TEST_CASE("one-shots end by themselves; missing files throw") {
     play(audio, 1.3);
     CHECK(audio.activeSounds() == 0);
     CHECK_THROWS(audio.playSound("missing.wav", SoundOptions{}));
+}
+
+TEST_CASE("Ogg Vorbis files decode like the other formats") {
+    MiniAudio audio(false);
+    const auto file = std::filesystem::path(FENGINE_TEST_GAME) / "audio" / "tone.ogg";
+    CHECK(audio.length(file) == doctest::Approx(0.5).epsilon(0.05));
+    const int voice = audio.playSound(file, SoundOptions{});
+    CHECK(audio.playing(voice));
+    play(audio, 0.8);
+    CHECK(audio.activeSounds() == 0); // it played to its end
 }
 
 TEST_CASE("voices report whether they play and where they are") {
@@ -553,7 +566,8 @@ TEST_CASE("music cued in one tick starts together; a later tick's cue is its own
     MusicOptions first;
     first.layer = "pads";
     audio.playMusic(file, first);
-    mixUntil(audio, [&] { return audio.musicPosition("pads") > 0; }); // ticks pass: later cues form another group
+    mixUntil(audio,
+             [&] { return audio.musicPosition("pads") > 0; }); // ticks pass: later cues form another group
     MusicOptions drums, bass;
     drums.layer = "drums";
     bass.layer = "bass";
@@ -658,4 +672,52 @@ TEST_CASE("preserve_speed shifts the pitch and keeps the playback time; outside 
     // Voices that never asked for it have no shifter.
     const int plain = audio.playSound(file, SoundOptions{});
     CHECK_FALSE(audio.voiceShifted(plain));
+}
+
+TEST_CASE("packed audio plays from inside the archive, stored or compressed, without being extracted") {
+    TempFolder folder;
+    const auto game = folder.path / "game";
+    std::filesystem::create_directories(game / "audio");
+    const auto read = [](const std::filesystem::path& file) {
+        std::ifstream in(file, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), {});
+    };
+    const auto ogg = read(std::filesystem::path(FENGINE_TEST_GAME) / "audio" / "tone.ogg");
+    const auto wav = read(toneFile());
+    {
+        PackWriter writer(folder.path / "game.pak");
+        writer.add("audio/stored.ogg", ogg); // as the packer stores audio
+        writer.add("audio/stored.wav", wav);
+        writer.add("audio/squeezed.wav", wav, PackWriter::Compression::Zlib); // an archive made otherwise
+        writer.add("audio/squeezed.ogg", ogg, PackWriter::Compression::Zlib);
+        writer.finish();
+    }
+    mountPack(folder.path / "game.pak", false);
+    REQUIRE(storedSpan(game / "audio" / "stored.ogg").has_value());
+    CHECK(storedSpan(game / "audio" / "stored.ogg")->size == ogg.size());
+    CHECK_FALSE(storedSpan(game / "audio" / "squeezed.wav").has_value());
+    CHECK(isPacked(game / "audio" / "squeezed.wav"));
+    CHECK_FALSE(isPacked(toneFile()));
+
+    MiniAudio audio(false);
+    CHECK(audio.length(game / "audio" / "stored.ogg") == doctest::Approx(0.5).epsilon(0.05));
+    CHECK(audio.length(game / "audio" / "squeezed.ogg") == doctest::Approx(0.5).epsilon(0.05));
+    CHECK(audio.length(game / "audio" / "stored.wav") == doctest::Approx(1.0));
+    CHECK(audio.length(game / "audio" / "squeezed.wav") == doctest::Approx(1.0));
+    for (const char* name : {"stored.ogg", "stored.wav", "squeezed.wav", "squeezed.ogg"}) {
+        CAPTURE(name);
+        const int voice = audio.playSound(game / "audio" / name, SoundOptions{});
+        CHECK(audio.playing(voice));
+        mixUntil(audio, [&] { return audio.position(voice) > 0; });
+        CHECK(audio.position(voice) > 0); // it produced sound
+        audio.stopSound(voice, 0);
+    }
+    // Music streams from the archive too.
+    audio.playMusic(game / "audio" / "stored.wav", MusicOptions{});
+    mixUntil(audio, [&] { return audio.musicPosition("main") > 0; });
+    CHECK(audio.musicPosition("main") > 0);
+    // Nothing was written next to the archive or anywhere under the game folder.
+    CHECK_FALSE(std::filesystem::exists(game / "audio" / "stored.ogg"));
+    audio.stopMusic("", 0);
+    unmountPacks();
 }

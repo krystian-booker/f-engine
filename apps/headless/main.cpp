@@ -43,7 +43,7 @@ int replay(int argc, char** argv) {
         usage();
         return 2;
     }
-    return fe::runHeadlessReplay(fe::openGame(game), fe::findLibraryRoot(fe::executablePath(argv[0])), file,
+    return fe::runHeadlessReplay(fe::openGame(game), fe::findBuiltinRoot(fe::executablePath(argv[0])), file,
                                  userData, seed);
 }
 } // namespace

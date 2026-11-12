@@ -44,7 +44,9 @@ void bindPlatform(Engine& engine) {
         .fn(
             "load_progress", [&engine](int ticket) { return engine.loadProgress(ticket); },
             "fun(ticket: integer): number",
-            "Background load progress 0..1; 1 when finish_load won't wait (or the load failed).")
+            "Background load progress 0..1; 1 when finish_load won't wait (or the load failed) and what the "
+            "map draws is on the GPU, so the first frame that shows it does not stall (the last tenth is "
+            "that upload).")
         .fn(
             "finish_load", [&engine](int ticket) { return WorldRef{engine.finishLoad(ticket), &engine}; },
             "fun(ticket: integer): World",

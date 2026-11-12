@@ -183,7 +183,8 @@ void bindText(Engine& engine) {
             },
             "fun(resolver: (fun(tag: string): string?)|nil)",
             "Resolve custom tags such as {player} or {var:name}; nil removes the resolver. It runs under a C "
-            "call (from fe.text, fe.canvas.text and the frame's text layout) and must not yield: a task.wait "
+            "call (from fe.text, fe.canvas.text and the frame's text layout) and must not yield: a "
+            "coroutine.yield "
             "in it raises 'attempt to yield across a C-call boundary'. A resolver may "
             "replace or remove itself; the call in progress finishes with the old one. Its errors are "
             "reported and the tag is shown as written. A resolver that resolves markup with tags through "

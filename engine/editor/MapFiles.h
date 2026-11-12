@@ -26,7 +26,8 @@ namespace fe {
 // `geometry`, that .glb/.gltf file is copied in as the map's geometry;
 // without one, a map whose geometry file is missing gets a flat ground quad
 // the size of the grid (`geometry.gltf`), which the bake reads as walkable.
-void writeMap(const std::filesystem::path& gameRoot, const MapData& map, const std::filesystem::path& geometry = {});
+void writeMap(const std::filesystem::path& gameRoot, const MapData& map,
+              const std::filesystem::path& geometry = {});
 // Copies a map folder to a new id (map.json gets the new id; geometry and
 // everything else in the folder come along).
 void copyMap(const std::filesystem::path& gameRoot, std::string_view from, const std::string& to,

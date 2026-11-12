@@ -27,9 +27,10 @@ std::optional<GridPos> Editor::hoveredCell(World& w) {
 void Editor::updateOverlays(World& w) {
     auto& overlays = w.overlays();
     const auto& boxed = w.boxBlockedCells();
-    const auto key = w.name() + "/" + std::to_string(revision_) + "/" + std::to_string(layer_) + "/" + brush_.tag +
-                     (showGrid_ ? "/on" : "/off") + (showBoxBlocked_ ? "/boxes" : "") + (showOverrides_ ? "/over" : "") +
-                     "/" + std::to_string(boxed.size()) + "/" + std::to_string(w.map().grid.revision());
+    const auto key = w.name() + "/" + std::to_string(revision_) + "/" + std::to_string(layer_) + "/" +
+                     brush_.tag + (showGrid_ ? "/on" : "/off") + (showBoxBlocked_ ? "/boxes" : "") +
+                     (showOverrides_ ? "/over" : "") + "/" + std::to_string(boxed.size()) + "/" +
+                     std::to_string(w.map().grid.revision());
     if (key == gridOverlayKey_ && overlays.contains("editor:blocked") == showGrid_) {
         return;
     }
@@ -70,7 +71,8 @@ void Editor::updateOverlays(World& w) {
     }
     if (showOverrides_ && !w.authored().bake.overrides.empty()) {
         // Cells an author corrected by hand: they keep their value through re-bakes.
-        overlays["editor:override"] = OverlayLayer{overriddenCells(w.authored(), layer_), {0.75f, 0.4f, 1, 0.3f}, 0, 94, true, true};
+        overlays["editor:override"] =
+            OverlayLayer{overriddenCells(w.authored(), layer_), {0.75f, 0.4f, 1, 0.3f}, 0, 94, true, true};
     }
 }
 
@@ -80,8 +82,9 @@ void Editor::drawPaint(World& w) {
     const auto& grid = map.grid;
     const bool derived = !map.bake.empty();
     if (derived) {
-        ImGui::TextWrapped("The brush records overrides: cells that keep what you paint when the walkability is "
-                           "baked again. Clear override hands a cell back to the bake.");
+        ImGui::TextWrapped(
+            "The brush records overrides: cells that keep what you paint when the walkability is "
+            "baked again. Clear override hands a cell back to the bake.");
     }
     ImGui::SliderInt("Layer", &layer_, 0, grid.layerCount() - 1);
     ImGui::SameLine();
@@ -146,7 +149,8 @@ void Editor::drawPaint(World& w) {
     }
     ImGui::PopID();
     const auto ray = mouseRay(w, alpha_);
-    const auto hit = ray ? raycastGrid(w.grid(), ray->origin, ray->direction, sceneCamera(w).farPlane) : std::nullopt;
+    const auto hit =
+        ray ? raycastGrid(w.grid(), ray->origin, ray->direction, sceneCamera(w).farPlane) : std::nullopt;
     if (!hit) {
         if (fillStart_ && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
             fillStart_.reset();
@@ -159,7 +163,8 @@ void Editor::drawPaint(World& w) {
         return;
     }
     const auto& c = grid.at(target);
-    ImGui::Text("Cell %d,%d  height %.2f  %s", target.x, target.z, c.height, c.walkable ? "walkable" : "blocked");
+    ImGui::Text("Cell %d,%d  height %.2f  %s", target.x, target.z, c.height,
+                c.walkable ? "walkable" : "blocked");
     w.cursor() = OverlayCursor{true, target, {1, 1, 1, 0.8f}};
     cursorShown_ = true;
     if (tool_ != Tool::Paint || !viewportHovered_) {
@@ -236,9 +241,11 @@ void Editor::drawPaint(World& w) {
                     const auto cell = stack.back();
                     stack.pop_back();
                     cells.push_back(cell);
-                    for (const auto [dx, dz] : {std::pair{1, 0}, std::pair{-1, 0}, std::pair{0, 1}, std::pair{0, -1}}) {
+                    for (const auto& [dx, dz] :
+                         {std::pair{1, 0}, std::pair{-1, 0}, std::pair{0, 1}, std::pair{0, -1}}) {
                         const GridPos next{cell.x + dx, cell.z + dz, layer_};
-                        if (grid.inRange(next) && grid.at(next).walkable == walkable && seen.insert({next.x, next.z}).second) {
+                        if (grid.inRange(next) && grid.at(next).walkable == walkable &&
+                            seen.insert({next.x, next.z}).second) {
                             stack.push_back(next);
                         }
                     }
@@ -287,8 +294,12 @@ Json bakedPlacementsJson(const MapData& map) {
     Json out = Json::array();
     for (const auto& p : map.placements) {
         if (const auto model = bakedModelOf(p)) {
-            out.push_back({{"id", p.id},   {"model", *model},         {"position", toJson(p.position)},
-                           {"yaw", p.yaw}, {"scale", toJson(p.scale)}, {"layer", p.layer}});
+            out.push_back({{"id", p.id},
+                           {"model", *model},
+                           {"position", toJson(p.position)},
+                           {"yaw", p.yaw},
+                           {"scale", toJson(p.scale)},
+                           {"layer", p.layer}});
         }
     }
     return out;
@@ -311,10 +322,12 @@ void Editor::rebake(World& w, const BakeOptions& given, bool joinGesture, bool s
     }
     const auto scene = sceneForMap(authored, engine_.assets(), w.geometryPath());
     const auto result = bakeWalkability(scene.pieces, authored.grid, options);
-    const Json optionsJson = storeOptions || authored.bake.options.empty() ? options.toJson() : authored.bake.options;
+    const Json optionsJson =
+        storeOptions || authored.bake.options.empty() ? options.toJson() : authored.bake.options;
     MapData fingerprinted = authored;
     fingerprinted.bake.options = optionsJson;
-    const auto fingerprint = bakeFingerprint(fingerprinted, w.geometryPath(), gameFileReader(engine_.lua().gameRoot()));
+    const auto fingerprint =
+        bakeFingerprint(fingerprinted, w.geometryPath(), gameFileReader(engine_.lua().gameRoot()));
     int changed = 0;
     const auto apply = [&](MapData& m) {
         changed = applyBake(m, result, options);
@@ -332,8 +345,8 @@ void Editor::rebake(World& w, const BakeOptions& given, bool joinGesture, bool s
     gestureBakeSnapshot_.reset();
     ++revision_;
     status_ = (options.region ? "Re-baked walkability around the change: " : "Baked walkability: ") +
-              std::to_string(changed) + " cell(s) changed, " + std::to_string(w.authored().bake.colliders.size()) +
-              " box(es)";
+              std::to_string(changed) + " cell(s) changed, " +
+              std::to_string(w.authored().bake.colliders.size()) + " box(es)";
     for (const auto& problem : scene.problems) {
         status_ += "; " + problem;
     }
@@ -360,7 +373,8 @@ void Editor::autoRebake(World& w) {
         p.yaw = entry.at("yaw");
         p.scale = jsonVec3(entry.at("scale"));
         const auto model = engine_.assets().tryModel(entry.at("model").get<std::string>());
-        const auto cells = model ? bakeRegionFor(*model, p, grid) : glm::ivec4(0, 0, grid.width(), grid.depth());
+        const auto cells =
+            model ? bakeRegionFor(*model, p, grid) : glm::ivec4(0, 0, grid.width(), grid.depth());
         region = region ? unionRegion(*region, cells) : cells;
     };
     for (const auto& entry : before) {
@@ -422,8 +436,9 @@ void Editor::drawWalkability(World& w) {
         }
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Derive walkability from the terrain and the placed models, again whenever a model is\n"
-                          "placed, moved, turned, scaled or removed. Fix exceptions with the brush.");
+        ImGui::SetTooltip(
+            "Derive walkability from the terrain and the placed models, again whenever a model is\n"
+            "placed, moved, turned, scaled or removed. Fix exceptions with the brush.");
     }
     ImGui::SameLine();
     if (ImGui::Button(ICON_FA_WAND_MAGIC_SPARKLES " Bake now")) {
@@ -439,8 +454,9 @@ void Editor::drawWalkability(World& w) {
         ImGui::TextDisabled("Hand-painted walkability. Bake now derives it from the terrain and the placed\n"
                             "models; Auto bake keeps it up to date.");
     } else if (bakeStale_) {
-        ImGui::TextColored(ImVec4(1, 0.6f, 0.2f, 1), ICON_FA_TRIANGLE_EXCLAMATION
-                           " Bake out of date: the geometry, a model or a placement changed. Press Bake now.");
+        ImGui::TextColored(
+            ImVec4(1, 0.6f, 0.2f, 1), ICON_FA_TRIANGLE_EXCLAMATION
+            " Bake out of date: the geometry, a model or a placement changed. Press Bake now.");
     } else {
         ImGui::TextDisabled("Fresh: %s", bakeStatus_.c_str());
     }
@@ -459,7 +475,8 @@ void Editor::drawWalkability(World& w) {
     ImGui::SameLine();
     ImGui::Checkbox("Overrides", &showOverrides_);
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Violet: cells fixed by hand with the brush; they keep their value through re-bakes.");
+        ImGui::SetTooltip(
+            "Violet: cells fixed by hand with the brush; they keep their value through re-bakes.");
     }
     drawBakeOptions(w);
 }
@@ -505,7 +522,8 @@ void Editor::drawBakeOptions(World& w) {
     if (band) {
         ImGui::DragFloatRange2("Band", &o.minHeight, &o.maxHeight, 0.25f, -100, 100, "%.2f", "%.2f");
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("For a bridge deck or an upper floor: bake only what lies between these heights into the layer");
+            ImGui::SetTooltip("For a bridge deck or an upper floor: bake only what lies between these "
+                              "heights into the layer");
         }
     }
     bool regional = o.region.has_value();
@@ -571,9 +589,9 @@ void Editor::drawLinks(World& w) {
     for (std::size_t i = 0; i < links.size(); ++i) {
         const auto& l = links[i];
         ImGui::PushID(static_cast<int>(i));
-        const auto label = std::string(l.kind == LinkKind::Ladder ? "Ladder " : "Link ") + std::to_string(l.x) +
-                           "," + std::to_string(l.z) + ": layer " + std::to_string(l.from) + " -> " +
-                           std::to_string(l.to);
+        const auto label = std::string(l.kind == LinkKind::Ladder ? "Ladder " : "Link ") +
+                           std::to_string(l.x) + "," + std::to_string(l.z) + ": layer " +
+                           std::to_string(l.from) + " -> " + std::to_string(l.to);
         if (ImGui::Selectable(label.c_str(), selectedLink == static_cast<int>(i))) {
             selectedLink = static_cast<int>(i);
         }
@@ -662,8 +680,8 @@ void Editor::drawMapTab() {
     }
     const auto& map = w->authored();
     layer_ = std::clamp(layer_, 0, map.grid.layerCount() - 1);
-    ImGui::Text("%s (%s)  %dx%d, %d layer(s)", map.name.c_str(), map.id.c_str(), map.grid.width(), map.grid.depth(),
-                map.grid.layerCount());
+    ImGui::Text("%s (%s)  %dx%d, %d layer(s)", map.name.c_str(), map.id.c_str(), map.grid.width(),
+                map.grid.depth(), map.grid.layerCount());
     if (ImGui::Button(ICON_FA_FLOPPY_DISK " Save map")) {
         saveMap(*w);
     }

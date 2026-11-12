@@ -48,11 +48,16 @@ struct AudioId {
 // archives) through engine/core/Paths.h, so it runs headless.
 class AssetCatalog {
 public:
-    AssetCatalog(std::filesystem::path gameRoot, std::filesystem::path libraryRoot);
+    AssetCatalog(std::filesystem::path gameRoot, std::filesystem::path builtinRoot);
     // Reads the folder again. Cheap enough to call after the file watcher
     // reports a change; the revision moves when the result differs.
     void scan();
     [[nodiscard]] std::uint64_t revision() const { return revision_; }
+    // The game's description of its placement and zone types (PropLinks.h):
+    // the next scan() takes the fields it types as scripts and maps for
+    // references, so one that names nothing is listed by missing(). The
+    // editor's default description until a game gives its own.
+    void setSchemas(Json schemas) { schemas_ = std::move(schemas); }
 
     [[nodiscard]] const std::vector<AssetEntry>& entries() const { return entries_; }
     [[nodiscard]] std::vector<const AssetEntry*> ofKind(AssetKind kind) const;
@@ -79,14 +84,17 @@ public:
 private:
     void addReference(const std::string& target, const std::string& file, const std::string& where);
     void indexJson(const Json& value, const std::string& file, const std::string& where, bool isMap);
+    void indexString(const std::string& text, const std::string& file, const std::string& where);
+    void indexLinks(const Json& objects, const char* group, const std::string& file);
     void indexMap(const std::string& path);
     void indexData(const std::string& path);
     void indexSprite(const std::string& path);
-    std::filesystem::path gameRoot_, libraryRoot_;
+    std::filesystem::path gameRoot_, builtinRoot_;
     std::vector<AssetEntry> entries_;
     std::map<std::string, std::vector<AssetReference>, std::less<>> references_;
     std::vector<MapInfo> maps_;
     std::vector<AudioId> audio_;
+    Json schemas_;
     std::uint64_t revision_ = 0;
 };
 } // namespace fe

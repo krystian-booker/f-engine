@@ -367,7 +367,7 @@ def kit_stairs(path, height=1.0, length=2):
     scene.write(path)
 
 
-def vale_props(folder):
+def sample_props(folder):
     """Models for the Assets panel: props with their origin at the centre of
     the base and footprints of whole cells, and a kit of ground pieces."""
     prop_house(folder / "fx" / "house.glb", 4, 3)
@@ -459,35 +459,246 @@ def zone(id_, kind, x0, z0, x1, z1, props):
     return {"id": id_, "type": kind, "min": [x0, z0], "max": [x1, z1], "props": props}
 
 
-# --------------------------------------------------------------------------- Vale (classic ATB side-view)
+# --------------------------------------------------------------------------- Starfall (the sample game)
 
-def vale():
-    folder = REPO / "samples" / "vale"
+def vehicle_sprite(folder, name, draw):
+    """A one-clip, four-direction sprite of two frames (the strider, the skiff)."""
+    c = Canvas(64, 48 * 4)
+    directions = []
+    for direction in range(4):
+        entries = []
+        for frame in range(2):
+            ox, oy = frame * 32, direction * 48
+            draw(c, ox, oy, direction, frame)
+            entries.append({"rect": [ox, oy, 32, 48], "duration": 0.3})
+        directions.append(entries)
+    c.save(folder / "sprites" / f"{name}.png")
+    write_json(folder / "sprites" / f"{name}.anim.json", {
+        "atlas": f"{name}.png", "pixels_per_unit": 32, "pivot": [0.5, 1],
+        "clips": {"idle": {"loop": True, "directions": [[d[0]] for d in directions]},
+                  "walk": {"loop": True, "directions": directions}}})
+
+
+def draw_strider(c, ox, oy, direction, frame):
+    """A long-legged riding bird."""
+    body, dark, beak = (236, 196, 72), (176, 132, 40), (232, 120, 48)
+    bob = frame
+    side = direction in (1, 3)
+    flip = -1 if direction == 1 else 1
+    c.rect(ox + 12, oy + 34 + bob, 2, 12 - bob, dark)
+    c.rect(ox + 18, oy + 34 - bob + 1, 2, 12 + bob - 1, dark)
+    c.ellipse(ox + 16, oy + 28 - bob, 10, 8, OUTLINE)
+    c.ellipse(ox + 16, oy + 28 - bob, 9, 7, body)
+    if side:
+        c.rect(ox + 16 + flip * 7 - 2, oy + 12 - bob, 5, 14, body)
+        c.ellipse(ox + 16 + flip * 8, oy + 11 - bob, 5, 4, body)
+        c.rect(ox + 16 + flip * 12 - 1, oy + 11 - bob, 4, 2, beak)
+        c.rect(ox + 16 + flip * 9, oy + 9 - bob, 2, 2, OUTLINE)
+        c.rect(ox + 16 - flip * 10 - 1, oy + 22 - bob, 4, 6, dark)
+    else:
+        c.rect(ox + 14, oy + 12 - bob, 5, 12, body)
+        c.ellipse(ox + 16, oy + 11 - bob, 5, 4, body)
+        if direction == 0:
+            c.rect(ox + 15, oy + 12 - bob, 3, 2, beak)
+            c.rect(ox + 13, oy + 9 - bob, 2, 2, OUTLINE); c.rect(ox + 18, oy + 9 - bob, 2, 2, OUTLINE)
+
+
+def draw_skiff(c, ox, oy, direction, frame):
+    """A small airship: a hull under a balloon, with a spinning propeller."""
+    hull, trim, bag = (132, 86, 52), (214, 178, 96), (206, 84, 70)
+    c.ellipse(ox + 16, oy + 14, 13, 9, OUTLINE)
+    c.ellipse(ox + 16, oy + 14, 12, 8, bag)
+    c.rect(ox + 6, oy + 13, 20, 2, trim)
+    c.rect(ox + 9, oy + 22, 1, 8, OUTLINE); c.rect(ox + 22, oy + 22, 1, 8, OUTLINE)
+    c.rect(ox + 6, oy + 30, 20, 9, OUTLINE)
+    c.rect(ox + 7, oy + 31, 18, 7, hull)
+    c.rect(ox + 7, oy + 31, 18, 2, trim)
+    blade = 6 if frame == 0 else 2
+    if direction in (1, 3):
+        x = ox + (3 if direction == 3 else 27)
+        c.rect(x, oy + 34 - blade // 2, 2, blade + 1, (230, 230, 240))
+    else:
+        c.rect(ox + 16 - blade // 2, oy + (39 if direction == 0 else 29), blade + 1, 2, (230, 230, 240))
+
+
+def overworld_icons(folder):
+    """Small landmark models for the overworld: a town, a cave mouth, a shrine."""
+    town = Diorama()
+    for x, z, w in ((-.22, -.1, .4), (.24, .05, .34), (-.05, .28, .3)):
+        town.box(x, 0, z, w, .28, w, (.74, .62, .45))
+        town.roof(x, .28, z, w + .1, .2, w + .1)
+    town.write(folder / "fx" / "ow_town.glb")
+    cave = Diorama()
+    cave.box(0, 0, -.1, .9, .7, .6, (.36, .34, .36))
+    cave.box(0, 0, .22, .36, .42, .1, (.05, .05, .08))
+    cave.box(-.3, .7, -.1, .25, .25, .3, (.3, .29, .31))
+    cave.write(folder / "fx" / "ow_cave.glb")
+    shrine = Diorama()
+    shrine.box(0, 0, 0, .9, .12, .9, (.8, .8, .84))
+    for x, z in ((-.3, -.3), (.3, -.3), (-.3, .3), (.3, .3)):
+        shrine.box(x, .12, z, .12, .6, .12, (.86, .86, .9))
+    shrine.box(0, .72, 0, .9, .1, .9, (.7, .74, .9))
+    shrine.box(0, .12, 0, .2, .4, .2, (.5, 1.4, 2.4))
+    shrine.write(folder / "fx" / "ow_shrine.glb")
+
+
+def overworld(folder):
+    """The walkable world map: a continent cut by a river only a strider fords,
+    mountains, forests with their own encounters, and an islet only the skiff
+    reaches. The grid wraps east-west and north-south."""
+    rng = random.Random(41)
+    W, D = 40, 28
+    grid = GridBuilder(W, D)
+    land = [[False] * W for _ in range(D)]
+
+    def blob(cx, cz, rx, rz):
+        for z in range(D):
+            for x in range(W):
+                if ((x + .5 - cx) / rx) ** 2 + ((z + .5 - cz) / rz) ** 2 <= 1:
+                    land[z][x] = True
+    blob(12, 14, 8.5, 8)     # the western half: the town's plains
+    blob(25, 13, 7.5, 8.5)   # the eastern half: forest and the grotto's hills
+    blob(18.5, 14, 4, 6)     # joined across the river
+    blob(35, 12, 2.6, 2.6)   # the shrine's islet
+    river = {(x, z) for z in range(D) for x in (18, 19) if land[z][x]}
+    mountains = {(x, z) for x, z in [(22, 7), (23, 7), (24, 7), (27, 8), (28, 9), (28, 10), (28, 11), (22, 8),
+                                     (21, 9), (27, 12), (26, 13), (9, 8), (10, 8), (11, 7), (6, 17), (7, 18)]
+                 if land[z][x]}
+    forest = {(x, z) for z in range(D) for x in range(W)
+              if land[z][x] and x >= 20 and (x, z) not in mountains and not (24 <= x <= 26 and 9 <= z <= 12)
+              and x < 32}
+    for z in range(D):
+        for x in range(W):
+            if not land[z][x]:
+                continue
+            if (x, z) in river:
+                grid.fill(x, z, x + 1, z + 1, walk=False, height=-0.12, tag="shallows")
+            elif (x, z) in mountains:
+                grid.fill(x, z, x + 1, z + 1, walk=False, height=1.3, tag="mountain")
+            elif (x, z) in forest:
+                grid.fill(x, z, x + 1, z + 1, tag="encounter:forest")
+                grid.fill(x, z, x + 1, z + 1, tag="forest")
+            elif x < 32 and not (9 <= x <= 13 and 12 <= z <= 16):
+                grid.fill(x, z, x + 1, z + 1, tag="encounter:plains")
+    # The sea: every cell that is not land, as rectangles of water one row at a time.
+    for z in range(D):
+        x = 0
+        while x < W:
+            if land[z][x]:
+                x += 1
+                continue
+            end = x
+            while end < W and not land[z][end]:
+                end += 1
+            grid.fill(x, z, end, z + 1, walk=False, height=-0.3, tag="water")
+            grid.water.append((x, z, end, z + 1, -0.1))
+            x = end
+    for x, z in sorted(river):
+        grid.water.append((x, z, x + 1, z + 1, -0.04))
+
+    def colour(x, z):
+        if (x, z) in mountains:
+            return PALETTE["cliff"]
+        if (x, z) in forest:
+            return (.2, .36, .22)
+        if (x, z) in river:
+            return PALETTE["sand"]
+        edge = any(not land[(z + dz) % D][(x + dx) % W] for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)))
+        return PALETTE["sand"] if edge else PALETTE["grass"]
+    scene = terrain(grid, colour, rng)
+    # What the walkability bake reads instead of the visible mesh: flat ground
+    # under every land cell (the forest's trees are scenery, not obstacles),
+    # nothing under the river and the sea, and the mountains as blocks.
+    for z in range(D):
+        for x in range(W):
+            if land[z][x] and (x, z) not in river and (x, z) not in mountains:
+                scene.quad([(x, 0, z), (x, 0, z + 1), (x + 1, 0, z + 1), (x + 1, 0, z)], (1, 1, 1), "collision")
+    for x, z in sorted(mountains):
+        scene.collision_box(x + .5, 0, z + .5, 1, 1.3, 1)
+        scene.box(x + .5, 1.3, z + .5, .6, rng.uniform(.4, .9), .6, PALETTE["snow"])
+    for x, z in sorted(forest):
+        if rng.random() < 0.55:
+            scene.box(x + rng.uniform(.3, .7), 0, z + rng.uniform(.3, .7), .12, .3, .12, (.32, .22, .15))
+            scene.box(x + .5, .25, z + .5, .7, .45, .7, tuple(v * rng.uniform(.85, 1.1) for v in (.16, .34, .2)))
+    placements = [
+        {"id": "amber_vale", "type": "door", "position": [11.5, 0, 14.5],
+         "props": {"map": "town", "point": "entry", "name": "Amber Vale", "model": "fx/ow_town.glb", "solid": False}},
+        {"id": "crystal_grotto", "type": "door", "position": [25.5, 0, 10.5],
+         "props": {"map": "grotto", "point": "entry", "name": "Crystal Grotto", "model": "fx/ow_cave.glb",
+                   "solid": False}},
+        {"id": "starfall_shrine", "type": "npc", "position": [35.5, 0, 12.5],
+         "props": {"name": "Starfall Shrine", "model": "fx/ow_shrine.glb", "script": "events.shrine",
+                   "solid": False}},
+        {"id": "strider", "type": "vehicle", "position": [13.5, 0, 15.5],
+         "props": {"kind": "strider", "sprite": "sprites/strider.anim.json"}},
+        {"id": "skiff", "type": "vehicle", "position": [9.5, 0, 16.5],
+         "props": {"kind": "skiff", "sprite": "sprites/skiff.anim.json"}},
+    ]
+    doc = write_map(folder, "overworld", "The Starfall Coast", grid, scene, {
+        "ambient": [.5, .5, .48], "sun_color": [1, .92, .78], "sun_direction": [-.5, -1, -.35],
+        "fog_color": [.66, .76, .86], "fog_density": .006, "shadow_distance": 40,
+        "sky": {"mode": "gradient", "top": [.24, .44, .8], "horizon": [.8, .86, .92], "cloud_cover": .35},
+        "water": {"color": [.1, .36, .56], "deep_color": [.04, .14, .3]},
+        "post": {"bloom_strength": .3, "focus": .55, "focus_range": .3, "lut": "ui/amber.cube"}},
+        {"start": {"position": [11.5, 0, 15.5], "facing": [0, 1]},
+         "town": {"position": [11.5, 0, 15.5], "facing": [0, 1]},
+         "grotto": {"position": [25.5, 0, 11.5], "facing": [0, 1]},
+         "shrine": {"position": [35.5, 0, 13.5], "facing": [0, 1]}},
+        placements=placements,
+        props={"music": "overworld", "battle_stage": "battle_grass", "overworld": True,
+               "camera": {"pitch": 52, "distance": 21, "fov": 30}})
+    # The map wraps, and its bake keeps every landmass: the far bank and the
+    # islet are reached by strider and skiff, not on foot, so they are not
+    # stray islands to prune. The river and the peaks stay closed to walkers
+    # whatever the bake makes of their surfaces.
+    target = folder / "maps" / "overworld" / "map.json"
+    doc["grid"]["wrap"] = True
+    doc["bake"]["options"] = {"prune_islands": False, "block_edges": False}
+    doc["bake"]["overrides"] = [{"x": x, "z": z, "layer": 0, "w": 1, "d": 1, "walkable": False}
+                                for x, z in sorted(river | mountains)]
+    write_json(target, doc)
+
+
+def starfall():
+    folder = REPO / "samples" / "starfall"
     looks = {
         "aster": {"coat": (178, 61, 66), "hair": (83, 53, 40), "weapon": (200, 210, 230)},
         "mira": {"coat": (49, 126, 142), "hair": (235, 197, 118), "trim": (240, 240, 250)},
+        "bram": {"coat": (96, 108, 76), "hair": (48, 44, 40), "weapon": (150, 120, 70), "hat": (70, 76, 52)},
+        "sel": {"coat": (142, 92, 168), "hair": (236, 236, 244), "trim": (255, 214, 120)},
         "elder": {"coat": (118, 93, 157), "hair": (204, 203, 197)},
         "merchant": {"coat": (89, 142, 86), "hair": (104, 64, 40), "hat": (120, 80, 40)},
         "innkeeper": {"coat": (74, 109, 163), "hair": (124, 76, 44)},
         "villager": {"coat": (160, 120, 80), "hair": (60, 40, 30)},
+        "stablehand": {"coat": (196, 150, 70), "hair": (150, 70, 40), "hat": (220, 200, 150)},
+        "warden": {"coat": (90, 170, 220), "hair": (220, 240, 255), "trim": (255, 255, 255)},
     }
     for name, look in looks.items():
         sprite_sheet(folder, name, look)
-    for name in ("aster", "mira", "elder"):
+    for name in ("aster", "mira", "bram", "sel", "elder"):
         portrait(folder, name, looks[name])
     sprite_sheet(folder, "slime", {"kind": "slime", "coat": (86, 177, 132)}, monster=True)
     sprite_sheet(folder, "wisp", {"kind": "wisp", "coat": (120, 170, 255)}, monster=True)
     sprite_sheet(folder, "golem", {"kind": "golem", "coat": (106, 112, 138)}, monster=True)
+    sprite_sheet(folder, "wolf", {"kind": "wolf", "coat": (128, 110, 96)}, monster=True)
+    sprite_sheet(folder, "ember", {"kind": "wisp", "coat": (255, 140, 70)}, monster=True)
+    vehicle_sprite(folder, "strider", draw_strider)
+    vehicle_sprite(folder, "skiff", draw_skiff)
     render_showcase(folder)
     chest_sprite(folder)
     crystal_sprite(folder, (90, 190, 255))
     standard_audio(folder, {"vale": (262, "major", 96), "grotto": (220, "minor", 80), "battle": (220, "minor", 150),
-                            "boss": (196, "minor", 132), "title": (294, "major", 72)})
+                            "boss": (196, "minor", 132), "title": (294, "major", 72),
+                            "overworld": (330, "major", 112)})
     lut(folder / "ui" / "amber.cube", (1.04, 1.0, 0.94), 1.05)
     lut(folder / "ui" / "grotto.cube", (0.95, 1.0, 1.05), 1.1)
     backdrop(folder / "ui" / "hills.png", (84, 110, 96), 3, 4)
 
-    vale_props(folder)
+    sample_props(folder)
+    overworld_icons(folder)
+    # The grotto's guardian: a rigged, animated 3D creature among the sprites.
+    from generate_creature import write_creature
+    write_creature(folder / "fx" / "drake.glb", (0.36, 0.5, 0.62))
 
     # Town: the terrain is ground, paths and the pond; houses, trees, lamps and
     # a fence are placed models, and the walkability bake derives the grid.
@@ -514,17 +725,19 @@ def vale():
         prop("lamp_east", "fx/lamp.glb", 12.5, 9.5),
         prop("lamp_south", "fx/lamp.glb", 8.5, 12.5),
         prop("fence_pond", "fx/fence.glb", 14, 11, yaw=90),         # along the pond's west bank
-        npc("elder", 5, 6, "elder", {"name": "Elder Rowan", "pages": [
-            {"script": "events.elder", "trigger": "action"}]}),
+        npc("elder", 5, 6, "elder", {"name": "Elder Rowan", "script": "events.elder"}),
         npc("merchant", 14, 6, "merchant", {"name": "Merchant", "script": "events.merchant"}),
         npc("innkeeper", 3, 6, "innkeeper", {"name": "Innkeeper", "script": "events.inn"}, facing=(1, 0)),
-        npc("villager", 11, 11, "villager", {"name": "Villager", "routine": "wander", "script": "events.villager"}),
+        npc("villager", 11, 11, "villager", {"name": "Villager", "wander": True, "script": "events.villager"}),
+        npc("stablehand", 12, 13, "stablehand", {"name": "Stablehand", "script": "events.stablehand"},
+            facing=(-1, 0)),
         {"id": "town_chest", "type": "chest", "position": [16.5, 0, 8.5], "props": {"item": "potion", "count": 2,
                                                                                      "sprite": "sprites/chest.anim.json"}},
-        {"id": "sign", "type": "sign", "position": [11.5, 0, 13.5], "props": {"text": "North: the Crystal Grotto."}},
+        {"id": "sign", "type": "sign", "position": [11.5, 0, 13.5],
+         "props": {"text": "South gate: the Starfall Coast. The Crystal Grotto lies east, across the river."}},
         {"id": "save", "type": "save_point", "position": [9.5, 0, 9.5], "props": {"sprite": "sprites/crystal.anim.json"}},
-        door("to_grotto", 9, 0, "grotto", "entry"),
-        door("to_grotto2", 10, 0, "grotto", "entry"),
+        door("to_coast", 9, 15, "overworld", "town"),
+        door("to_coast2", 10, 15, "overworld", "town"),
         {"id": "fountain", "type": "emitter", "position": [16, 0.2, 11.5],
          "props": {"rate": 14, "lifetime": 1.2, "velocity": [0, 1.4, 0], "velocity_jitter": [0.3, 0.2, 0.3],
                    "gravity": [0, -2.4, 0], "size": 0.06, "color": [0.7, 0.85, 1, 0.8], "color_end": [0.7, 0.85, 1, 0]}},
@@ -538,11 +751,10 @@ def vale():
                                "elevation": -2, "parallax": 0.3}]},
         "weather": {"kind": "leaves", "intensity": .6},
         "post": {"bloom_strength": .35, "focus": .55, "focus_range": .22, "lut": "ui/amber.cube"}},
-        {"entry": {"position": [9.5, 0, 14.5], "facing": [0, -1]}, "return": {"position": [9.5, 0, 1.8], "facing": [0, 1]}},
+        {"entry": {"position": [9.5, 0, 13.6], "facing": [0, -1]}},
         lights=lights, placements=placements, zones=zones,
-        props={"music": "vale", "battle_stage": "battle_grass", "camera": {"pitch": 42, "distance": 18, "fov": 30,
-                                                                          "min": [6, 5], "max": [14, 11]}},
-        overrides=[walkable_override(9, 0, 2, 1), walkable_override(9, 15, 2, 1)])  # the doors on the edge ring
+        props={"music": "vale", "camera": {"pitch": 42, "distance": 18, "fov": 30, "min": [6, 5], "max": [14, 11]}},
+        overrides=[walkable_override(9, 15, 2, 1)])  # the gate on the edge ring
 
     # Grotto: cave walls, glowing crystals, random encounters, the guardian.
     rng = random.Random(12)
@@ -568,27 +780,32 @@ def vale():
         grid.fill(x, z, x + 1, z + 1, walk=False)
         lights.append({"position": [x + .5, 2.8, z + .5], "color": [.35, .75, 1], "radius": 7, "intensity": 3, "flicker": .15})
     placements = [
-        {"id": "guardian", "type": "npc", "position": [8, 0.5, 5], "facing": [0, 1],
-         "props": {"name": "Guardian", "sprite": "sprites/golem.anim.json", "pages": [
-             {"script": "events.guardian", "trigger": "action"},
-             {"when": {"flag": "guardian_defeated"}, "hidden": True}]}},
+        {"id": "guardian", "type": "boss", "position": [8, 0.5, 5.3], "facing": [0, 1],
+         "props": {"name": "Grotto Drake", "model": "fx/drake.glb", "script": "events.guardian", "solid": False,
+                   "hide_flag": "guardian_defeated"}},
         {"id": "vale_crystal", "type": "npc", "position": [8, 0.5, 4.2],
-         "props": {"name": "Vale Crystal", "sprite": "sprites/crystal.anim.json", "script": "events.crystal", "solid": True}},
+         "props": {"name": "Vale Crystal", "sprite": "sprites/crystal.anim.json", "script": "events.crystal"}},
         {"id": "grotto_chest", "type": "chest", "position": [2.5, 0, 6.5], "props": {"item": "ether", "count": 1,
                                                                                       "sprite": "sprites/chest.anim.json"}},
-        door("exit", 7, 15, "town", "return"), door("exit2", 8, 15, "town", "return"),
+        door("exit", 7, 15, "overworld", "grotto"), door("exit2", 8, 15, "overworld", "grotto"),
         {"id": "drip", "type": "sound", "position": [12, 1, 12], "props": {"sound": "audio/chime.wav", "radius": 6, "volume": .2}},
         {"id": "wisp_symbol", "type": "symbol", "position": [4.5, 0, 9.5], "props": {"troop": "wisps",
                                                                                       "sprite": "sprites/wisp.anim.json"}},
     ]
+    # A polygon zone across the cave before the dais: walking into it runs a script, once.
+    zones = [{"id": "drake_warning", "type": "event", "shape": "polygon", "min": [3, 8], "max": [13, 10.5],
+              "points": [[4, 10.5], [12, 10.5], [13, 9], [10, 8], [6, 8], [3, 9]],
+              "props": {"script": "events.warning", "once": True}}]
     write_map(folder, "grotto", "Crystal Grotto", grid, scene, {
         "ambient": [.16, .2, .32], "sun_color": [.3, .4, .6], "sun_direction": [-.3, -1, -.2], "fog_color": [.06, .09, .16],
         "fog_density": .03, "sky": {"mode": "color", "horizon": [.04, .05, .1]},
         "weather": {"kind": "dust", "intensity": .8, "color": [.6, .8, 1, .6]},
         "post": {"bloom_strength": .55, "focus": .5, "focus_range": .2, "lut": "ui/grotto.cube"}},
-        {"entry": {"position": [8, 0, 14.4], "facing": [0, -1]}}, lights=lights, placements=placements,
+        {"entry": {"position": [8, 0, 14.4], "facing": [0, -1]}}, lights=lights, placements=placements, zones=zones,
         props={"music": "grotto", "battle_stage": "battle_cave", "camera": {"pitch": 46, "distance": 17, "fov": 30}},
         overrides=[walkable_override(7, 15, 2, 1)])  # the exit on the edge ring
+
+    overworld(folder)
 
     def grass_decor(scene, rng):
         for x, z in [(2, 2), (13, 2), (1, 12), (14, 12)]:
@@ -609,7 +826,7 @@ def vale():
 
 def fixture():
     """A small arena used by the engine's own C++ and Lua tests."""
-    root = REPO / "lualib" / "tests" / "game"
+    root = REPO / "tests" / "game"
     grid = GridBuilder(12, 10, layers=2)
     scene = Diorama()
     grid.fill(0, 0, 12, 1, walk=False)
@@ -1095,8 +1312,8 @@ def backdrop(path, color, peaks, seed):
 # --------------------------------------------------------------------------- engine UI art
 
 def engine():
-    """Default UI art shipped in lualib/fe/assets/ui (window skin, cursor, emotes)."""
-    root = REPO / "lualib" / "fe" / "assets" / "ui"
+    """Default UI art shipped in builtin/assets/ui (window skin, cursor, emotes)."""
+    root = REPO / "builtin" / "assets" / "ui"
     skin = Canvas(24, 24)
     for y in range(24):
         for x in range(24):
@@ -1176,7 +1393,7 @@ def engine():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("targets", nargs="*", default=["fixture"], help="engine, fixture, vale, all")
+    parser.add_argument("targets", nargs="*", default=["fixture"], help="engine, fixture, starfall, all")
     parser.add_argument("--headless", help="fengine_headless executable: bakes each sample's walkability afterwards")
     parser.add_argument("--fresh", action="store_true",
                         help="rewrite placements, zones and map props from the generator (editor edits are lost)")
@@ -1185,13 +1402,13 @@ def main():
     KEEP_AUTHORED = not args.fresh
     targets = set(args.targets)
     if "all" in targets:
-        targets = {"engine", "fixture", "vale"}
+        targets = {"engine", "fixture", "starfall"}
     for name in sorted(targets):
         globals()[name]()
         print(f"generated {name}")
     if args.headless:
         import subprocess
-        for name in sorted(targets & {"vale"}):
+        for name in sorted(targets & {"starfall"}):
             subprocess.run([args.headless, "--bake", str(REPO / "samples" / name)], check=True)
 
 

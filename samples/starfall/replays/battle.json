@@ -1,0 +1,276 @@
+{
+ "seed": 7,
+ "commands": [
+  {
+   "tick": 10,
+   "lua": "require('game.title').new_game()"
+  },
+  {
+   "tick": 14,
+   "lua": "require('game.field').event(function() require('game.battle.scene').start('embers', {opening = 'normal'}) end)"
+  },
+  {
+   "tick": 18,
+   "wait_for": "require('game.battle.scene').active ~= nil and require('game.battle.scene').active.menu ~= nil",
+   "timeout": 900
+  },
+  {
+   "tick": 48,
+   "capture": "replay-out/battle-commands.png",
+   "compare": "reference/{backend}/battle-commands.png",
+   "tolerance": 0.04
+  },
+  {
+   "tick": 52,
+   "input": [
+    [
+     "key:Down",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 54,
+   "input": [
+    [
+     "key:Down",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 60,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 62,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 68,
+   "input": [
+    [
+     "key:Down",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 70,
+   "input": [
+    [
+     "key:Down",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 76,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 78,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 98,
+   "capture": "replay-out/battle-target.png",
+   "compare": "reference/{backend}/battle-target.png",
+   "tolerance": 0.04
+  },
+  {
+   "tick": 102,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 104,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 108,
+   "wait_for": "require('game.battle.scene').active.menu ~= nil",
+   "timeout": 900
+  },
+  {
+   "tick": 114,
+   "input": [
+    [
+     "key:Down",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 116,
+   "input": [
+    [
+     "key:Down",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 122,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 124,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 130,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 132,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 138,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 140,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 144,
+   "wait_for": "require('game.battle.scene').active.menu ~= nil",
+   "timeout": 900
+  },
+  {
+   "tick": 146,
+   "assert": "require('game.battle.scene').active.rules.foes[1].broken or require('game.battle.scene').active.rules.foes[1].hp == 0"
+  },
+  {
+   "tick": 148,
+   "assert": "require('game.state').data.bestiary.ember.ice == 'weak'"
+  },
+  {
+   "tick": 158,
+   "capture": "replay-out/battle-broken.png",
+   "compare": "reference/{backend}/battle-broken.png",
+   "tolerance": 0.04
+  },
+  {
+   "tick": 162,
+   "lua": "require('game.title').new_game(); require('game.field').event(function() require('game.battle.scene').start('guardian') end)"
+  },
+  {
+   "tick": 166,
+   "wait_for": "require('game.battle.scene').active ~= nil and require('game.battle.scene').active.menu ~= nil and require('game.battle.scene').active.rules.boss",
+   "timeout": 900
+  },
+  {
+   "tick": 196,
+   "capture": "replay-out/battle-boss.png",
+   "compare": "reference/{backend}/battle-boss.png",
+   "tolerance": 0.04
+  },
+  {
+   "tick": 200,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 202,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 210,
+   "input": [
+    [
+     "key:Return",
+     1
+    ]
+   ]
+  },
+  {
+   "tick": 212,
+   "input": [
+    [
+     "key:Return",
+     0
+    ]
+   ]
+  },
+  {
+   "tick": 216,
+   "wait_for": "require('game.battle.scene').active.menu ~= nil",
+   "timeout": 900
+  },
+  {
+   "tick": 218,
+   "assert": "require('game.battle.scene').active.rules.foes[1].hp < require('game.battle.scene').active.rules.foes[1].max_hp"
+  }
+ ]
+}

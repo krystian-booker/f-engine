@@ -23,7 +23,7 @@ namespace {
 using Clock = std::chrono::steady_clock;
 
 #if FENGINE_DEV
-// Development hot reload: game files, lualib, compiled shaders, and shader
+// Development hot reload: game files, builtin, compiled shaders, and shader
 // sources when running from the build tree (rebuilt in the background).
 class Reloader {
 public:
@@ -32,7 +32,7 @@ public:
     static constexpr std::size_t EntriesPerPoll = 512;
     Reloader(const RuntimeOptions& options, const std::filesystem::path& shaderRoot)
         : game_(std::filesystem::weakly_canonical(options.game), EntriesPerPoll),
-          library_(options.lualib, EntriesPerPoll), shaders_(shaderRoot, EntriesPerPoll) {
+          library_(options.builtin, EntriesPerPoll), shaders_(shaderRoot, EntriesPerPoll) {
 #ifdef FENGINE_SHADER_SOURCE_DIR
         std::error_code ec;
         if (std::filesystem::equivalent(shaderRoot, FENGINE_SHADER_DIR, ec)) {
@@ -191,14 +191,13 @@ void pace(double seconds) {
     if (seconds <= 0) {
         return;
     }
-    const auto deadline = Clock::now() + std::chrono::duration_cast<Clock::duration>(
-                                             std::chrono::duration<double>(seconds));
+    const auto deadline =
+        Clock::now() + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(seconds));
     constexpr double SpinSeconds = 0.0015;
     if (seconds > SpinSeconds) {
         SDL_DelayNS(static_cast<Uint64>((seconds - SpinSeconds) * 1e9));
     }
-    while (Clock::now() < deadline) {
-    }
+    while (Clock::now() < deadline) {}
 }
 
 // Replays and recordings are deterministic: a fixed seed unless one is given.
@@ -230,9 +229,10 @@ OutputColor outputRequest(const RuntimeOptions& options, const GameConfig& confi
 class Session {
 public:
     Session(const RuntimeOptions& options, const GameConfig& config)
-        : options_(options), window_(config), renderer_(window_, options.shaders, outputRequest(options, config)),
-          replay_(loadReplay(options)), engine_(engineOptions(), config),
-          frame_(renderer_, engine_.assets(), config.pixelsPerUnit), input_(engine_.input())
+        : options_(options), window_(config),
+          renderer_(window_, options.shaders, outputRequest(options, config)), replay_(loadReplay(options)),
+          engine_(engineOptions(), config), frame_(renderer_, engine_.assets(), config.pixelsPerUnit),
+          input_(engine_.input())
 #if FENGINE_DEV
           ,
           editor_(engine_), reloader_(options, options.shaders)
@@ -245,8 +245,12 @@ public:
 #if FENGINE_DEV
         editor_.attach(frame_);
         editor_.setWindow(window_.native());
-        engine_.editorHooks().leaveMap = [this](const std::string& world) { return editor_.requestLeaveMap(world); };
-        engine_.editorHooks().leaveResult = [this] { return editor_.leaveMapResult(); };
+        engine_.editorHooks().leaveMap = [this](const std::string& world) {
+            return editor_.requestLeaveMap(world);
+        };
+        engine_.editorHooks().leaveResult = [this] {
+            return editor_.leaveMapResult();
+        };
         if (!options.userData.empty()) {
             editor_.setLayoutFile(options.userData / "editor.ini");
         }
@@ -254,6 +258,7 @@ public:
             editor_.toggle();
         }
 #endif
+        engine_.setGpuWarm([this](const WarmAsset& asset) { return frame_.warmed(asset); });
         readViewport();
         auto& display = engine_.display();
         display.monitors = Window::monitors();
@@ -301,11 +306,12 @@ private:
     EngineOptions engineOptions() {
         EngineOptions engine;
         engine.gameRoot = options_.game;
-        engine.libraryRoot = options_.lualib;
+        engine.builtinRoot = options_.builtin;
         engine.userData = options_.userData;
         engine.development = FENGINE_DEV != 0;
         engine.seed = sessionSeed(options_, replay_);
         engine.testHooks = !options_.replay.empty() || !options_.record.empty();
+        engine.blockingLoads = engine.testHooks;
         // Replays and recordings must not depend on the machine's language or
         // clipboard (they keep the engine's in-memory one).
         engine.locale = engine.testHooks ? "en-US" : preferredLocale();
@@ -450,9 +456,12 @@ private:
 
     void render(double frameMilliseconds) {
         if (!renderer_.beginFrame()) {
-            SDL_Delay(16); // minimised
+            engine_.setGpuWarmActive(false); // nothing uploads: loads must not wait for it
+            SDL_Delay(16);                   // minimised
             return;
         }
+        engine_.setGpuWarmActive(true);
+        frame_.warm(engine_);
         engine_.draw(step_.alpha());
         auto& requests = engine_.requests();
         for (const auto& file : requests.sceneCaptures) {

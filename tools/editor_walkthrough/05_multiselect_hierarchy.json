@@ -65,11 +65,11 @@
  },
  {
   "frame": 126,
-  "expect": "require('fe.field').world:placement('villager').position.x > 12"
+  "expect": "require('game.field').world:placement('villager').position.x > 12"
  },
  {
   "frame": 126,
-  "expect": "require('fe.field').world:placement('elder').position.x > 6"
+  "expect": "require('game.field').world:placement('elder').position.x > 6"
  },
  {
   "frame": 126,
@@ -86,11 +86,11 @@
  },
  {
   "frame": 138,
-  "expect": "math.abs(require('fe.field').world:placement('elder').position.x - 5.5) < 0.01"
+  "expect": "math.abs(require('game.field').world:placement('elder').position.x - 5.5) < 0.01"
  },
  {
   "frame": 138,
-  "expect": "math.abs(require('fe.field').world:placement('villager').position.x - 11.5) < 0.01"
+  "expect": "math.abs(require('game.field').world:placement('villager').position.x - 11.5) < 0.01"
  },
  {
   "frame": 140,
@@ -105,11 +105,11 @@
  },
  {
   "frame": 156,
-  "expect": "require('fe.field').world:placement('villager') == nil"
+  "expect": "require('game.field').world:placement('villager') == nil"
  },
  {
   "frame": 156,
-  "expect": "require('fe.field').world:placement('elder') == nil"
+  "expect": "require('game.field').world:placement('elder') == nil"
  },
  {
   "frame": 156,
@@ -122,7 +122,7 @@
  },
  {
   "frame": 170,
-  "expect": "require('fe.field').world:placement('villager') ~= nil and require('fe.field').world:placement('elder') ~= nil"
+  "expect": "require('game.field').world:placement('villager') ~= nil and require('game.field').world:placement('elder') ~= nil"
  },
  {
   "frame": 170,
@@ -152,7 +152,7 @@
  },
  {
   "frame": 202,
-  "expect": "require('fe.field').world:placement('merchant2') ~= nil"
+  "expect": "require('game.field').world:placement('merchant2') ~= nil"
  },
  {
   "frame": 202,
@@ -190,7 +190,7 @@
  },
  {
   "frame": 232,
-  "expect": "require('fe.field').world:placement('merchant') == nil"
+  "expect": "require('game.field').world:placement('merchant') == nil"
  },
  {
   "frame": 232,
@@ -203,7 +203,7 @@
  },
  {
   "frame": 244,
-  "expect": "require('fe.field').world:placement('merchant') ~= nil"
+  "expect": "require('game.field').world:placement('merchant') ~= nil"
  },
  {
   "frame": 246,
@@ -212,7 +212,7 @@
  },
  {
   "frame": 256,
-  "expect": "require('fe.field').world:placement('merchant2') == nil"
+  "expect": "require('game.field').world:placement('merchant2') == nil"
  },
  {
   "frame": 260,

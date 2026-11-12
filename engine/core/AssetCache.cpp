@@ -71,10 +71,10 @@ std::size_t decodedBytes(const SpriteAnimation& sprite) {
     return bytes;
 }
 
-AssetCache::AssetCache(std::filesystem::path root, std::filesystem::path libraryRoot,
+AssetCache::AssetCache(std::filesystem::path root, std::filesystem::path builtinRoot,
                        std::filesystem::path userRoot, std::size_t budget)
     : root_(std::filesystem::weakly_canonical(root)),
-      libraryRoot_(std::filesystem::weakly_canonical(libraryRoot)),
+      builtinRoot_(std::filesystem::weakly_canonical(builtinRoot)),
       userRoot_(userRoot.empty() ? userRoot : std::filesystem::weakly_canonical(userRoot)), budget_(budget),
       thread_([this] { worker(); }) {
 }
@@ -90,7 +90,7 @@ AssetCache::~AssetCache() {
 
 std::filesystem::path AssetCache::file(const std::string& relative) const {
     if (relative.starts_with("@fe/")) {
-        return resolveInside(libraryRoot_ / "fe", relative.substr(4));
+        return resolveInside(builtinRoot_, relative.substr(4));
     }
     if (relative.starts_with(UserPrefix)) {
         if (userRoot_.empty()) {
@@ -114,6 +114,21 @@ AssetCache::Decoded AssetCache::decode(const std::filesystem::path& file) {
         return std::make_shared<const Image>(Image::load(file));
     }
     return {};
+}
+
+std::shared_ptr<const Model> AssetCache::cachedModel(const std::string& path) const {
+    const auto found = models_.find(path);
+    return found == models_.end() ? nullptr : found->second;
+}
+
+std::shared_ptr<const SpriteAnimation> AssetCache::cachedSprite(const std::string& path) const {
+    const auto found = sprites_.find(path);
+    return found == sprites_.end() ? nullptr : found->second;
+}
+
+std::shared_ptr<const Image> AssetCache::cachedImage(const std::string& path) const {
+    const auto found = images_.find(path);
+    return found == images_.end() ? nullptr : found->second;
 }
 
 std::shared_ptr<const Model> AssetCache::model(const std::string& path) {
@@ -329,18 +344,41 @@ std::shared_ptr<FontSet> AssetCache::font(const std::string& name) {
 }
 
 int AssetCache::preload(const std::vector<std::string>& paths) {
+    collect();
     std::lock_guard lock(mutex_);
     const int ticket = nextTicket_++;
     auto& entry = tickets_[ticket];
     for (const auto& path : paths) {
-        if (models_.contains(path) || sprites_.contains(path) || images_.contains(path)) {
+        if (loaded(path) || failed_.contains(path)) {
             continue;
         }
-        queue_.emplace_back(ticket, path);
+        const auto [waiting, fresh] = inFlight_.try_emplace(path);
+        if (fresh) {
+            queue_.push_back(path);
+        } else if (std::find(waiting->second.begin(), waiting->second.end(), ticket) !=
+                   waiting->second.end()) {
+            continue; // named twice in `paths`
+        }
+        waiting->second.push_back(ticket);
         ++entry.total;
     }
     wake_.notify_one();
     return ticket;
+}
+
+void AssetCache::decodeInBackground(const std::string& path) {
+    collect();
+    std::lock_guard lock(mutex_);
+    if (!loaded(path) && !failed_.contains(path) && inFlight_.try_emplace(path).second) {
+        queue_.push_back(path);
+        wake_.notify_one();
+    }
+}
+
+bool AssetCache::decoding(const std::string& path) {
+    collect();
+    std::lock_guard lock(mutex_);
+    return inFlight_.contains(path);
 }
 
 float AssetCache::progress(int ticket) {
@@ -359,7 +397,7 @@ float AssetCache::progress(int ticket) {
 
 void AssetCache::worker() {
     for (;;) {
-        std::pair<int, std::string> job;
+        std::string job;
         {
             std::unique_lock lock(mutex_);
             wake_.wait(lock, [this] { return stopping_ || !queue_.empty(); });
@@ -370,15 +408,27 @@ void AssetCache::worker() {
             queue_.pop_front();
         }
         Decoded decoded;
+        bool failed = false;
         try {
-            decoded = decode(file(job.second));
+            decoded = decode(file(job));
         } catch (const std::exception& error) {
             log(LogLevel::Error, error.what());
+            failed = true;
         }
         std::lock_guard lock(mutex_);
-        finished_.emplace_back(job.second, std::move(decoded));
+        if (failed) {
+            failedDecodes_.push_back(job);
+        }
+        if (const auto waiting = inFlight_.find(job); waiting != inFlight_.end()) {
+            for (const int ticket : waiting->second) {
+                if (const auto found = tickets_.find(ticket); found != tickets_.end()) {
+                    ++found->second.done;
+                }
+            }
+            inFlight_.erase(waiting);
+        }
+        finished_.emplace_back(std::move(job), std::move(decoded));
         hasFinished_.store(true, std::memory_order_release);
-        ++tickets_[job.first].done;
     }
 }
 
@@ -390,6 +440,10 @@ void AssetCache::collect() {
     {
         std::lock_guard lock(mutex_);
         ready.swap(finished_);
+        // What could not be decoded there is not tried again here on first
+        // use (the error is already logged) until its file changes.
+        failed_.insert(failedDecodes_.begin(), failedDecodes_.end());
+        failedDecodes_.clear();
         hasFinished_.store(false, std::memory_order_relaxed);
     }
     for (auto& [path, value] : ready) {
@@ -407,7 +461,7 @@ bool AssetCache::reload(const std::filesystem::path& absolute) {
     collect();
     auto relative = relativeTo(root_, absolute);
     if (relative.empty()) {
-        relative = relativeTo(libraryRoot_ / "fe", absolute);
+        relative = relativeTo(builtinRoot_, absolute);
         if (relative.empty()) {
             return false;
         }

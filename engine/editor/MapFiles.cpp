@@ -3,8 +3,8 @@
 #include "engine/editor/WalkBake.h"
 #include <algorithm>
 #include <cstdint>
-#include <vector>
 #include <stdexcept>
+#include <vector>
 
 namespace fe {
 namespace {
@@ -54,23 +54,44 @@ Json groundQuadGltf(float width, float depth) {
         append(buffer, index);
     }
     const auto positionsBytes = 4 * 12, normalsBytes = 4 * 12, coloursBytes = 4 * 16, indicesBytes = 6 * 2;
-    return {{"asset", {{"version", "2.0"}, {"generator", "f-engine editor"}}},
-            {"scene", 0},
-            {"scenes", Json::array({{{"nodes", Json::array({0})}}})},
-            {"nodes", Json::array({{{"mesh", 0}, {"name", "ground"}}})},
-            {"meshes", Json::array({{{"primitives", Json::array({{{"attributes", {{"POSITION", 0}, {"NORMAL", 1}, {"COLOR_0", 2}}},
-                                                                   {"indices", 3},
-                                                                   {"material", 0}}})}}})},
-            {"materials", Json::array({{{"pbrMetallicRoughness", {{"baseColorFactor", {1, 1, 1, 1}}}}, {"doubleSided", true}}})},
-            {"buffers", Json::array({{{"byteLength", buffer.size()}, {"uri", "data:application/octet-stream;base64," + base64(buffer)}}})},
-            {"bufferViews", Json::array({{{"buffer", 0}, {"byteOffset", 0}, {"byteLength", positionsBytes}, {"target", 34962}},
-                                         {{"buffer", 0}, {"byteOffset", positionsBytes}, {"byteLength", normalsBytes}, {"target", 34962}},
-                                         {{"buffer", 0}, {"byteOffset", positionsBytes + normalsBytes}, {"byteLength", coloursBytes}, {"target", 34962}},
-                                         {{"buffer", 0}, {"byteOffset", positionsBytes + normalsBytes + coloursBytes}, {"byteLength", indicesBytes}, {"target", 34963}}})},
-            {"accessors", Json::array({{{"bufferView", 0}, {"componentType", 5126}, {"count", 4}, {"type", "VEC3"}, {"min", {0, 0, 0}}, {"max", {width, 0, depth}}},
-                                       {{"bufferView", 1}, {"componentType", 5126}, {"count", 4}, {"type", "VEC3"}},
-                                       {{"bufferView", 2}, {"componentType", 5126}, {"count", 4}, {"type", "VEC4"}},
-                                       {{"bufferView", 3}, {"componentType", 5123}, {"count", 6}, {"type", "SCALAR"}}})}};
+    return {
+        {"asset", {{"version", "2.0"}, {"generator", "f-engine editor"}}},
+        {"scene", 0},
+        {"scenes", Json::array({{{"nodes", Json::array({0})}}})},
+        {"nodes", Json::array({{{"mesh", 0}, {"name", "ground"}}})},
+        {"meshes",
+         Json::array(
+             {{{"primitives", Json::array({{{"attributes", {{"POSITION", 0}, {"NORMAL", 1}, {"COLOR_0", 2}}},
+                                            {"indices", 3},
+                                            {"material", 0}}})}}})},
+        {"materials", Json::array({{{"pbrMetallicRoughness", {{"baseColorFactor", {1, 1, 1, 1}}}},
+                                    {"doubleSided", true}}})},
+        {"buffers", Json::array({{{"byteLength", buffer.size()},
+                                  {"uri", "data:application/octet-stream;base64," + base64(buffer)}}})},
+        {"bufferViews",
+         Json::array({{{"buffer", 0}, {"byteOffset", 0}, {"byteLength", positionsBytes}, {"target", 34962}},
+                      {{"buffer", 0},
+                       {"byteOffset", positionsBytes},
+                       {"byteLength", normalsBytes},
+                       {"target", 34962}},
+                      {{"buffer", 0},
+                       {"byteOffset", positionsBytes + normalsBytes},
+                       {"byteLength", coloursBytes},
+                       {"target", 34962}},
+                      {{"buffer", 0},
+                       {"byteOffset", positionsBytes + normalsBytes + coloursBytes},
+                       {"byteLength", indicesBytes},
+                       {"target", 34963}}})},
+        {"accessors",
+         Json::array({{{"bufferView", 0},
+                       {"componentType", 5126},
+                       {"count", 4},
+                       {"type", "VEC3"},
+                       {"min", {0, 0, 0}},
+                       {"max", {width, 0, depth}}},
+                      {{"bufferView", 1}, {"componentType", 5126}, {"count", 4}, {"type", "VEC3"}},
+                      {{"bufferView", 2}, {"componentType", 5126}, {"count", 4}, {"type", "VEC4"}},
+                      {{"bufferView", 3}, {"componentType", 5123}, {"count", 6}, {"type", "SCALAR"}}})}};
 }
 
 bool validMapId(std::string_view id) {
@@ -114,7 +135,8 @@ MapData makeBlankMap(const std::string& id, const std::string& name, int width, 
     return map;
 }
 
-void writeMap(const std::filesystem::path& gameRoot, const MapData& map, const std::filesystem::path& geometry) {
+void writeMap(const std::filesystem::path& gameRoot, const MapData& map,
+              const std::filesystem::path& geometry) {
     const auto folder = mapFolder(gameRoot, map.id);
     const auto json = map.toJson();
     MapData::fromJson(json); // never write a map that cannot be loaded
@@ -130,7 +152,8 @@ void writeMap(const std::filesystem::path& gameRoot, const MapData& map, const s
         }
         const auto target = folder / map.geometry;
         if (!std::filesystem::equivalent(geometry, target, error)) {
-            std::filesystem::copy_file(geometry, target, std::filesystem::copy_options::overwrite_existing, error);
+            std::filesystem::copy_file(geometry, target, std::filesystem::copy_options::overwrite_existing,
+                                       error);
             if (error) {
                 throw std::runtime_error("Cannot copy the geometry: " + error.message());
             }
@@ -141,7 +164,8 @@ void writeMap(const std::filesystem::path& gameRoot, const MapData& map, const s
         // pieces onto until a Blender export replaces it.
         auto blank = json;
         blank["geometry"] = "geometry.gltf";
-        writeJson(folder / "geometry.gltf", groundQuadGltf(static_cast<float>(map.grid.width()), static_cast<float>(map.grid.depth())));
+        writeJson(folder / "geometry.gltf",
+                  groundQuadGltf(static_cast<float>(map.grid.width()), static_cast<float>(map.grid.depth())));
         writeJson(folder / "map.json", blank);
         return;
     }

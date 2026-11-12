@@ -46,7 +46,7 @@ struct Selection {
 [[nodiscard]] Zone* findZone(MapData& map, std::string_view id);
 [[nodiscard]] int zoneIndex(const MapData& map, std::string_view id);
 
-// The spawned entity of an authored placement (fe.field names entities by
+// The spawned entity of an authored placement (games name entities by
 // their placement id), or null. The reverse: the placement id of an entity,
 // or empty when no authored placement has its name.
 [[nodiscard]] entt::entity placementEntity(const World& world, std::string_view id);
@@ -60,19 +60,20 @@ struct SelectionTransform {
     float yawDegrees = 0;
     glm::vec3 scale{1};
     int layer = 0;
-    bool canRotate = false;   // yaw (meshes) or facing (sprites, points)
-    bool facingOnly = false;  // rotation writes `facing`, not `yaw`
-    bool canScale = false;    // mesh scale, or a zone's or collider's size
+    bool canRotate = false;    // yaw (meshes) or facing (sprites, points)
+    bool facingOnly = false;   // rotation writes `facing`, not `yaw`
+    bool canScale = false;     // mesh scale, or a zone's or collider's size
     bool uniformScale = false; // sprites scale by one number
-    bool snapsToGrid = false; // placements and points sit on cell centres by default
+    bool snapsToGrid = false;  // placements and points sit on cell centres by default
 };
-[[nodiscard]] std::optional<SelectionTransform> selectionTransform(const World& world, const Selection& selection);
+[[nodiscard]] std::optional<SelectionTransform> selectionTransform(const World& world,
+                                                                   const Selection& selection);
 // Writes a transform into the authored map for map kinds (not Entity);
 // returns false when the selection is not in the map.
 bool applySelectionTransform(MapData& map, const Selection& selection, const SelectionTransform& transform);
 // World-space bounds for framing (F): the sprite quad or mesh box of a
 // placement's entity, a zone's rectangle, a light's radius, a collider box;
 // half a unit around a bare position.
-[[nodiscard]] std::optional<std::pair<glm::vec3, glm::vec3>> selectionBounds(World& world, const Selection& selection,
-                                                                             double alpha);
+[[nodiscard]] std::optional<std::pair<glm::vec3, glm::vec3>>
+selectionBounds(World& world, const Selection& selection, double alpha);
 } // namespace fe

@@ -15,8 +15,9 @@
 // (lstate.h: `lu_byte gcstp;`, lgc.h: `#define GCSTPUSR 1`). A Lua upgrade
 // must revisit this file; the patches in cmake/LuaPatches.cmake fail loudly
 // on their own, this guard does the same for the hold.
-static_assert(LUA_VERSION_NUM == 504, "GcHold.cpp touches global_State::gcstp (GCSTPUSR), a Lua 5.4 "
-                                      "internal; check lgc.h and lstate.h before building against another Lua");
+static_assert(LUA_VERSION_NUM == 504,
+              "GcHold.cpp touches global_State::gcstp (GCSTPUSR), a Lua 5.4 "
+              "internal; check lgc.h and lstate.h before building against another Lua");
 
 // Included last: these headers define short macros.
 #include "lgc.h"

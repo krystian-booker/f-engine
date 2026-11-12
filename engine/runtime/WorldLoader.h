@@ -1,4 +1,5 @@
 #pragma once
+#include "engine/runtime/WarmAssets.h"
 #include "engine/world/MapData.h"
 #include <filesystem>
 #include <future>
@@ -33,6 +34,12 @@ public:
     // background and its result is discarded; assets already queued stay in
     // the cache like any other. Throws for an unknown (or finished) ticket.
     void cancel(int ticket);
+    // What the worlds of pending loads will draw (mapWarmAssets), for every
+    // load whose map file has been parsed, or for one ticket. An unknown
+    // ticket adds nothing.
+    void warmAssets(std::vector<WarmAsset>& out) const;
+    void warmAssets(int ticket, std::vector<WarmAsset>& out) const;
+    [[nodiscard]] bool pending() const { return !loads_.empty(); }
 
 private:
     struct Pending {

@@ -13,7 +13,7 @@
 
 namespace fe {
 // Documentation for every binding, written out as LuaLS annotations
-// (lualib/types/fengine.d.lua) and Markdown (docs/api.md), so editor
+// (builtin/types/fengine.d.lua) and Markdown (docs/api.md), so editor
 // autocomplete and docs always match the registered functions.
 class BindingDocs {
 public:
@@ -245,7 +245,8 @@ template<class F> auto guardedCall(LuaHost& host, std::string name, bool method,
 
 // The arguments a function or method reads from Lua (see ParameterCount).
 template<class F> constexpr int arity(bool method) {
-    return detail::ParameterCount<typename detail::Signature<std::decay_t<F>>::Type>::value - (method ? 1 : 0);
+    return detail::ParameterCount<typename detail::Signature<std::decay_t<F>>::Type>::value -
+           (method ? 1 : 0);
 }
 
 // Registers functions on a module table such as fe.world.
@@ -259,8 +260,7 @@ public:
     template<class F>
     ModuleBinder& fn(const char* name, F&& function, const char* signature, const char* doc) {
         // Lua holds only a pointer; the host owns the function (LuaHost::keep).
-        auto* stored =
-            host_.keep(guardedCall(host_, name_ + "." + name, false, std::forward<F>(function)));
+        auto* stored = host_.keep(guardedCall(host_, name_ + "." + name, false, std::forward<F>(function)));
         auto call = [stored](sol::this_state state, sol::variadic_args args) -> decltype(auto) {
             return (*stored)(state, args);
         };

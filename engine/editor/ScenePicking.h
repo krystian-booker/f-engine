@@ -19,7 +19,8 @@ struct ViewRect {
     }
     [[nodiscard]] bool contains(glm::vec2 px) const {
         return px.x >= static_cast<float>(pixels.x) && px.y >= static_cast<float>(pixels.y) &&
-               px.x < static_cast<float>(pixels.x + pixels.z) && px.y < static_cast<float>(pixels.y + pixels.w);
+               px.x < static_cast<float>(pixels.x + pixels.z) &&
+               px.y < static_cast<float>(pixels.y + pixels.w);
     }
     [[nodiscard]] glm::vec2 ndc(glm::vec2 px) const {
         return {(px.x - static_cast<float>(pixels.x)) / static_cast<float>(std::max(1, pixels.z)) * 2 - 1,
@@ -47,11 +48,12 @@ struct ViewRay {
 // The world ray under a viewport pixel.
 [[nodiscard]] ViewRay viewRay(const Camera& camera, const ViewRect& view, glm::vec2 mousePx, double alpha);
 // The grid surface under a viewport pixel.
-[[nodiscard]] std::optional<GridHit> pickGround(const World& world, const Camera& camera, const ViewRect& view,
-                                                glm::vec2 mousePx, double alpha, std::uint32_t layers = ~0u);
+[[nodiscard]] std::optional<GridHit> pickGround(const World& world, const Camera& camera,
+                                                const ViewRect& view, glm::vec2 mousePx, double alpha,
+                                                std::uint32_t layers = ~0u);
 // A world point's viewport pixel, or nullopt when it is behind the camera.
-[[nodiscard]] std::optional<glm::vec2> projectToView(const Camera& camera, const ViewRect& view, glm::vec3 point,
-                                                     double alpha);
+[[nodiscard]] std::optional<glm::vec2> projectToView(const Camera& camera, const ViewRect& view,
+                                                     glm::vec3 point, double alpha);
 
 // What is under a viewport pixel: handles (points, lights, emitters, and
 // placements that have no entity) by screen distance first, then the world

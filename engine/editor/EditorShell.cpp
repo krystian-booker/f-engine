@@ -1,15 +1,15 @@
+#include "engine/core/Paths.h"
 #include "engine/editor/Editor.h"
 #include "engine/editor/EditorWidgets.h"
 #include "engine/editor/MapFiles.h"
-#include "engine/core/Paths.h"
 #include "engine/runtime/Engine.h"
 #include "engine/script/LuaHost.h"
 #include "engine/world/World.h"
 #include <IconsFontAwesome6.h>
+#include <algorithm>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <imgui_stdlib.h>
-#include <algorithm>
 
 namespace fe {
 using namespace editorui;
@@ -20,7 +20,8 @@ constexpr float StatusBarHeight = 26;
 
 void Editor::buildLayout(unsigned int dockspace) {
     ImGui::DockBuilderRemoveNode(dockspace);
-    ImGui::DockBuilderAddNode(dockspace, static_cast<ImGuiDockNodeFlags>(ImGuiDockNodeFlags_DockSpace) | ImGuiDockNodeFlags_PassthruCentralNode);
+    ImGui::DockBuilderAddNode(dockspace, static_cast<ImGuiDockNodeFlags>(ImGuiDockNodeFlags_DockSpace) |
+                                             ImGuiDockNodeFlags_PassthruCentralNode);
     const auto* viewport = ImGui::GetMainViewport();
     ImGui::DockBuilderSetNodeSize(dockspace, viewport->WorkSize);
     ImGuiID centre = dockspace, left, right, bottom;
@@ -41,12 +42,9 @@ void Editor::buildLayout(unsigned int dockspace) {
 }
 
 void Editor::drawEditMode(const EditorFrame& frame) {
-    if (handles_.triggerBadges.empty()) {
-        handles_.triggerBadges = {{"action", ICON_FA_COMMENT " talk"},
-                                  {"touch", ICON_FA_SHOE_PRINTS " touch"},
-                                  {"auto", ICON_FA_BOLT " auto"},
-                                  {"parallel", ICON_FA_REPEAT " loop"}};
-    }
+    handles_.schemas = &schemas_;
+    handles_.scriptBadge = ICON_FA_SCROLL;
+    handles_.mapBadge = ICON_FA_DOOR_OPEN;
     const auto* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
@@ -54,10 +52,10 @@ void Editor::drawEditMode(const EditorFrame& frame) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    const ImGuiWindowFlags flags = ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
-                                   ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-                                   ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus |
-                                   ImGuiWindowFlags_NoBackground;
+    const ImGuiWindowFlags flags =
+        ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
+        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoBackground;
     ImGui::Begin("##fe_editor_host", nullptr, flags);
     ImGui::PopStyleVar(3);
     drawMenuBar(frame);
@@ -131,7 +129,7 @@ void Editor::confirmDiscard(World* w, const char* what, std::function<void()> ac
 void Editor::openMap(const std::string& id) {
     const auto playFrom = devtool("play_from");
     if (playFrom == sol::lua_nil) {
-        status_ = "Define fe.devtools.play_from(map, point) to open maps from the editor";
+        openPreview(id);
         return;
     }
     const auto points = mapPoints(id);
@@ -147,6 +145,66 @@ void Editor::openMap(const std::string& id) {
         extra_.clear();
         cameraAdopted_ = false; // frame the new map from its game view
         status_ = "Opened " + id;
+    }
+}
+
+// A game with no `editor.play_from` hook (a new project with an empty
+// main.lua, say) still opens its maps: the editor loads the map into a world
+// of its own and stands simple entities in for the placements that name a
+// model or a sprite, so the scene can be laid out before any game code exists.
+void Editor::openPreview(const std::string& id) {
+    try {
+        if (engine_.world(PreviewWorld)) {
+            engine_.unloadWorld(PreviewWorld);
+        }
+        const auto w = engine_.loadWorld(PreviewWorld, id);
+        for (const auto& placement : w->authored().placements) {
+            respawnPreview(*w, placement.id);
+        }
+        worldName_ = PreviewWorld;
+        selection_ = {};
+        extra_.clear();
+        cameraAdopted_ = false;
+        status_ = "Opened " + id + " (preview: this game defines no editor.play_from hook)";
+    } catch (const std::exception& error) {
+        status_ = std::string("Cannot open ") + id + ": " + error.what();
+    }
+}
+
+void Editor::respawnPreview(World& w, const std::string& id) {
+    if (const auto existing = w.find(id); existing != entt::null) {
+        w.destroy(existing);
+    }
+    const auto& placements = w.authored().placements;
+    const auto found =
+        std::find_if(placements.begin(), placements.end(), [&](const Placement& p) { return p.id == id; });
+    if (found == placements.end()) {
+        return;
+    }
+    const auto model = found->props.find("model");
+    const auto sprite = found->props.find("sprite");
+    const bool hasModel = model != found->props.end() && model->is_string();
+    const bool hasSprite = sprite != found->props.end() && sprite->is_string();
+    if (!hasModel && !hasSprite) {
+        return; // nothing to show; its handle still marks the spot
+    }
+    try {
+        const auto entity = w.spawn(found->id, found->position, found->layer);
+        auto& transform = w.registry().get<Transform>(entity);
+        transform.yaw = transform.previousYaw = glm::radians(found->yaw);
+        transform.scale = found->scale;
+        transform.facing = found->facing;
+        if (hasModel) {
+            MeshInstance mesh;
+            mesh.model = model->get<std::string>();
+            w.registry().emplace<MeshInstance>(entity, std::move(mesh));
+        } else {
+            Sprite visual;
+            visual.animation = sprite->get<std::string>();
+            w.registry().emplace<Sprite>(entity, std::move(visual));
+        }
+    } catch (const std::exception& error) {
+        status_ = std::string("Preview of ") + id + ": " + error.what();
     }
 }
 
@@ -202,7 +260,8 @@ void Editor::drawMapDialogs(World* w) {
     const auto usedBy = [&](const std::string& id) {
         const auto& users = catalog_.references("maps/" + id + "/map.json");
         if (!users.empty()) {
-            ImGui::TextColored(ImVec4(1, 0.8f, 0.4f, 1), ICON_FA_TRIANGLE_EXCLAMATION " Named by %zu place(s):", users.size());
+            ImGui::TextColored(ImVec4(1, 0.8f, 0.4f, 1),
+                               ICON_FA_TRIANGLE_EXCLAMATION " Named by %zu place(s):", users.size());
             for (std::size_t i = 0; i < users.size() && i < 8; ++i) {
                 ImGui::BulletText("%s  %s", users[i].file.c_str(), users[i].where.c_str());
             }
@@ -222,8 +281,9 @@ void Editor::drawMapDialogs(World* w) {
         if (ImGui::SmallButton("Browse...")) {
             openImportDialog(ImportQueue::Purpose::NewMapGeometry);
         }
-        ImGui::TextDisabled("A flat, walkable map with a start point in the middle. Add a Blender export as its\n"
-                            "geometry now or later (File > Import geometry), then bake walkability from it.");
+        ImGui::TextDisabled(
+            "A flat, walkable map with a start point in the middle. Add a Blender export as its\n"
+            "geometry now or later (File > Import geometry), then bake walkability from it.");
         if (!d.problem.empty()) {
             ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "%s", d.problem.c_str());
         }
@@ -233,7 +293,8 @@ void Editor::drawMapDialogs(World* w) {
         if (create) {
             try {
                 auto map = makeBlankMap(d.id, d.name, d.width, d.depth);
-                writeMap(root, map, d.geometry.empty() ? std::filesystem::path() : std::filesystem::path(d.geometry));
+                writeMap(root, map,
+                         d.geometry.empty() ? std::filesystem::path() : std::filesystem::path(d.geometry));
                 catalog_.scan();
                 const auto id = d.id;
                 close();
@@ -290,7 +351,8 @@ void Editor::drawMapDialogs(World* w) {
         const bool valid = idField() && (d.id == from || !mapExists(root, d.id));
         ImGui::InputText("Name", &d.name);
         usedBy(from);
-        ImGui::TextDisabled("Doors and props that name '%s' are not rewritten; the Assets panel lists them.", from.c_str());
+        ImGui::TextDisabled("Doors and props that name '%s' are not rewritten; the Assets panel lists them.",
+                            from.c_str());
         if (!d.problem.empty()) {
             ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "%s", d.problem.c_str());
         }
@@ -369,7 +431,8 @@ void Editor::drawMapDialogs(World* w) {
         }
         break;
     }
-    case MapDialog::Kind::None: break;
+    case MapDialog::Kind::None:
+        break;
     }
     ImGui::SameLine();
     if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
@@ -384,8 +447,9 @@ void Editor::drawMapDialogs(World* w) {
 
 void Editor::drawPlayBar() {
     const auto* viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f, viewport->WorkPos.y + 6),
-                            ImGuiCond_Always, ImVec2(0.5f, 0));
+    ImGui::SetNextWindowPos(
+        ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f, viewport->WorkPos.y + 6), ImGuiCond_Always,
+        ImVec2(0.5f, 0));
     ImGui::SetNextWindowBgAlpha(0.6f);
     const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                                    ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
@@ -549,17 +613,7 @@ void Editor::drawMenuBar(const EditorFrame& /*frame*/) {
         ImGui::MenuItem("Triggers (non-solid colliders)", "", &handles_.triggers);
         ImGui::MenuItem("Unspawned placements", "", &handles_.placements);
         ImGui::MenuItem("Labels", "", &handles_.labels);
-        bool badges = !handles_.triggerBadges.empty();
-        if (ImGui::MenuItem("Script badges (talk, touch, auto, loop)", "", &badges)) {
-            if (!badges) {
-                handles_.triggerBadges.clear();
-            } else {
-                handles_.triggerBadges = {{"action", ICON_FA_COMMENT " talk"},
-                                          {"touch", ICON_FA_SHOE_PRINTS " touch"},
-                                          {"auto", ICON_FA_BOLT " auto"},
-                                          {"parallel", ICON_FA_REPEAT " loop"}};
-            }
-        }
+        ImGui::MenuItem("Link badges (scripts, doors)", "", &handles_.linkBadges);
         ImGui::Separator();
         ImGui::MenuItem("Game camera", "", &gameCamera_);
         bool ortho = editorCamera_.camera.orthographic;
@@ -708,7 +762,8 @@ void Editor::handleShortcuts(World* w) {
     } else if (ImGui::IsKeyPressed(ImGuiKey_Home, false)) {
         const auto& g = w->authored().grid;
         editorCamera_.frame({0, 0, 0}, {static_cast<float>(g.width()), 2, static_cast<float>(g.depth())});
-    } else if (ImGui::IsKeyPressed(ImGuiKey_Delete, false) || ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) {
+    } else if (ImGui::IsKeyPressed(ImGuiKey_Delete, false) ||
+               ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) {
         deleteSelection(*w);
     }
 }

@@ -40,8 +40,9 @@ void Editor::addZone(World& w) {
     const auto& zones = w.authored().zones;
     const auto t = dropPoint(w, sceneCamera(w), layer_);
     auto type = defaultType("zones");
-    Zone zone{uniqueId("zone", zones), type.empty() ? "zone" : type, {t.x - 2, t.z - 2}, {t.x + 2, t.z + 2}, -1,
-              Json::object()};
+    Zone zone{
+        uniqueId("zone", zones), type.empty() ? "zone" : type, {t.x - 2, t.z - 2}, {t.x + 2, t.z + 2}, -1,
+        Json::object()};
     gesture_ = false;
     edit(w, [&](MapData& m) { m.zones.push_back(zone); });
     gesture_ = false;
@@ -100,7 +101,8 @@ void Editor::drawPlacementForm(World& w, std::size_t index) {
     bool changed = false, respawn = false;
     const auto entity = placementEntity(w, p.id);
     if (entity == entt::null) {
-        ImGui::TextColored(ImVec4(1, 0.8f, 0.4f, 1), ICON_FA_TRIANGLE_EXCLAMATION " Not spawned in the running game");
+        ImGui::TextColored(ImVec4(1, 0.8f, 0.4f, 1),
+                           ICON_FA_TRIANGLE_EXCLAMATION " Not spawned in the running game");
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("No entity has this id: the type has no spawner, it was hidden by a page, or\n"
                               "the game is not on this map. Save or Play from here to spawn it.");
@@ -110,13 +112,15 @@ void Editor::drawPlacementForm(World& w, std::size_t index) {
         changed = respawn = true;
     }
     if (ImGui::BeginCombo("Type", p.type.c_str())) {
-        for (const auto& type : schemas_.value("entities", Json::object()).items()) {
+        // Named: items() of a temporary would outlive what it iterates.
+        const auto entityTypes = schemas_.value("entities", Json::object());
+        for (const auto& type : entityTypes.items()) {
             if (ImGui::Selectable(type.key().c_str(), type.key() == p.type)) {
                 p.type = type.key();
                 changed = respawn = true;
             }
-            if (const auto doc = type.value().find("doc"); doc != type.value().end() && doc->is_string() &&
-                                                           ImGui::IsItemHovered()) {
+            if (const auto doc = type.value().find("doc");
+                doc != type.value().end() && doc->is_string() && ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", doc->get<std::string>().c_str());
             }
         }
@@ -148,18 +152,17 @@ void Editor::drawPlacementForm(World& w, std::size_t index) {
         changed = true;
     }
     ImGui::SeparatorText("Props");
+    scriptSuggestion_ = p.id;
     if (editProps(fieldsFor(p.type, {"entities"}), p.props)) {
         changed = respawn = true;
     }
+    scriptSuggestion_.clear();
     if (const auto modelPath = p.props.find("model"); modelPath != p.props.end() && modelPath->is_string()) {
         ImGui::SeparatorText("Collision");
         if (const auto model = engine_.assets().tryModel(modelPath->get<std::string>())) {
             const auto footprint = footprintCells(*model, p);
-            if (p.props.contains("pages")) {
-                ImGui::TextDisabled("Round collider while solid: a scripted prop shows and hides itself,\n"
-                                    "so the walkability bake leaves it out.");
-            } else if (const auto solid = p.props.find("solid");
-                       solid != p.props.end() && solid->is_boolean() && !solid->get<bool>()) {
+            if (const auto solid = p.props.find("solid");
+                solid != p.props.end() && solid->is_boolean() && !solid->get<bool>()) {
                 ImGui::TextDisabled("None (solid = false): decoration bodies walk through.");
             } else if (!w.authored().bake.empty()) {
                 ImGui::TextDisabled("Blocks through the walkability bake, from the model's %s.",
@@ -169,11 +172,13 @@ void Editor::drawPlacementForm(World& w, std::size_t index) {
             }
             ImGui::TextDisabled("Footprint: %d x %d cell(s)", footprint.x, footprint.y);
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Model props with their origin at the centre of the base and a footprint of whole\n"
-                                  "cells; a hidden node marked {\"collision\": true} stands in for the visible mesh.");
+                ImGui::SetTooltip(
+                    "Model props with their origin at the centre of the base and a footprint of whole\n"
+                    "cells; a hidden node marked {\"collision\": true} stands in for the visible mesh.");
             }
         } else {
-            ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "Model not found: %s", modelPath->get<std::string>().c_str());
+            ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "Model not found: %s",
+                               modelPath->get<std::string>().c_str());
         }
     }
     const bool duplicate = std::any_of(placements.begin(), placements.end(), [&](const Placement& other) {
@@ -198,43 +203,19 @@ void Editor::drawPlacementForm(World& w, std::size_t index) {
         }
     }
     if (entity != entt::null) {
-        if (const auto inspect = devtool("inspect_entity"); inspect != sol::lua_nil && (p.props.contains("pages") || p.props.contains("script"))) {
+        // What the game itself says about this object right now: whatever
+        // its inspect_entity hook returns (JSON text of an object), shown as it is.
+        if (const auto inspect = devtool("inspect_entity"); inspect != sol::lua_nil) {
             const auto result = engine_.lua().invoke(inspect, p.id, w.name());
             if (result.valid() && result.get_type() == sol::type::string) {
                 const auto info = Json::parse(result.get<std::string>(), nullptr, false);
-                if (info.is_object()) {
-                    ImGui::SeparatorText("Event pages (live)");
-                    for (const auto& page : jsonArray(info, "pages")) {
-                        const int index = static_cast<int>(jsonNumber(page, "index", 0));
-                        const bool active = jsonBool(page, "active", false);
-                        ImGui::PushID(index);
-                        if (active) {
-                            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 1, 0.6f, 1));
-                        }
-                        ImGui::Text("%s#%d %s: %s", active ? ICON_FA_CIRCLE_CHECK " " : "   ", index,
-                                    jsonString(page, "trigger", "action").c_str(), jsonString(page, "script", "(none)").c_str());
-                        if (active) {
-                            ImGui::PopStyleColor();
-                        }
-                        if (const auto error = page.find("error"); error != page.end() && error->is_string()) {
-                            ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "   %s", error->get<std::string>().c_str());
-                        }
-                        ImGui::SameLine();
-                        if (ImGui::SmallButton(ICON_FA_PLAY " Run")) {
-                            if (const auto run = devtool("run_page"); run != sol::lua_nil) {
-                                if (succeeded(engine_.lua().invoke(run, p.id, index))) {
-                                    paused_ = false; // the page needs ticks to play out
-                                    status_ = "Running page " + std::to_string(index) + " of " + p.id;
-                                }
-                            }
-                        }
-                        ImGui::PopID();
-                    }
-                    if (const auto running = info.find("running"); running != info.end() && running->is_object()) {
-                        ImGui::Text(ICON_FA_GEARS " Running: %s", jsonString(*running, "name", "").c_str());
-                    }
-                    if (!jsonString(info, "routine", "").empty()) {
-                        ImGui::TextDisabled("Routine: %s", jsonString(info, "routine", "").c_str());
+                if (info.is_object() && !info.empty()) {
+                    ImGui::SeparatorText("Game state (live)");
+                    for (const auto& [key, value] : info.items()) {
+                        ImGui::TextDisabled("%s", key.c_str());
+                        ImGui::SameLine(110);
+                        ImGui::TextWrapped("%s", value.is_string() ? value.get<std::string>().c_str()
+                                                                   : value.dump().c_str());
                     }
                 }
             }
@@ -256,7 +237,8 @@ void Editor::drawZoneForm(World& w, std::size_t index) {
     const auto previousId = z.id;
     bool changed = ImGui::InputText("Zone id", &z.id);
     if (ImGui::BeginCombo("Zone type", z.type.c_str())) {
-        for (const auto& type : schemas_.value("zones", Json::object()).items()) {
+        const auto zoneTypes = schemas_.value("zones", Json::object());
+        for (const auto& type : zoneTypes.items()) {
             if (ImGui::Selectable(type.key().c_str(), type.key() == z.type)) {
                 z.type = type.key();
                 changed = true;
@@ -268,11 +250,57 @@ void Editor::drawZoneForm(World& w, std::size_t index) {
         changed |= ImGui::InputText("Custom zone type", &z.type);
         ImGui::TreePop();
     }
-    changed |= ImGui::DragFloat2("Min", glm::value_ptr(z.min), 0.1f);
-    changed |= ImGui::DragFloat2("Max", glm::value_ptr(z.max), 0.1f);
+    int shape = static_cast<int>(z.shape);
+    if (ImGui::Combo("Shape", &shape, "Box\0Ellipse\0Polygon\0")) {
+        const auto before = z.shape;
+        z.shape = static_cast<ZoneShape>(shape);
+        if (z.shape == ZoneShape::Polygon && before != ZoneShape::Polygon) {
+            z.points = z.outline(before == ZoneShape::Ellipse ? 8 : 4); // start from the shape it had
+        } else if (z.shape != ZoneShape::Polygon) {
+            z.points.clear(); // its bounds stay as the box (or the ellipse's box)
+        }
+        changed = true;
+    }
+    if (z.shape == ZoneShape::Polygon) {
+        // Corners in order round the outline; the gizmo moves and stretches them together.
+        int remove = -1, insert = -1;
+        for (std::size_t i = 0; i < z.points.size(); ++i) {
+            ImGui::PushID(static_cast<int>(i));
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 60);
+            changed |= ImGui::DragFloat2("##corner", glm::value_ptr(z.points[i]), 0.1f);
+            ImGui::SameLine();
+            if (ImGui::SmallButton("+") && z.points.size() < Zone::MaxPoints) {
+                insert = static_cast<int>(i);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Add a corner between this one and the next");
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("x") && z.points.size() > 3) {
+                remove = static_cast<int>(i);
+            }
+            ImGui::PopID();
+        }
+        if (insert >= 0) {
+            const auto a = z.points[static_cast<std::size_t>(insert)];
+            const auto b = z.points[(static_cast<std::size_t>(insert) + 1) % z.points.size()];
+            z.points.insert(z.points.begin() + insert + 1, (a + b) * 0.5f);
+            changed = true;
+        }
+        if (remove >= 0) {
+            z.points.erase(z.points.begin() + remove);
+            changed = true;
+        }
+        z.fitBounds();
+    } else {
+        changed |= ImGui::DragFloat2("Min", glm::value_ptr(z.min), 0.1f);
+        changed |= ImGui::DragFloat2("Max", glm::value_ptr(z.max), 0.1f);
+    }
     changed |= editLayer("Zone layer (-1 all)", z.layer, w.authored().grid, -1);
     ImGui::SeparatorText("Zone props");
+    scriptSuggestion_ = z.id;
     changed |= editProps(fieldsFor(z.type, {"zones", "entities"}), z.props);
+    scriptSuggestion_.clear();
     if (const auto problem = changed ? editProblem(zones, z, index) : std::string{}; !problem.empty()) {
         status_ = problem;
     } else if (changed) {
@@ -301,7 +329,8 @@ void Editor::updateZoneOverlay(World& w) {
         zoneOverlayKey_.clear();
         return;
     }
-    const auto key = w.name() + "/" + z->id + "/" + Json{z->min.x, z->min.y, z->max.x, z->max.y, z->layer, layer_}.dump();
+    const auto key =
+        w.name() + "/" + z->id + "/" + Json{z->min.x, z->min.y, z->max.x, z->max.y, z->layer, layer_}.dump();
     if (key != zoneOverlayKey_ || !w.overlays().contains("editor:zone")) {
         zoneOverlayKey_ = key;
         w.overlays()["editor:zone"] =
@@ -320,6 +349,7 @@ void Editor::drawPointForm(World& w, const std::string& name) {
     changed |= ImGui::DragFloat2("Point facing", glm::value_ptr(point.facing), 0.05f, -1, 1);
     changed |= editLayer("Point layer", point.layer, w.authored().grid);
     if (changed) {
+        point.position = clampToGrid(w.authored().grid, point.position);
         edit(w, [&](MapData& m) { m.points[name] = point; });
     }
     static std::string rename;
@@ -352,7 +382,7 @@ void Editor::drawPointForm(World& w, const std::string& name) {
     }
     ImGui::EndDisabled();
     if (playFrom == sol::lua_nil && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip("Define fe.devtools.play_from(map, point) to enable");
+        ImGui::SetTooltip("Needs an editor.play_from(map, point) hook in the game's main.lua");
     }
 }
 
@@ -489,17 +519,32 @@ void Editor::drawEnvironment(World& w) {
             {"distance", {{"type", "number"}, {"optional", true}, {"default", 60}}},
             {"height", {{"type", "number"}, {"optional", true}, {"default", 20}}},
             {"width", {{"type", "number"}, {"optional", true}, {"default", 80}}},
-            {"yaw", {{"type", "number"}, {"optional", true}, {"default", 0}, {"doc", "Degrees around the camera"}}},
+            {"yaw",
+             {{"type", "number"}, {"optional", true}, {"default", 0}, {"doc", "Degrees around the camera"}}},
             {"elevation", {{"type", "number"}, {"optional", true}, {"default", 0}}},
-            {"parallax", {{"type", "number"}, {"optional", true}, {"default", 0.2}, {"doc", "0 fixed, 1 moves with the world"}}},
-            {"tint", {{"type", "list"}, {"of", {{"type", "number"}}}, {"optional", true}, {"doc", "[r, g, b, a]"}}}}}}}};
-    static const Json customSpec = {
-        {"type", "list"},
-        {"of",
-         {{"type", "record"},
-          {"fields",
-           {{"shader", {{"type", "string"}, {"default", "custom"}, {"doc", "shaders/fs_<name>.sc (a-z, 0-9, _ and -)"}}},
-            {"params", {{"type", "list"}, {"of", {{"type", "number"}}}, {"optional", true}, {"doc", "Up to 16 numbers (u_params)"}}}}}}}};
+            {"parallax",
+             {{"type", "number"},
+              {"optional", true},
+              {"default", 0.2},
+              {"doc", "0 fixed, 1 moves with the world"}}},
+            {"tint",
+             {{"type", "list"},
+              {"of", {{"type", "number"}}},
+              {"optional", true},
+              {"doc", "[r, g, b, a]"}}}}}}}};
+    static const Json customSpec = {{"type", "list"},
+                                    {"of",
+                                     {{"type", "record"},
+                                      {"fields",
+                                       {{"shader",
+                                         {{"type", "string"},
+                                          {"default", "custom"},
+                                          {"doc", "shaders/fs_<name>.sc (a-z, 0-9, _ and -)"}}},
+                                        {"params",
+                                         {{"type", "list"},
+                                          {"of", {{"type", "number"}}},
+                                          {"optional", true},
+                                          {"doc", "Up to 16 numbers (u_params)"}}}}}}}};
     auto editSection = [&](const char* label, const char* pointer) {
         auto value = env.toJson().at(Json::json_pointer(pointer));
         const Json& spec = std::string_view(pointer) == "/sky/backdrops" ? backdropSpec : customSpec;

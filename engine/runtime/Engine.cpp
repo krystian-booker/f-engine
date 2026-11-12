@@ -5,11 +5,13 @@
 #include "engine/runtime/WorldLoader.h"
 #include "engine/script/Binder.h"
 #include "engine/script/LuaHost.h"
+#include "engine/services/SaveQueue.h"
 #include "engine/world/World.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <stdexcept>
+#include <thread>
 
 namespace fe {
 // The engine's references into the Lua state, kept out of Engine.h so that
@@ -33,20 +35,33 @@ struct Engine::Script {
     }
 };
 
+namespace {
+// Where saves go: the port's backend or files in the user-data folder,
+// behind the background writer unless the options turn it off.
+std::unique_ptr<SaveBackend> saveBackendFor(EngineOptions& options) {
+    auto backend = options.saveBackend ? std::move(options.saveBackend)
+                                       : std::make_unique<FileSaveBackend>(options.userData);
+    if (!options.backgroundSaves) {
+        return backend;
+    }
+    return std::make_unique<QueuedSaveBackend>(std::move(backend));
+}
+} // namespace
+
 Engine::Engine(EngineOptions options) : Engine(std::move(options), std::nullopt) {
 }
 
 Engine::Engine(EngineOptions&& options, std::optional<GameConfig> config)
     : config_(config ? std::move(*config) : GameConfig::load(options.gameRoot)),
-      development_(options.development), testHooks_(options.testHooks),
+      development_(options.development), testHooks_(options.testHooks), blockingLoads_(options.blockingLoads),
       seed_(options.seed.value_or(
           static_cast<std::uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count()))),
-      assets_(std::make_unique<AssetCache>(options.gameRoot, options.libraryRoot, options.userData,
+      assets_(std::make_unique<AssetCache>(options.gameRoot, options.builtinRoot, options.userData,
                                            options.assetBudget)),
       text_(std::make_unique<TextSystem>(*assets_)),
       canvas_(std::make_unique<Canvas>(*text_, config_.virtualWidth, config_.virtualHeight)),
       audio_(options.audio ? std::move(options.audio) : std::make_unique<NullAudio>()),
-      saves_(options.userData, std::move(options.saveBackend)),
+      saves_(options.userData, saveBackendFor(options)),
       platform_(options.platform ? std::move(options.platform)
                                  : std::make_unique<LocalPlatformServices>(
                                        options.userData.empty() ? std::filesystem::path()
@@ -55,13 +70,13 @@ Engine::Engine(EngineOptions&& options, std::optional<GameConfig> config)
       locale_(options.locale.empty() ? "en-US" : options.locale),
       loader_(std::make_unique<WorldLoader>(*assets_)), emitters_(std::make_unique<EmitterAudio>()),
       docs_(std::make_unique<BindingDocs>()),
-      lua_(std::make_unique<LuaHost>(options.gameRoot, options.libraryRoot, options.development)),
+      lua_(std::make_unique<LuaHost>(options.gameRoot, options.builtinRoot, options.development)),
       script_(std::make_unique<Script>()), ownsLogSink_(static_cast<bool>(options.logSink)) {
     if (ownsLogSink_) {
         setLogSink(std::move(options.logSink));
     }
-    if (!isFolder(options.libraryRoot)) {
-        throw std::runtime_error("Lua library folder not found: " + options.libraryRoot.string());
+    if (!isFolder(options.builtinRoot)) {
+        throw std::runtime_error("Engine asset folder (builtin) not found: " + options.builtinRoot.string());
     }
     // Content packs go over the game folder once game.json is loaded, so a
     // pack cannot change the game's configuration, only its files.
@@ -242,8 +257,102 @@ int Engine::loadWorldAsync(const std::string& name, const std::string& mapId) {
     return loader_->begin(name, mapId, resolveMap(mapId));
 }
 
+float Engine::uploaded(const std::vector<WarmAsset>& assets) const {
+    if (!gpuReady_ || !gpuWarmActive_ || assets.empty()) {
+        return 1;
+    }
+    std::size_t ready = 0;
+    for (const auto& asset : assets) {
+        ready += gpuReady_(asset) ? 1 : 0;
+    }
+    return ready == assets.size() ? 1.0f : static_cast<float>(ready) / static_cast<float>(assets.size());
+}
+
+namespace {
+// Decoding fills the first nine tenths of a progress bar, uploading the rest.
+constexpr float DecodeShare = 0.9f;
+float combined(float decoded, float uploaded) {
+    if (decoded < 1) {
+        return decoded * DecodeShare;
+    }
+    return uploaded >= 1 ? 1.0f : DecodeShare + (1 - DecodeShare) * uploaded;
+}
+} // namespace
+
+namespace {
+// Blocking loads: sleeps in short steps until `progress` reaches 1.
+template<typename Progress> void waitFor(Progress progress) {
+    while (progress() < 1) {
+        std::this_thread::sleep_for(std::chrono::microseconds(200));
+    }
+}
+} // namespace
+
 float Engine::loadProgress(int ticket) {
-    return loader_->progress(ticket);
+    if (blockingLoads_) {
+        // What the map draws uploads when it is first drawn: a replay does
+        // not mind the long frame, and its ticks must not depend on the GPU.
+        waitFor([&] { return loader_->progress(ticket); });
+        return 1;
+    }
+    const float decoded = loader_->progress(ticket);
+    if (!gpuReady_ || !gpuWarmActive_) {
+        return decoded;
+    }
+    std::vector<WarmAsset> assets;
+    loader_->warmAssets(ticket, assets);
+    return combined(decoded, uploaded(assets));
+}
+
+int Engine::preload(const std::vector<std::string>& paths) {
+    const int ticket = assets_->preload(paths);
+    std::vector<WarmAsset> warm;
+    for (const auto& path : paths) {
+        if (auto asset = preloadWarmAsset(path)) {
+            warm.push_back(std::move(*asset));
+        }
+    }
+    if (!warm.empty()) {
+        // A game that never reads a ticket's progress to the end leaves it
+        // here; the oldest go first.
+        constexpr std::size_t MaxTracked = 64;
+        while (preloads_.size() >= MaxTracked) {
+            preloads_.erase(preloads_.begin());
+        }
+        preloads_.emplace(ticket, std::move(warm));
+    }
+    return ticket;
+}
+
+float Engine::preloadProgress(int ticket) {
+    if (blockingLoads_) {
+        waitFor([&] { return assets_->progress(ticket); });
+        preloads_.erase(ticket);
+        return 1;
+    }
+    const float decoded = assets_->progress(ticket);
+    const auto found = preloads_.find(ticket);
+    if (found == preloads_.end()) {
+        return decoded;
+    }
+    if (!gpuReady_ || !gpuWarmActive_) {
+        if (decoded >= 1) {
+            preloads_.erase(found);
+        }
+        return decoded;
+    }
+    const float progress = combined(decoded, uploaded(found->second));
+    if (progress >= 1) {
+        preloads_.erase(found);
+    }
+    return progress;
+}
+
+void Engine::warmAssets(std::vector<WarmAsset>& out) const {
+    loader_->warmAssets(out);
+    for (const auto& [ticket, assets] : preloads_) {
+        out.insert(out.end(), assets.begin(), assets.end());
+    }
 }
 
 std::shared_ptr<World> Engine::finishLoad(int ticket) {

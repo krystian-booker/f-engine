@@ -1,6 +1,8 @@
 #pragma once
 #include "engine/assets/Image.h"
 #include "engine/core/Json.h"
+#include <array>
+#include <cstdint>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <memory>
@@ -66,7 +68,28 @@ struct ModelPart {
     Material material;
     int node = 0;
     bool hidden = false;      // collision or helper geometry, or a node outside the shown scene
-    glm::vec3 min{0}, max{0}; // bounds in node space
+    glm::vec3 min{0}, max{0}; // bounds in node space (a skinned part: model space, at rest)
+    // A skinned part (skin >= 0) carries, per vertex, up to four joints of
+    // its skin (indices into ModelSkin::joints) and their weights, which sum
+    // to 1. Its vertices are in the mesh's bind space and are placed by the
+    // joints alone: the owning node's transform does not apply (glTF).
+    int skin = -1;
+    std::vector<std::array<std::uint16_t, 4>> joints;
+    std::vector<glm::vec4> weights;
+};
+
+// A glTF skin: the nodes that are its joints and, per joint, the matrix that
+// takes a vertex from bind space into that joint's space.
+struct ModelSkin {
+    std::vector<int> joints;
+    std::vector<glm::mat4> inverseBind;
+};
+
+// A node's local transform, the unit animations are sampled and blended in.
+struct NodePose {
+    glm::vec3 translation{0};
+    glm::quat rotation{1, 0, 0, 0};
+    glm::vec3 scale{1};
 };
 
 struct ModelNode {
@@ -102,14 +125,15 @@ struct ModelAnimation {
     std::vector<AnimationChannel> channels;
 };
 
-// A static glTF scene: node hierarchy, rigid TRS animations, markers.
-// Skinned meshes are rejected; characters are sprites. Images a .gltf
-// references by URI must lie in the model's folder (or below it); a node
-// matrix with a negative determinant imports as a mirrored scale.
+// A glTF scene: node hierarchy, TRS animations of its nodes, skins (skeletal
+// characters and creatures) and markers. Images a .gltf references by URI
+// must lie in the model's folder (or below it); a node matrix with a negative
+// determinant imports as a mirrored scale. Morph targets are not read.
 struct Model {
     std::vector<ModelNode> nodes;
     std::vector<int> order; // parents before children
     std::vector<ModelPart> parts;
+    std::vector<ModelSkin> skins;
     std::vector<ModelAnimation> animations; // each one's channels sorted by node
     std::vector<ModelMarker> markers;
     glm::vec3 min{0}, max{0};
@@ -124,7 +148,45 @@ struct Model {
     // into `matrices` only (sized to the nodes), so a frame allocates nothing
     // here once it is warm.
     void pose(int animation, float time, std::vector<glm::mat4>& matrices) const;
+    // The same in two steps, for blending between animations: every node's
+    // local transform under an animation (-1: at rest), then world matrices
+    // from local transforms. blendPoses moves `into` towards `other` by
+    // `weight` (0 keeps it, 1 replaces it), the short way round for rotations.
+    void sample(int animation, float time, std::vector<NodePose>& locals) const;
+    void compose(const std::vector<NodePose>& locals, std::vector<glm::mat4>& matrices) const;
+    static void blendPoses(std::vector<NodePose>& into, const std::vector<NodePose>& other, float weight);
+    // Joint matrices of a skin under a pose (world matrices of every node):
+    // matrices[i] takes a bind-space vertex of joint i to model space.
+    void jointMatrices(int skin, const std::vector<glm::mat4>& pose, std::vector<glm::mat4>& matrices) const;
+    [[nodiscard]] bool skinned() const { return !skins.empty(); }
     // Fills restLocal and restPose from the nodes (load() does this).
     void bakeRestPose();
 };
+
+// A skinned part's vertices under joint matrices (Model::jointMatrices): each
+// position, normal and tangent is the weighted sum of its joints' transforms.
+// `out` is resized to the part's vertex count; uv and colour are copied.
+void skinVertices(const ModelPart& part, const std::vector<glm::mat4>& joints, std::vector<MeshVertex>& out);
+
+// True when two materials draw identically: same factors, images (the same
+// decoded image, not merely equal pixels), samplers, flags and shader. Parts
+// with such materials can share one draw call.
+[[nodiscard]] bool sameMaterial(const Material& a, const Material& b);
+
+// Static geometry ready to draw as a map: a model's visible parts at rest, in
+// model space, merged by material.
+struct BakedMesh {
+    const Material* material = nullptr; // of the first part merged into it
+    std::vector<MeshVertex> vertices;
+    std::vector<std::uint32_t> indices;
+};
+
+// Every visible part is transformed by its node (a skinned part by its
+// joints at rest; a mirrored node's triangles are turned to face outwards
+// again), then parts whose materials are the same are joined into one mesh,
+// in the order their materials first appear. A map built from many small
+// pieces (one node per wall, floor tile or prop) becomes one mesh per
+// material rather than one per piece. Transparent and water materials are
+// not joined: their parts are sorted by distance, each on its own.
+[[nodiscard]] std::vector<BakedMesh> bakeGeometry(const Model& model);
 } // namespace fe

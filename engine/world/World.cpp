@@ -41,15 +41,15 @@ std::vector<WorldEvent> EventQueue::take() {
 
 World::World(std::string name, MapData map, AssetCache& assets, std::uint64_t seed)
     : name_(std::move(name)), map_(std::move(map)), authored_(map_), assets_(assets), random_(seed),
-      collision_(registry_, staticBoxes(map_)),
-      movement_(registry_, map_.grid, collision_, events_), particles_(registry_, assets_, random_) {
+      collision_(registry_, staticBoxes(map_)), movement_(registry_, map_.grid, collision_, events_),
+      particles_(registry_, assets_, random_) {
     rebuildStatic();
     movement_.setBlockedCells(&boxBlockedCells());
     // The camera starts on the `start` point, else the first point, else the middle.
     const auto start = map_.points.find("start");
     camera_.target = start != map_.points.end() ? start->second.position
-                     : map_.points.empty()      ? glm::vec3(map_.grid.width() * 0.5f, 0, map_.grid.depth() * 0.5f)
-                                                : map_.points.begin()->second.position;
+                     : map_.points.empty() ? glm::vec3(map_.grid.width() * 0.5f, 0, map_.grid.depth() * 0.5f)
+                                           : map_.points.begin()->second.position;
     camera_.snap();
 }
 
@@ -131,9 +131,9 @@ std::optional<WorldHit> World::raycast(glm::vec3 origin, glm::vec3 direction,
             if (!animation) {
                 continue;
             }
-            const auto quad = spriteQuad(sprite, *animation, interpolated(entity, options.alpha), transform.facing,
-                                         options.camera ? *options.camera : camera_, options.alpha,
-                                         options.pixelsPerUnit);
+            const auto quad =
+                spriteQuad(sprite, *animation, interpolated(entity, options.alpha), transform.facing,
+                           options.camera ? *options.camera : camera_, options.alpha, options.pixelsPerUnit);
             const auto t = rayQuad(origin, direction, quad);
             if (t && *t <= (best ? best->distance : options.maxDistance)) {
                 best = WorldHit{.kind = WorldHit::Kind::Entity,
@@ -238,15 +238,20 @@ void World::rename(entt::entity entity, const std::string& id) {
     if (!registry_.valid(entity)) {
         return;
     }
+    // Refused before anything changes: a rename that throws leaves the
+    // entity findable under its old id.
+    if (const auto taken = names_.find(id); taken != names_.end()) {
+        if (taken->second == entity) {
+            return;
+        }
+        throw std::runtime_error("Entity id already in use: " + id);
+    }
     if (const auto* name = registry_.try_get<Name>(entity)) {
         names_.erase(name->id);
     }
     if (id.empty()) {
         registry_.remove<Name>(entity);
         return;
-    }
-    if (names_.contains(id)) {
-        throw std::runtime_error("Entity id already in use: " + id);
     }
     registry_.emplace_or_replace<Name>(entity, Name{id});
     names_[id] = entity;
@@ -283,8 +288,19 @@ void World::setClip(entt::entity entity, const std::string& clip, bool restart) 
     restartClip(sprite, clip);
 }
 
-void World::playMesh(entt::entity entity, const std::string& animation, bool loop) {
+void World::playMesh(entt::entity entity, const std::string& animation, bool loop, float fade) {
     auto& mesh = registry_.get<MeshInstance>(entity);
+    if (fade > 0 && mesh.animation != animation) {
+        // Blend out of the pose shown now, wherever its animation had got to.
+        mesh.fromAnimation = mesh.animation;
+        mesh.fromTime = mesh.time;
+        mesh.fromLoop = mesh.loop;
+        mesh.fade = fade;
+        mesh.fadeElapsed = 0;
+    } else if (fade <= 0) {
+        mesh.fade = mesh.fadeElapsed = 0;
+        mesh.fromAnimation.clear();
+    }
     mesh.animation = animation;
     mesh.loop = loop;
     mesh.time = 0;

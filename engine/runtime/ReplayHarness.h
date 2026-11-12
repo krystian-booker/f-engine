@@ -21,8 +21,8 @@ struct Image;
 //
 //   [{"tick": 10, "input": [["key:Right", 1]]},
 //    {"tick": 40, "input": {"key:Right": 0}},
-//    {"tick": 41, "wait_for": "require('fe.field').world ~= nil", "timeout": 600},
-//    {"tick": 42, "assert": "require('fe.state').flag('met_elder')"},
+//    {"tick": 41, "wait_for": "require('game.field').world ~= nil", "timeout": 600},
+//    {"tick": 42, "assert": "require('game.state').flags.met_elder"},
 //    {"tick": 50, "mouse": [120, 80]}, {"tick": 51, "wheel": -1},
 //    {"tick": 55, "text": "Aria"}, {"tick": 56, "text": "かな", "cursor": 2},
 //    {"tick": 58, "pads": [{"connected": true, "pad": 1, "name": "Virtual", "type": "xbox",
@@ -143,7 +143,7 @@ private:
 
 // `fengine_headless <game> --replay <file>`: runs a replay with no window,
 // GPU or audio device. Returns the process exit code.
-int runHeadlessReplay(const std::filesystem::path& game, const std::filesystem::path& lualib,
+int runHeadlessReplay(const std::filesystem::path& game, const std::filesystem::path& builtin,
                       const std::filesystem::path& replay, std::filesystem::path userData,
                       std::optional<std::uint64_t> seed);
 } // namespace fe

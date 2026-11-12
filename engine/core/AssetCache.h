@@ -31,10 +31,10 @@ namespace fe {
 class AssetCache {
 public:
     static constexpr std::size_t DefaultBudget = std::size_t{512} << 20;
-    // Paths beginning with "@fe/" resolve inside lualib/fe (shared fonts and
+    // Paths beginning with "@fe/" resolve inside the builtin folder (shared fonts and
     // UI art), "user://" ones inside the per-user data folder (read only,
     // e.g. save thumbnails), all others inside the game folder.
-    AssetCache(std::filesystem::path root, std::filesystem::path libraryRoot,
+    AssetCache(std::filesystem::path root, std::filesystem::path builtinRoot,
                std::filesystem::path userRoot = {}, std::size_t budget = DefaultBudget);
     ~AssetCache();
     AssetCache(const AssetCache&) = delete;
@@ -51,6 +51,12 @@ public:
     std::shared_ptr<const Image> tryImage(const std::string& path);
     // Whether `path` is decoded and cached right now (no load is started).
     [[nodiscard]] bool loaded(const std::string& path) const;
+    // The cached asset, or null: nothing is loaded and, unlike the accessors
+    // above, the asset does not count as used (the renderer compares its GPU
+    // copies with these without making every asset look recently used).
+    [[nodiscard]] std::shared_ptr<const Model> cachedModel(const std::string& path) const;
+    [[nodiscard]] std::shared_ptr<const SpriteAnimation> cachedSprite(const std::string& path) const;
+    [[nodiscard]] std::shared_ptr<const Image> cachedImage(const std::string& path) const;
 
     // Fonts are named sets of faces, e.g. {"files":["ui/font.fnt","ui/noto.ttf"],"size":12}.
     // Redefining a font keeps the previous faces alive until
@@ -62,8 +68,15 @@ public:
     // Call once nothing refers to the faces of redefined fonts (frame start).
     void releaseRetiredFonts() { retiredFonts_.clear(); }
 
-    // Starts background decoding; returns a ticket for progress().
+    // Starts background decoding; returns a ticket for progress(). A path
+    // already being decoded (for another ticket) is not decoded twice: the
+    // ticket waits for that decode.
     int preload(const std::vector<std::string>& paths);
+    // The same for one path with no ticket to read (the renderer warming the
+    // GPU): nothing happens when it is cached or already being decoded.
+    void decodeInBackground(const std::string& path);
+    // True while a background decode of `path` is queued or running.
+    [[nodiscard]] bool decoding(const std::string& path);
     // 0..1; a finished ticket is forgotten and reads as 1 from then on.
     [[nodiscard]] float progress(int ticket);
     // Moves finished background results into the cache (main thread). Cheap
@@ -109,7 +122,7 @@ private:
     void touch(const std::string& path) { lastUse_[path] = ++useCounter_; }
     bool erase(const std::string& path);
     void worker();
-    std::filesystem::path root_, libraryRoot_, userRoot_;
+    std::filesystem::path root_, builtinRoot_, userRoot_;
     std::map<std::string, Stamp> userStamps_;
     std::map<std::string, std::shared_ptr<const Model>> models_;
     std::map<std::string, std::shared_ptr<const SpriteAnimation>> sprites_;
@@ -130,8 +143,11 @@ private:
     };
     std::mutex mutex_;
     std::condition_variable wake_;
-    std::deque<std::pair<int, std::string>> queue_;
+    std::deque<std::string> queue_;
+    // Paths queued or being decoded, each with the tickets waiting for it.
+    std::map<std::string, std::vector<int>> inFlight_;
     std::vector<std::pair<std::string, Decoded>> finished_;
+    std::vector<std::string> failedDecodes_; // paths whose decode threw, until collect()
     std::atomic<bool> hasFinished_ = false;
     std::map<int, Ticket> tickets_;
     int nextTicket_ = 1;

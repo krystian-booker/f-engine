@@ -22,18 +22,30 @@ using namespace editorui;
 namespace {
 const char* iconFor(AssetKind kind) {
     switch (kind) {
-    case AssetKind::Sprite: return ICON_FA_PERSON_WALKING;
-    case AssetKind::Image: return ICON_FA_IMAGE;
-    case AssetKind::Model: return ICON_FA_CUBE;
-    case AssetKind::Audio: return ICON_FA_MUSIC;
-    case AssetKind::Lut: return ICON_FA_PALETTE;
-    case AssetKind::Script: return ICON_FA_SCROLL;
-    case AssetKind::Map: return ICON_FA_MAP;
-    case AssetKind::Data: return ICON_FA_TABLE;
-    case AssetKind::Shader: return ICON_FA_WAND_MAGIC_SPARKLES;
-    case AssetKind::Font: return ICON_FA_FONT;
-    case AssetKind::Text: return ICON_FA_FILE_LINES;
-    case AssetKind::Other: break;
+    case AssetKind::Sprite:
+        return ICON_FA_PERSON_WALKING;
+    case AssetKind::Image:
+        return ICON_FA_IMAGE;
+    case AssetKind::Model:
+        return ICON_FA_CUBE;
+    case AssetKind::Audio:
+        return ICON_FA_MUSIC;
+    case AssetKind::Lut:
+        return ICON_FA_PALETTE;
+    case AssetKind::Script:
+        return ICON_FA_SCROLL;
+    case AssetKind::Map:
+        return ICON_FA_MAP;
+    case AssetKind::Data:
+        return ICON_FA_TABLE;
+    case AssetKind::Shader:
+        return ICON_FA_WAND_MAGIC_SPARKLES;
+    case AssetKind::Font:
+        return ICON_FA_FONT;
+    case AssetKind::Text:
+        return ICON_FA_FILE_LINES;
+    case AssetKind::Other:
+        break;
     }
     return ICON_FA_FILE;
 }
@@ -53,13 +65,20 @@ bool containsNoCase(const std::string& text, const std::string& needle) {
 std::string defaultFolderFor(AssetKind kind) {
     switch (kind) {
     case AssetKind::Sprite:
-    case AssetKind::Image: return "sprites";
-    case AssetKind::Model: return "fx";
-    case AssetKind::Audio: return "audio";
-    case AssetKind::Lut: return "ui";
-    case AssetKind::Script: return "events";
-    case AssetKind::Shader: return "shaders";
-    default: return "";
+    case AssetKind::Image:
+        return "sprites";
+    case AssetKind::Model:
+        return "fx";
+    case AssetKind::Audio:
+        return "audio";
+    case AssetKind::Lut:
+        return "ui";
+    case AssetKind::Script:
+        return "events";
+    case AssetKind::Shader:
+        return "shaders";
+    default:
+        return "";
     }
 }
 std::string kilobytes(std::uintmax_t bytes) {
@@ -108,7 +127,8 @@ void Editor::openImportDialog(ImportQueue::Purpose purpose) {
                            geometry ? models : assets, geometry ? 1 : 5, nullptr, !geometry);
 }
 
-std::vector<std::filesystem::path> Editor::takeChosenFiles(ImportQueue::Purpose& purpose, std::string& folder) {
+std::vector<std::filesystem::path> Editor::takeChosenFiles(ImportQueue::Purpose& purpose,
+                                                           std::string& folder) {
     std::vector<std::filesystem::path> chosen;
     std::lock_guard lock(importQueue_->mutex);
     chosen.swap(importQueue_->files);
@@ -168,10 +188,12 @@ void Editor::importFiles(const std::vector<std::filesystem::path>& files, const 
         }
         const auto name = source.filename().string();
         const auto kind = assetKindOf(name);
-        const auto destinationFolder = folder.empty() || folder.starts_with("@fe/") ? defaultFolderFor(kind) : folder;
+        const auto destinationFolder =
+            folder.empty() || folder.starts_with("@fe/") ? defaultFolderFor(kind) : folder;
         std::filesystem::path target;
         try {
-            target = destinationFolder.empty() ? root / name : resolveInside(root, destinationFolder + "/" + name);
+            target =
+                destinationFolder.empty() ? root / name : resolveInside(root, destinationFolder + "/" + name);
         } catch (const std::exception& problem) {
             status_ = problem.what();
             continue;
@@ -192,7 +214,8 @@ void Editor::importFiles(const std::vector<std::filesystem::path>& files, const 
         }
         std::filesystem::create_directories(target.parent_path(), error);
         const auto temporary = target.parent_path() / (target.filename().string() + ".importing");
-        if (!std::filesystem::copy_file(source, temporary, std::filesystem::copy_options::overwrite_existing, error)) {
+        if (!std::filesystem::copy_file(source, temporary, std::filesystem::copy_options::overwrite_existing,
+                                        error)) {
             status_ = "Could not copy " + name + ": " + error.message();
             continue;
         }
@@ -218,8 +241,7 @@ void Editor::importFiles(const std::vector<std::filesystem::path>& files, const 
                         }
                     }
                 }
-            } catch (const std::exception&) {
-            }
+            } catch (const std::exception&) {}
         } else if (kind == AssetKind::Image) {
             const auto stem = source.stem().string();
             const auto description = source.parent_path() / (stem + ".anim.json");
@@ -344,7 +366,8 @@ void Editor::drawSpriteWizard() {
         const float scale = std::min(280.0f / static_cast<float>(wizard_.imageWidth),
                                      280.0f / static_cast<float>(wizard_.imageHeight));
         const ImVec2 origin = ImGui::GetCursorScreenPos();
-        const ImVec2 size(static_cast<float>(wizard_.imageWidth) * scale, static_cast<float>(wizard_.imageHeight) * scale);
+        const ImVec2 size(static_cast<float>(wizard_.imageWidth) * scale,
+                          static_cast<float>(wizard_.imageHeight) * scale);
         if (!drawThumbnail(wizard_.image, AssetKind::Image, size.y)) {
             ImGui::Dummy(size);
         }
@@ -352,11 +375,13 @@ void Editor::drawSpriteWizard() {
         const auto line = ImGui::ColorConvertFloat4ToU32(ImVec4(1, 1, 0, 0.6f));
         for (int c = 0; c <= columns; ++c) {
             const float x = origin.x + static_cast<float>(c * spec.frameWidth) * scale;
-            draw->AddLine({x, origin.y}, {x, origin.y + static_cast<float>(rows * spec.frameHeight) * scale}, line);
+            draw->AddLine({x, origin.y}, {x, origin.y + static_cast<float>(rows * spec.frameHeight) * scale},
+                          line);
         }
         for (int r = 0; r <= rows; ++r) {
             const float y = origin.y + static_cast<float>(r * spec.frameHeight) * scale;
-            draw->AddLine({origin.x, y}, {origin.x + static_cast<float>(columns * spec.frameWidth) * scale, y}, line);
+            draw->AddLine({origin.x, y},
+                          {origin.x + static_cast<float>(columns * spec.frameWidth) * scale, y}, line);
         }
     }
     ImGui::EndChild();
@@ -373,7 +398,10 @@ void Editor::drawSpriteWizard() {
     if (!problem.empty()) {
         ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "%s", problem.c_str());
     }
-    const auto output = wizard_.image.substr(0, wizard_.image.size() - std::filesystem::path(wizard_.image).extension().string().size()) + ".anim.json";
+    const auto output =
+        wizard_.image.substr(0, wizard_.image.size() -
+                                    std::filesystem::path(wizard_.image).extension().string().size()) +
+        ".anim.json";
     ImGui::BeginDisabled(!problem.empty());
     const bool create = ImGui::Button((ICON_FA_CHECK " Create " + output).c_str());
     ImGui::EndDisabled();
@@ -458,7 +486,8 @@ void Editor::drawAssetDetails(const AssetEntry& entry) {
                     ImGui::TableNextColumn();
                     ImGui::Text("%zu", clip.directions.size());
                     ImGui::TableNextColumn();
-                    ImGui::Text("%zu (%.2fs)", clip.directions.empty() ? 0 : clip.directions.front().size(), clip.length(0));
+                    ImGui::Text("%zu (%.2fs)", clip.directions.empty() ? 0 : clip.directions.front().size(),
+                                clip.length(0));
                     ImGui::TableNextColumn();
                     ImGui::TextUnformatted(clip.loop ? "yes" : "no");
                 }
@@ -480,10 +509,10 @@ void Editor::drawAssetDetails(const AssetEntry& entry) {
     case AssetKind::Model:
         drawThumbnail(entry.path, AssetKind::Model, 160);
         if (const auto model = engine_.assets().tryModel(entry.path)) {
-            ImGui::Text("%zu nodes, %zu parts, %zu animations, %zu markers", model->nodes.size(), model->parts.size(),
-                        model->animations.size(), model->markers.size());
-            ImGui::Text("Bounds %.2f x %.2f x %.2f units", model->max.x - model->min.x, model->max.y - model->min.y,
-                        model->max.z - model->min.z);
+            ImGui::Text("%zu nodes, %zu parts, %zu animations, %zu markers", model->nodes.size(),
+                        model->parts.size(), model->animations.size(), model->markers.size());
+            ImGui::Text("Bounds %.2f x %.2f x %.2f units", model->max.x - model->min.x,
+                        model->max.y - model->min.y, model->max.z - model->min.z);
             for (const auto& animation : model->animations) {
                 ImGui::BulletText("animation %s (%.2fs)", animation.name.c_str(), animation.duration);
             }
@@ -498,23 +527,15 @@ void Editor::drawAssetDetails(const AssetEntry& entry) {
         for (const auto& map : catalog_.maps()) {
             if (map.path == entry.path) {
                 ImGui::Text("%s: %d x %d cells", map.name.c_str(), map.width, map.depth);
-                if (const auto playFrom = devtool("play_from"); playFrom != sol::lua_nil) {
-                    if (ImGui::Button(ICON_FA_PLAY " Open this map")) {
-                        const auto points = mapPoints(map.id);
-                        const auto point = std::find(points.begin(), points.end(), "start") != points.end() ? std::string("start")
-                                           : points.empty() ? std::string()
-                                                            : points.front();
-                        if (point.empty()) {
-                            status_ = "The map has no points to start from";
-                        } else if (succeeded(engine_.lua().invoke(playFrom, map.id, point))) {
-                            status_ = "Opened " + map.id;
-                        }
-                    }
+                if (ImGui::Button(ICON_FA_PLAY " Open this map")) {
+                    const auto id = map.id;
+                    confirmDiscard(world().get(), "open another map", [this, id] { openMap(id); });
                 }
             }
         }
         break;
-    default: break;
+    default:
+        break;
     }
     const auto& users = catalog_.references(entry.path);
     ImGui::SeparatorText(users.empty() ? "Not used by any map or table" : "Used by");
@@ -545,8 +566,9 @@ void Editor::drawAssetsPanel() {
     ImGui::InputTextWithHint("##assetfilter", ICON_FA_MAGNIFYING_GLASS " Search", &assetFilter_);
     ImGui::SameLine();
     const char* kinds[] = {"All", "Sprites", "Images", "Models", "Audio", "LUTs", "Scripts", "Maps", "Data"};
-    const AssetKind kindOf[] = {AssetKind::Other, AssetKind::Sprite, AssetKind::Image, AssetKind::Model, AssetKind::Audio,
-                                AssetKind::Lut,   AssetKind::Script, AssetKind::Map,   AssetKind::Data};
+    const AssetKind kindOf[] = {AssetKind::Other,  AssetKind::Sprite, AssetKind::Image,
+                                AssetKind::Model,  AssetKind::Audio,  AssetKind::Lut,
+                                AssetKind::Script, AssetKind::Map,    AssetKind::Data};
     int kindIndex = assetKindFilter_ + 1;
     ImGui::SetNextItemWidth(90);
     if (ImGui::Combo("##kind", &kindIndex, kinds, 9)) {
@@ -564,13 +586,15 @@ void Editor::drawAssetsPanel() {
     const auto missing = catalog_.missing();
     if (!missing.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 0.6f, 0.3f, 1));
-        const auto label = std::string(ICON_FA_TRIANGLE_EXCLAMATION " ") + std::to_string(missing.size()) + " missing";
+        const auto label =
+            std::string(ICON_FA_TRIANGLE_EXCLAMATION " ") + std::to_string(missing.size()) + " missing";
         if (ImGui::SmallButton(label.c_str())) {
             ImGui::OpenPopup("Missing references");
         }
         ImGui::PopStyleColor();
         if (ImGui::BeginPopup("Missing references")) {
-            ImGui::TextDisabled("Files, modules, maps and audio ids that maps and tables name but no file supplies");
+            ImGui::TextDisabled(
+                "Files, modules, maps and audio ids that maps and tables name but no file supplies");
             for (const auto& [target, user] : missing) {
                 ImGui::BulletText("%s  <- %s (%s)", target.c_str(), user.file.c_str(), user.where.c_str());
             }
@@ -609,7 +633,7 @@ void Editor::drawAssetsPanel() {
         }
     };
     tree("");
-    tree("@fe"); // the kit's own assets
+    tree("@fe"); // the engine's own assets
     ImGui::EndChild();
     ImGui::SameLine();
     const AssetEntry* selected = catalog_.find(assetSelected_);
@@ -620,7 +644,8 @@ void Editor::drawAssetsPanel() {
     const int perRow = std::max(1, static_cast<int>(ImGui::GetContentRegionAvail().x / cell));
     int shown = 0;
     for (const auto& entry : catalog_.entries()) {
-        if (!entry.path.starts_with(prefix) || entry.path.starts_with("tests/") || entry.path.starts_with("replays/")) {
+        if (!entry.path.starts_with(prefix) || entry.path.starts_with("tests/") ||
+            entry.path.starts_with("replays/")) {
             continue;
         }
         if (assetFolder_.empty() && entry.path.starts_with("@fe/")) {
@@ -640,8 +665,9 @@ void Editor::drawAssetsPanel() {
         ImGui::PushID(entry.path.c_str());
         // The drag source must follow the selectable item itself (not a group).
         const auto dragSource = [&] {
-            if ((entry.kind == AssetKind::Sprite || entry.kind == AssetKind::Model || entry.kind == AssetKind::Image ||
-                 entry.kind == AssetKind::Audio || entry.kind == AssetKind::Lut) &&
+            if ((entry.kind == AssetKind::Sprite || entry.kind == AssetKind::Model ||
+                 entry.kind == AssetKind::Image || entry.kind == AssetKind::Audio ||
+                 entry.kind == AssetKind::Lut) &&
                 ImGui::BeginDragDropSource()) {
                 const auto payload = AssetDragPayload::of(entry.kind, entry.path);
                 ImGui::SetDragDropPayload(AssetPayloadType, &payload, sizeof(payload));
@@ -655,7 +681,8 @@ void Editor::drawAssetsPanel() {
             }
             ImGui::BeginGroup();
             const auto top = ImGui::GetCursorScreenPos();
-            if (ImGui::Selectable("##cell", isSelected, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(cell - 8, cell + 12))) {
+            if (ImGui::Selectable("##cell", isSelected, ImGuiSelectableFlags_AllowDoubleClick,
+                                  ImVec2(cell - 8, cell + 12))) {
                 assetSelected_ = entry.path;
             }
             dragSource();
@@ -677,11 +704,13 @@ void Editor::drawAssetsPanel() {
                 name.resize(dot); // the icon or thumbnail says what kind it is
             }
             const auto label = name.size() > 12 ? name.substr(0, 11) + "~" : name;
-            draw->AddText(ImVec2(top.x + 4, top.y + cell - 10), ImGui::GetColorU32(ImGuiCol_Text), label.c_str());
+            draw->AddText(ImVec2(top.x + 4, top.y + cell - 10), ImGui::GetColorU32(ImGuiCol_Text),
+                          label.c_str());
             ImGui::SetCursorScreenPos(ImVec2(top.x, top.y + cell + 14));
             ImGui::EndGroup();
             if (hovered) {
-                ImGui::SetTooltip("%s\n%s, %s", entry.path.c_str(), assetKindName(entry.kind), kilobytes(entry.size).c_str());
+                ImGui::SetTooltip("%s\n%s, %s", entry.path.c_str(), assetKindName(entry.kind),
+                                  kilobytes(entry.size).c_str());
             }
         } else {
             const auto label = std::string(iconFor(entry.kind)) + " " + rest;
@@ -700,7 +729,8 @@ void Editor::drawAssetsPanel() {
                 ImGui::SetClipboardText(entry.path.c_str());
             }
             if (ImGui::MenuItem(ICON_FA_ARROW_UP_RIGHT_FROM_SQUARE " Open externally")) {
-                SDL_OpenURL(("file://" + std::filesystem::absolute(catalog_.fileOf(entry.path)).string()).c_str());
+                SDL_OpenURL(
+                    ("file://" + std::filesystem::absolute(catalog_.fileOf(entry.path)).string()).c_str());
             }
             ImGui::EndPopup();
         }

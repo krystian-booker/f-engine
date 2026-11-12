@@ -271,7 +271,7 @@ TEST_CASE("save lists skip files that are not slots") {
 }
 
 TEST_CASE("redefined fonts stay alive until the frame's quads are gone") {
-    AssetCache assets(FENGINE_TEST_GAME, FENGINE_LUALIB);
+    AssetCache assets(FENGINE_TEST_GAME, FENGINE_BUILTIN);
     const Json spec = {{"files", {"@fe/assets/fonts/pixel.fnt"}}};
     assets.defineFont("default", spec);
     std::weak_ptr<FontSet> previous = assets.font("default");
@@ -282,7 +282,7 @@ TEST_CASE("redefined fonts stay alive until the frame's quads are gone") {
 }
 
 TEST_CASE("canvas records transformed, clipped quads") {
-    AssetCache assets(FENGINE_TEST_GAME, FENGINE_LUALIB);
+    AssetCache assets(FENGINE_TEST_GAME, FENGINE_BUILTIN);
     assets.defineFont("default", {{"files", {"@fe/assets/fonts/pixel.fnt"}}});
     TextSystem text(assets);
     Canvas canvas(text, 320, 180);
@@ -305,7 +305,7 @@ TEST_CASE("canvas records transformed, clipped quads") {
 }
 
 TEST_CASE("asset preload decodes on the worker thread") {
-    AssetCache assets(FENGINE_TEST_GAME, FENGINE_LUALIB);
+    AssetCache assets(FENGINE_TEST_GAME, FENGINE_BUILTIN);
     const int ticket = assets.preload({"maps/arena/geometry.glb", "@fe/assets/fonts/pixel.png"});
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     while (assets.progress(ticket) < 1 && std::chrono::steady_clock::now() < deadline) {
@@ -313,6 +313,38 @@ TEST_CASE("asset preload decodes on the worker thread") {
     }
     CHECK(assets.progress(ticket) == doctest::Approx(1));
     CHECK(assets.tryModel("maps/arena/geometry.glb"));
+}
+
+TEST_CASE("an asset asked for twice in the background is decoded once, and both tickets wait for it") {
+    AssetCache assets(FENGINE_TEST_GAME, FENGINE_BUILTIN);
+    const std::string model = "maps/arena/geometry.glb";
+    const int first = assets.preload({model, model});
+    const int second = assets.preload({model});
+    assets.decodeInBackground(model); // already on its way: nothing to add
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while ((assets.progress(first) < 1 || assets.progress(second) < 1 || assets.decoding(model)) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    CHECK(assets.progress(first) == 1);
+    CHECK(assets.progress(second) == 1);
+    CHECK_FALSE(assets.decoding(model));
+    const auto decoded = assets.cachedModel(model);
+    REQUIRE(decoded);
+    // A second decode would have been dropped in favour of the first, but it
+    // would also have kept the worker busy: nothing is queued any more.
+    const int again = assets.preload({model});
+    CHECK(assets.progress(again) == 1);
+    CHECK(assets.cachedModel(model) == decoded);
+    // A path with no ticket decodes too, and a missing file ends without one.
+    assets.decodeInBackground("@fe/assets/fonts/pixel.png");
+    assets.decodeInBackground("models/nowhere.glb");
+    while ((assets.decoding("@fe/assets/fonts/pixel.png") || assets.decoding("models/nowhere.glb")) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    CHECK(assets.loaded("@fe/assets/fonts/pixel.png"));
+    CHECK_FALSE(assets.loaded("models/nowhere.glb"));
 }
 
 TEST_CASE("a blank or unparseable JSON file is never copied over the backup") {
@@ -616,7 +648,7 @@ TEST_CASE("the file backend writes sidecar summaries and the save size is capped
 }
 
 TEST_CASE("the asset cache evicts least recently used assets outside the referenced set") {
-    AssetCache assets(FENGINE_TEST_GAME, FENGINE_LUALIB);
+    AssetCache assets(FENGINE_TEST_GAME, FENGINE_BUILTIN);
     CHECK(assets.budget() == AssetCache::DefaultBudget);
     const std::string a = "@fe/assets/ui/cursor.png", b = "@fe/assets/ui/bubble.png",
                       c = "@fe/assets/ui/spark.png";
@@ -661,9 +693,9 @@ TEST_CASE("the asset cache evicts least recently used assets outside the referen
 }
 
 TEST_CASE("a font reloads only for the files it names") {
-    AssetCache assets(FENGINE_TEST_GAME, FENGINE_LUALIB);
+    AssetCache assets(FENGINE_TEST_GAME, FENGINE_BUILTIN);
     assets.defineFont("default", {{"files", {"@fe/assets/fonts/pixel.fnt"}}});
-    const auto fonts = std::filesystem::path(FENGINE_LUALIB) / "fe" / "assets" / "fonts";
+    const auto fonts = std::filesystem::path(FENGINE_BUILTIN) / "assets" / "fonts";
     const auto generation = assets.generation();
     std::weak_ptr<FontSet> before = assets.font("default");
     // The face and its page image rebuild the font; a neighbour in the folder does not.
@@ -719,4 +751,176 @@ TEST_CASE("save blobs live next to their slot through the backend and go with th
         store.remove("slot1");
         CHECK_FALSE(memory->current.contains("saves/slot1.snapshot.blob"));
     }
+}
+
+#include "engine/services/SaveQueue.h"
+#include <atomic>
+#include <condition_variable>
+#include <map>
+#include <mutex>
+
+namespace {
+// A backend in memory whose writes wait at a gate, so a test can look at the
+// queue while a write is in progress, and which can be told to fail.
+class GatedBackend final : public SaveBackend {
+public:
+    struct State {
+        std::mutex mutex;
+        std::condition_variable changed;
+        std::map<std::string, std::string> files, backups;
+        bool open = true, fail = false;
+        int writes = 0, overlapping = 0, active = 0;
+    };
+    explicit GatedBackend(std::shared_ptr<State> state, bool concurrent = true)
+        : s_(std::move(state)), concurrent_(concurrent) {}
+    [[nodiscard]] std::string name() const override { return "gated"; }
+    [[nodiscard]] bool concurrentReads() const override { return concurrent_; }
+    [[nodiscard]] std::optional<std::string> read(const std::string& key, bool backup) const override {
+        const std::scoped_lock lock(s_->mutex);
+        const auto& from = backup ? s_->backups : s_->files;
+        const auto found = from.find(key);
+        return found == from.end() ? std::nullopt : std::optional(found->second);
+    }
+    void write(const std::string& key, const std::string& bytes, bool keepBackup) override {
+        std::unique_lock lock(s_->mutex);
+        s_->overlapping += s_->active++ > 0 ? 1 : 0;
+        s_->changed.wait(lock, [&] { return s_->open; });
+        --s_->active;
+        if (s_->fail) {
+            throw std::runtime_error("disk full");
+        }
+        if (keepBackup && s_->files.contains(key)) {
+            s_->backups[key] = s_->files[key];
+        }
+        s_->files[key] = bytes;
+        ++s_->writes;
+    }
+    [[nodiscard]] std::vector<std::string> list(const std::string& folder) const override {
+        const std::scoped_lock lock(s_->mutex);
+        std::vector<std::string> names;
+        for (const auto& [key, bytes] : s_->files) {
+            if (key.starts_with(folder + "/")) {
+                names.push_back(key.substr(folder.size() + 1));
+            }
+        }
+        return names;
+    }
+    void remove(const std::string& key) override {
+        const std::scoped_lock lock(s_->mutex);
+        s_->files.erase(key);
+        s_->backups.erase(key);
+    }
+    [[nodiscard]] std::optional<Stat> stat(const std::string& key, bool) const override {
+        const std::scoped_lock lock(s_->mutex);
+        const auto found = s_->files.find(key);
+        if (found == s_->files.end()) {
+            return std::nullopt;
+        }
+        Stat stat;
+        stat.size = found->second.size();
+        return stat;
+    }
+
+private:
+    std::shared_ptr<State> s_;
+    bool concurrent_;
+};
+
+void setGate(GatedBackend::State& state, bool open) {
+    {
+        const std::scoped_lock lock(state.mutex);
+        state.open = open;
+    }
+    state.changed.notify_all();
+}
+} // namespace
+
+TEST_CASE("queued saves return at once and read back from the queue until they are written") {
+    const auto state = std::make_shared<GatedBackend::State>();
+    QueuedSaveBackend queue(std::make_unique<GatedBackend>(state));
+    setGate(*state, false); // storage is slow: nothing gets through yet
+    queue.write("saves/a.json", "one", true);
+    queue.write("config.json", "first", false);
+    queue.write("config.json", "second", false); // replaces the queued one: no backup to keep
+    queue.writeBlob("a", "snapshot", std::string("\0bytes", 6));
+    CHECK(queue.pending() == 3);
+    {
+        const std::scoped_lock lock(state->mutex);
+        CHECK(state->files.empty());
+    }
+    // The game sees its saves as written.
+    CHECK(queue.read("saves/a.json", false) == std::optional<std::string>("one"));
+    CHECK(queue.read("config.json", false) == std::optional<std::string>("second"));
+    CHECK(queue.readBlob("a", "snapshot") == std::optional<std::string>(std::string("\0bytes", 6)));
+    CHECK(queue.stat("saves/a.json", false)->size == 3);
+    CHECK(queue.list("saves") == std::vector<std::string>{"a.json"});
+    CHECK(queue.listBlobs("a") == std::vector<std::string>{"snapshot"});
+    CHECK_FALSE(queue.read("saves/b.json", false).has_value());
+    setGate(*state, true);
+    queue.flush();
+    CHECK(queue.pending() == 0);
+    CHECK_FALSE(queue.takeError().has_value());
+    const std::scoped_lock lock(state->mutex);
+    CHECK(state->files.at("saves/a.json") == "one");
+    CHECK(state->files.at("config.json") == "second");
+    CHECK(state->writes == 3);      // the first config never reached storage
+    CHECK(state->overlapping == 0); // the wrapped backend is never called twice at once
+}
+
+TEST_CASE("queued slot writes keep their order and their backups; removing drops what is queued") {
+    const auto state = std::make_shared<GatedBackend::State>();
+    QueuedSaveBackend queue(std::make_unique<GatedBackend>(state));
+    setGate(*state, false);
+    queue.write("saves/a.json", "one", true);
+    queue.write("saves/a.json", "two", true);
+    queue.write("saves/gone.json", "never", true);
+    CHECK(queue.read("saves/a.json", false) == std::optional<std::string>("two"));
+    queue.remove("saves/gone.json"); // nothing of it is in progress: dropped without waiting for storage
+    CHECK_FALSE(queue.read("saves/gone.json", false).has_value());
+    setGate(*state, true);
+    // The backup is the save before the last one, as with writes carried out at once.
+    CHECK(queue.read("saves/a.json", true) == std::optional<std::string>("one"));
+    queue.flush();
+    const std::scoped_lock lock(state->mutex);
+    CHECK(state->files.at("saves/a.json") == "two");
+    CHECK(state->backups.at("saves/a.json") == "one");
+    CHECK_FALSE(state->files.contains("saves/gone.json"));
+}
+
+TEST_CASE("a failed background write is reported by flush, once") {
+    const auto state = std::make_shared<GatedBackend::State>();
+    {
+        const std::scoped_lock lock(state->mutex);
+        state->fail = true;
+    }
+    const auto folder = std::filesystem::temp_directory_path() / "fengine-save-queue-test";
+    std::filesystem::remove_all(folder);
+    SaveStore store(folder, std::make_unique<QueuedSaveBackend>(std::make_unique<GatedBackend>(state)));
+    store.write("slot1", Json{{"gold", 5}}, Json::object()); // queued: no error yet
+    CHECK_THROWS_WITH_AS(store.flush(), doctest::Contains("disk full"), std::runtime_error);
+    CHECK_NOTHROW(store.flush()); // reported once
+    {
+        const std::scoped_lock lock(state->mutex);
+        state->fail = false;
+    }
+    store.write("slot1", Json{{"gold", 6}}, Json::object());
+    CHECK_NOTHROW(store.flush());
+    CHECK(store.read("slot1")->data.at("gold") == 6);
+    CHECK(store.pending() == 0);
+}
+
+TEST_CASE("a backend that cannot be read while it writes is never called twice at once") {
+    const auto state = std::make_shared<GatedBackend::State>();
+    QueuedSaveBackend queue(std::make_unique<GatedBackend>(state, false));
+    for (int i = 0; i < 20; ++i) {
+        queue.write("saves/slot" + std::to_string(i % 3) + ".json", std::to_string(i), true);
+        // Reads of keys the queue does not hold reach the backend, each waiting its turn.
+        CHECK_FALSE(queue.read("saves/other.json", false).has_value());
+        CHECK(queue.list("saves").size() <= 3);
+    }
+    queue.flush();
+    const std::scoped_lock lock(state->mutex);
+    CHECK(state->overlapping == 0);
+    CHECK(state->files.at("saves/slot1.json") == "19");
+    CHECK(state->backups.at("saves/slot1.json") == "16");
 }

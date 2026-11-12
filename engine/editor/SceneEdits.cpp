@@ -13,6 +13,13 @@ GridPos snapToCell(const Grid& grid, glm::vec3 position, int layer) {
             std::clamp(layer, 0, std::max(0, grid.layerCount() - 1))};
 }
 
+glm::vec3 clampToGrid(const Grid& grid, glm::vec3 position) {
+    const float margin = 0.001f;
+    position.x = std::clamp(position.x, 0.0f, std::max(0.0f, static_cast<float>(grid.width()) - margin));
+    position.z = std::clamp(position.z, 0.0f, std::max(0.0f, static_cast<float>(grid.depth()) - margin));
+    return position;
+}
+
 glm::vec3 cellCentre(const Grid& grid, GridPos cell) {
     const glm::vec2 centre(static_cast<float>(cell.x) + 0.5f, static_cast<float>(cell.z) + 0.5f);
     const int layer = std::clamp(cell.layer, 0, std::max(0, grid.layerCount() - 1));
@@ -40,13 +47,15 @@ glm::vec3 snapForFootprint(const Grid& grid, glm::vec3 point, glm::ivec2 footpri
     const int l = std::clamp(layer, 0, std::max(0, grid.layerCount() - 1));
     const glm::vec2 inside(std::clamp(snapped.x, 0.0f, static_cast<float>(grid.width()) - 0.01f),
                            std::clamp(snapped.y, 0.0f, static_cast<float>(grid.depth()) - 0.01f));
-    const float y = grid.contains(floorCell(inside.x), floorCell(inside.y), l) ? grid.heightAt(inside, l) : 0.0f;
+    const float y =
+        grid.contains(floorCell(inside.x), floorCell(inside.y), l) ? grid.heightAt(inside, l) : 0.0f;
     return {snapped.x, y, snapped.y};
 }
 
 std::string uniquePlacementId(const std::string& prefix, const std::vector<Placement>& placements) {
     const auto taken = [&](const std::string& id) {
-        return std::any_of(placements.begin(), placements.end(), [&](const Placement& p) { return p.id == id; });
+        return std::any_of(placements.begin(), placements.end(),
+                           [&](const Placement& p) { return p.id == id; });
     };
     const std::string base = prefix.empty() ? std::string("placement") : prefix;
     if (!taken(base)) {
@@ -76,20 +85,22 @@ std::string stemOf(const std::string& path) {
 }
 } // namespace
 
-std::optional<Placement> placementForAsset(AssetKind kind, const std::string& path, GridPos cell, const Grid& grid,
-                                           const std::string& defaultType, const std::vector<Placement>& existing,
-                                           const Model* model, std::optional<glm::vec3> point) {
+std::optional<Placement> placementForAsset(AssetKind kind, const std::string& path, GridPos cell,
+                                           const Grid& grid, const std::string& defaultType,
+                                           const std::vector<Placement>& existing, const Model* model,
+                                           std::optional<glm::vec3> point) {
     Placement p;
     switch (kind) {
     case AssetKind::Sprite:
-        p.type = defaultType.empty() ? "prop" : defaultType;
+        p.type = defaultType.empty() ? "object" : defaultType;
         p.props["sprite"] = path;
         break;
     case AssetKind::Model:
-        p.type = "prop";
+        p.type = defaultType.empty() ? "object" : defaultType;
         p.props["model"] = path;
         break;
-    default: return std::nullopt;
+    default:
+        return std::nullopt;
     }
     p.id = uniquePlacementId(stemOf(path), existing);
     p.layer = std::clamp(cell.layer, 0, std::max(0, grid.layerCount() - 1));
@@ -129,12 +140,17 @@ bool syncPlacementEntity(World& world, const Placement& placement) {
 }
 
 std::vector<std::string> changedPlacementIds(const MapData& before, const MapData& after) {
+    const auto placementJson = [](const Placement& placement) {
+        MapData map;
+        map.placements = {placement};
+        return map.toJson().at("placements").at(0);
+    };
     std::map<std::string, Json> was, now;
     for (const auto& p : before.placements) {
-        was[p.id] = MapData{.placements = {p}}.toJson().at("placements").at(0);
+        was[p.id] = placementJson(p);
     }
     for (const auto& p : after.placements) {
-        now[p.id] = MapData{.placements = {p}}.toJson().at("placements").at(0);
+        now[p.id] = placementJson(p);
     }
     std::vector<std::string> ids;
     for (const auto& [id, json] : was) {

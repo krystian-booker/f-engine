@@ -1,0 +1,41 @@
+{
+  "music": {
+    "vale": {
+      "file": "audio/vale.wav"
+    },
+    "grotto": {
+      "file": "audio/grotto.wav"
+    },
+    "battle": {
+      "file": "audio/battle.wav"
+    },
+    "boss": {
+      "file": "audio/boss.wav"
+    },
+    "title": {
+      "file": "audio/title.wav"
+    },
+    "overworld": {
+      "file": "audio/overworld.wav"
+    },
+    "victory": {
+      "file": "audio/victory.wav",
+      "loop": false
+    }
+  },
+  "sfx": {
+    "cursor": "audio/cursor.wav",
+    "confirm": "audio/confirm.wav",
+    "cancel": "audio/cancel.wav",
+    "buzzer": "audio/buzzer.wav",
+    "hit": "audio/hit.wav",
+    "chest": "audio/chest.wav",
+    "step": "audio/step.wav",
+    "heal": "audio/heal.wav",
+    "save": "audio/save.wav",
+    "buy": "audio/buy.wav",
+    "equip": "audio/equip.wav",
+    "defeat_enemy": "audio/defeat_enemy.wav",
+    "chime": "audio/chime.wav"
+  }
+}

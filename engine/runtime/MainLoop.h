@@ -9,7 +9,7 @@
 
 namespace fe {
 struct RuntimeOptions {
-    std::filesystem::path game, lualib, shaders, userData;
+    std::filesystem::path game, builtin, shaders, userData;
     std::filesystem::path replay, record, capture;
     std::optional<std::uint64_t> seed;
     std::uint64_t frameLimit = 0;

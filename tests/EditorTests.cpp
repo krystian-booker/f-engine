@@ -1,9 +1,10 @@
 #include "engine/assets/Model.h"
 #include "engine/editor/MapEdits.h"
+#include "engine/editor/PropLinks.h"
 #include "engine/world/Components.h"
 #include "engine/world/World.h"
-#include <doctest/doctest.h>
 #include <array>
+#include <doctest/doctest.h>
 
 using namespace fe;
 
@@ -13,7 +14,7 @@ MapData arena() {
 }
 
 struct Worlds {
-    AssetCache assets{FENGINE_TEST_GAME, FENGINE_LUALIB};
+    AssetCache assets{FENGINE_TEST_GAME, FENGINE_BUILTIN};
     World field{"field", arena(), assets, 1};
     World battle{"battle", arena(), assets, 2};
 };
@@ -433,7 +434,8 @@ TEST_CASE("a transform edited in the World tab moves the entity in the collision
 
 TEST_CASE("editor forms read mistyped JSON as absent instead of throwing") {
     using namespace editorui;
-    const Json record = Json::parse(R"({"id": 7, "name": "x", "rate": "fast", "on": 1, "list": {}, "obj": []})");
+    const Json record =
+        Json::parse(R"({"id": 7, "name": "x", "rate": "fast", "on": 1, "list": {}, "obj": []})");
     CHECK(jsonString(record, "id", "fallback") == "fallback");
     CHECK(jsonString(record, "name", "fallback") == "x");
     CHECK(jsonNumber(record, "rate", 2) == 2);
@@ -464,7 +466,7 @@ TEST_CASE("the asset catalog classifies files by name") {
 }
 
 TEST_CASE("the asset catalog lists vale's assets, maps, audio ids and modules, and who uses what") {
-    AssetCatalog catalog(std::filesystem::path(FENGINE_SAMPLES) / "vale", FENGINE_LUALIB);
+    AssetCatalog catalog(std::filesystem::path(FENGINE_SAMPLES) / "starfall", FENGINE_BUILTIN);
     catalog.scan();
     const auto before = catalog.revision();
     CHECK(before == 1);
@@ -510,7 +512,7 @@ TEST_CASE("the asset catalog lists vale's assets, maps, audio ids and modules, a
 }
 
 TEST_CASE("the asset catalog reports references to files that do not exist") {
-    AssetCatalog catalog(std::filesystem::path(FENGINE_TEST_GAME), FENGINE_LUALIB);
+    AssetCatalog catalog(std::filesystem::path(FENGINE_TEST_GAME), FENGINE_BUILTIN);
     catalog.scan();
     // Nothing in the library's test game is known to be missing; the check
     // is that the walk itself does not throw on its data and maps.
@@ -607,7 +609,8 @@ TEST_CASE("the editor camera adopts the game view, clamps its orbit and frames a
     editor.frame({0, 0, 0}, {12, 2, 10});
     CHECK(editor.camera.target == glm::vec3(6, 1, 5));
     // Every corner of the box projects inside the view.
-    for (const auto corner : {glm::vec3(0, 0, 0), glm::vec3(12, 0, 0), glm::vec3(0, 2, 10), glm::vec3(12, 2, 10)}) {
+    for (const auto corner :
+         {glm::vec3(0, 0, 0), glm::vec3(12, 0, 0), glm::vec3(0, 2, 10), glm::vec3(12, 2, 10)}) {
         const auto ndc = editor.camera.project(corner, 4.0f / 3.0f);
         CHECK(std::abs(ndc.x) <= 1);
         CHECK(std::abs(ndc.y) <= 1);
@@ -616,7 +619,8 @@ TEST_CASE("the editor camera adopts the game view, clamps its orbit and frames a
     // Pan by half the view moves the target by half the view height.
     const auto before = editor.camera.target;
     editor.pan({0, 300}, 600);
-    CHECK(glm::length(editor.camera.target - before) == doctest::Approx(editor.camera.viewHeight() * 0.5f).epsilon(0.01));
+    CHECK(glm::length(editor.camera.target - before) ==
+          doctest::Approx(editor.camera.viewHeight() * 0.5f).epsilon(0.01));
     editor.setOrthographic(true);
     CHECK(editor.camera.orthographic);
     CHECK(editor.camera.orthoHeight > 0);
@@ -708,7 +712,8 @@ TEST_CASE("picking finds handles by screen distance, entities and placements by 
     CHECK(pickScene(s.world, s.view, s.pixelOf({2.5f, 0, 8.5f}) + glm::vec2(4, -4), s.options()) ==
           Selection::placement("ghost"));
     // The elder's body (its collider) is under the ray: the placement, not a bare entity.
-    CHECK(pickScene(s.world, s.view, s.pixelOf({6.5f, 0.6f, 6.5f}), s.options()) == Selection::placement("elder"));
+    CHECK(pickScene(s.world, s.view, s.pixelOf({6.5f, 0.6f, 6.5f}), s.options()) ==
+          Selection::placement("elder"));
     CHECK(pickScene(s.world, s.view, s.pixelOf({4, 0, 4}), s.options()) == Selection::zone("plaza"));
     CHECK(pickScene(s.world, s.view, s.pixelOf({8.5f, 0.5f, 7.5f}), s.options()) == Selection::collider(0));
     // Open ground selects nothing; outside the view picks nothing.
@@ -747,15 +752,19 @@ TEST_CASE("scene edits snap to cells, make placements for dropped assets and mov
     CHECK(uniquePlacementId("chest", existing) == "chest");
     existing.push_back(Placement{.id = "chest"});
     CHECK(uniquePlacementId("chest", existing) == "chest2");
-    const auto sprite = placementForAsset(AssetKind::Sprite, "sprites/chest.anim.json", {4, 5, 0}, grid, "npc", existing);
+    const auto sprite =
+        placementForAsset(AssetKind::Sprite, "sprites/chest.anim.json", {4, 5, 0}, grid, "npc", existing);
     REQUIRE(sprite);
     CHECK(sprite->id == "chest2");
     CHECK(sprite->type == "npc");
     CHECK(sprite->props.at("sprite") == "sprites/chest.anim.json");
     CHECK(sprite->position == cellCentre(grid, {4, 5, 0}));
-    const auto model = placementForAsset(AssetKind::Model, "fx/Crate-01.glb", {1, 1, 0}, grid, "npc", existing);
+    const auto model =
+        placementForAsset(AssetKind::Model, "fx/Crate-01.glb", {1, 1, 0}, grid, "prop", existing);
     REQUIRE(model);
-    CHECK(model->type == "prop");
+    CHECK(model->type == "prop"); // the type the game names for models
+    CHECK(placementForAsset(AssetKind::Model, "fx/Crate-01.glb", {1, 1, 0}, grid, "", existing)->type ==
+          "object");
     CHECK(model->id == "crate_01");
     CHECK(model->props.at("model") == "fx/Crate-01.glb");
     CHECK(model->position == cellCentre(grid, {1, 1, 0}));
@@ -770,10 +779,12 @@ TEST_CASE("scene edits snap to cells, make placements for dropped assets and mov
     at.yaw = 0;
     at.scale = glm::vec3(0.5f);
     CHECK(footprintCells(house, at) == glm::ivec2(2, 2)); // 2 x 1.5 rounds to 2 x 2
-    CHECK(snapForFootprint(grid, {3.7f, 0, 2.2f}, {4, 3}, 0) == glm::vec3(4, grid.heightAt({4, 2.5f}, 0), 2.5f));
-    CHECK(snapForFootprint(grid, {3.7f, 0, 2.2f}, {1, 1}, 0) == glm::vec3(3.5f, grid.heightAt({3.5f, 2.5f}, 0), 2.5f));
-    const auto dropped = placementForAsset(AssetKind::Model, "fx/house.glb", {3, 2, 0}, grid, "npc", existing, &house,
-                                           glm::vec3(3.7f, 0, 2.2f));
+    CHECK(snapForFootprint(grid, {3.7f, 0, 2.2f}, {4, 3}, 0) ==
+          glm::vec3(4, grid.heightAt({4, 2.5f}, 0), 2.5f));
+    CHECK(snapForFootprint(grid, {3.7f, 0, 2.2f}, {1, 1}, 0) ==
+          glm::vec3(3.5f, grid.heightAt({3.5f, 2.5f}, 0), 2.5f));
+    const auto dropped = placementForAsset(AssetKind::Model, "fx/house.glb", {3, 2, 0}, grid, "npc", existing,
+                                           &house, glm::vec3(3.7f, 0, 2.2f));
     REQUIRE(dropped);
     CHECK(dropped->position.x == doctest::Approx(4));
     CHECK(dropped->position.z == doctest::Approx(2.5f));
@@ -839,12 +850,13 @@ TEST_CASE("handles mark zones, points, lights, colliders, triggers and unspawned
     const auto spotIndex = static_cast<int>(map.lights.size()) - 1;
     buildHandles(s.world, options, Selection::light(spotIndex), {}, 1, batch);
     const auto icons = [&](HandleBatch::Icon::Shape shape) {
-        return std::count_if(batch.icons.begin(), batch.icons.end(), [&](const auto& i) { return i.shape == shape; });
+        return std::count_if(batch.icons.begin(), batch.icons.end(),
+                             [&](const auto& i) { return i.shape == shape; });
     };
     CHECK(icons(HandleBatch::Icon::Shape::Flag) == static_cast<long>(map.points.size())); // the points
-    CHECK(icons(HandleBatch::Icon::Shape::Square) == 1);                                   // the zone
-    CHECK(icons(HandleBatch::Icon::Shape::Sun) == static_cast<long>(map.lights.size()));   // the lights
-    CHECK(icons(HandleBatch::Icon::Shape::Diamond) >= 1);                                  // the ghost placement
+    CHECK(icons(HandleBatch::Icon::Shape::Square) == 1);                                  // the zone
+    CHECK(icons(HandleBatch::Icon::Shape::Sun) == static_cast<long>(map.lights.size()));  // the lights
+    CHECK(icons(HandleBatch::Icon::Shape::Diamond) >= 1); // the ghost placement
     // Zone edges sit on the ground; the collider is a 12-edge box; the
     // selected spot light draws its cone; the trigger a cylinder.
     const auto onGround = std::count_if(batch.lines.begin(), batch.lines.end(), [&](const auto& l) {
@@ -859,15 +871,18 @@ TEST_CASE("handles mark zones, points, lights, colliders, triggers and unspawned
     CHECK(std::count_if(batch.lines.begin(), batch.lines.end(),
                         [&](const auto& l) { return l.color == handleColors::TriggerColor; }) > 0);
     // Labels name the point and the ghost.
-    CHECK(std::any_of(batch.labels.begin(), batch.labels.end(), [](const auto& l) { return l.text == "mark"; }));
-    CHECK(std::any_of(batch.labels.begin(), batch.labels.end(), [](const auto& l) { return l.text == "ghost (marker)"; }));
+    CHECK(std::any_of(batch.labels.begin(), batch.labels.end(),
+                      [](const auto& l) { return l.text == "mark"; }));
+    CHECK(std::any_of(batch.labels.begin(), batch.labels.end(),
+                      [](const auto& l) { return l.text == "ghost (marker)"; }));
     // An unselected light draws no reach; toggles drop whole kinds.
     HandleBatch quiet;
     buildHandles(s.world, options, {}, {}, 1, quiet);
     CHECK(std::none_of(quiet.lines.begin(), quiet.lines.end(), [&](const auto& l) {
         return l.color.r == handleColors::LightColor.r && l.color.g == handleColors::LightColor.g;
     }));
-    options.zones = options.points = options.lights = options.colliders = options.triggers = options.placements = false;
+    options.zones = options.points = options.lights = options.colliders = options.triggers =
+        options.placements = false;
     HandleBatch none;
     buildHandles(s.world, options, {}, {}, 1, none);
     CHECK(none.lines.empty());
@@ -949,7 +964,6 @@ TEST_CASE("boxes merge into slabs and are cut around a rectangle") {
     CHECK(cutBox(slab, {0, 0}, {10, 10}).empty());
 }
 
-
 TEST_CASE("a model's box follows the placement's position, yaw and scale") {
     Model model;
     model.min = {-1, 0, -0.5f};
@@ -1013,7 +1027,6 @@ TEST_CASE("rectangle and flood fills paint many cells in one step") {
     CHECK(floodFill(grid, brush, {3, 6, 0}) == 0);
 }
 
-
 // --- Walkability bake ---------------------------------------------------------
 
 #include "engine/editor/WalkBake.h"
@@ -1069,20 +1082,22 @@ struct ModelBuilder {
 };
 
 Grid flatGrid(int width, int depth) {
-    Json grid = {{"width", width}, {"depth", depth}, {"layers", Json::array({{{"name", "ground"}, {"height_fill", 0}, {"walk_fill", false}}})}};
+    Json grid = {{"width", width},
+                 {"depth", depth},
+                 {"layers", Json::array({{{"name", "ground"}, {"height_fill", 0}, {"walk_fill", false}}})}};
     return Grid::fromJson(grid);
 }
 } // namespace
 
 TEST_CASE("the walkability bake reads floors, houses, ramps, cliffs and water from geometry") {
     ModelBuilder b;
-    b.floor(0, 0, 8, 6, 0);              // level ground over the whole 8x6 map
-    b.box({2, 0, 1}, {4, 3, 3});          // a house covering cells (2..3, 1..2): its roof is an island
-    b.box({5.5f, 0, 4}, {6, 1.5f, 5});    // a post covering half of cell (5, 4)
-    b.floor(6, 0, 8, 2, 1);              // a cliff top one unit up over cells (6..7, 0..1)...
-    b.rampX(4, 0, 6, 2, 0, 1);            // ...reached by a ramp over cells (4..5, 0..1)
-    b.rampX(0, 4, 1, 5, 0, 0.5f);         // a gentle ramp in cell (0, 4) rising towards +x
-    b.floor(0, 5, 2, 6, 0.2f, true);      // a pond over cells (0..1, 5)
+    b.floor(0, 0, 8, 6, 0);            // level ground over the whole 8x6 map
+    b.box({2, 0, 1}, {4, 3, 3});       // a house covering cells (2..3, 1..2): its roof is an island
+    b.box({5.5f, 0, 4}, {6, 1.5f, 5}); // a post covering half of cell (5, 4)
+    b.floor(6, 0, 8, 2, 1);            // a cliff top one unit up over cells (6..7, 0..1)...
+    b.rampX(4, 0, 6, 2, 0, 1);         // ...reached by a ramp over cells (4..5, 0..1)
+    b.rampX(0, 4, 1, 5, 0, 0.5f);      // a gentle ramp in cell (0, 4) rising towards +x
+    b.floor(0, 5, 2, 6, 0.2f, true);   // a pond over cells (0..1, 5)
     const auto grid = flatGrid(8, 6);
     BakeOptions options;
     options.blockEdges = false; // the test's ramp, pond and cliff lie on the ring
@@ -1185,7 +1200,7 @@ TEST_CASE("the brush records overrides on a derived map, and clearing one hands 
     CHECK(map.bake.overrides[0].tags.empty());
     CHECK(map.bake.overrides[0].untags == std::vector<std::string>{"water"});
     tag.tag.clear();
-    CHECK_FALSE(setOverride(map, {2, 2, 0}, tag)); // no tag named
+    CHECK_FALSE(setOverride(map, {2, 2, 0}, tag));   // no tag named
     CHECK_FALSE(setOverride(map, {80, 2, 0}, open)); // outside the grid
     // A rectangle is one override; a later cell stroke inside it is a new entry.
     CHECK(setOverrideRect(map, {4, 1, 0}, {6, 3, 0}, open));
@@ -1220,8 +1235,8 @@ TEST_CASE("the brush records overrides on a derived map, and clearing one hands 
 }
 
 TEST_CASE("the kit's stairs bake to ramps and its cliff block to a raised floor") {
-    const auto gameRoot = std::filesystem::path(FENGINE_SAMPLES) / "vale";
-    AssetCache assets(gameRoot, FENGINE_LUALIB);
+    const auto gameRoot = std::filesystem::path(FENGINE_SAMPLES) / "starfall";
+    AssetCache assets(gameRoot, FENGINE_BUILTIN);
     const auto stairs = assets.tryModel("fx/kit/stairs_1x2.glb");
     const auto cliff = assets.tryModel("fx/kit/cliff_2x2.glb");
     const auto floor = assets.tryModel("fx/kit/floor_1x1.glb");
@@ -1231,8 +1246,10 @@ TEST_CASE("the kit's stairs bake to ramps and its cliff block to a raised floor"
     ground.floor(0, 0, 8, 6, 0);
     Placement up, block;
     up.position = {3, 0, 2.5f}; // stairs over cells (2, 2) and (3, 2), rising east
-    block.position = {5, 0, 3};  // a 2 x 2 cliff block over cells (4..5, 2..3), one unit up
-    const BakePiece pieces[] = {{&ground.model, glm::mat4(1)}, {stairs.get(), placementMatrix(up)}, {cliff.get(), placementMatrix(block)}};
+    block.position = {5, 0, 3}; // a 2 x 2 cliff block over cells (4..5, 2..3), one unit up
+    const BakePiece pieces[] = {{&ground.model, glm::mat4(1)},
+                                {stairs.get(), placementMatrix(up)},
+                                {cliff.get(), placementMatrix(block)}};
     BakeOptions options;
     options.blockEdges = false;
     const auto result = bakeWalkability(pieces, flatGrid(8, 6), options);
@@ -1249,10 +1266,10 @@ TEST_CASE("the kit's stairs bake to ramps and its cliff block to a raised floor"
 }
 
 TEST_CASE("vale's committed walkability is exactly the bake of its terrain and placed models") {
-    const auto gameRoot = std::filesystem::path(FENGINE_SAMPLES) / "vale";
+    const auto gameRoot = std::filesystem::path(FENGINE_SAMPLES) / "starfall";
     const auto map = MapData::load(gameRoot / "maps/town/map.json");
     REQUIRE_FALSE(map.bake.empty());
-    AssetCache assets(gameRoot, FENGINE_LUALIB);
+    AssetCache assets(gameRoot, FENGINE_BUILTIN);
     const auto scene = sceneForMap(map, assets, geometryPathOf(map));
     CHECK(scene.problems.empty());
     CHECK(scene.pieces.size() >= 2); // the terrain and the inn
@@ -1308,13 +1325,14 @@ TEST_CASE("a placed model bakes through its position, yaw and scale") {
     CHECK_FALSE(result.at(5, 4).walkable);
     CHECK(result.at(6, 4).walkable);
     CHECK(result.at(4, 2).walkable);
-    // Decoration and scripted props stay out of the bake.
+    // Decoration stays out of the bake, and that is the only prop that says so:
+    // what else a placement carries (a script, say) is the game's business.
     p.props["solid"] = false;
     CHECK(bakedModelOf(p) == nullptr);
     p.props.erase("solid");
-    p.props["pages"] = Json::array();
-    CHECK(bakedModelOf(p) == nullptr);
-    p.props.erase("pages");
+    p.props["script"] = "events.crate";
+    CHECK(bakedModelOf(p) != nullptr);
+    p.props.erase("script");
     p.props["model"] = 3;
     CHECK(bakedModelOf(p) == nullptr);
 }
@@ -1333,7 +1351,9 @@ TEST_CASE("collision nodes replace the visible mesh in the bake") {
     collider.hidden = true;
     house.model.parts.push_back(collider);
     auto& part = house.model.parts.back();
-    const auto tri = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c) { house.tri(part, a, b, c); };
+    const auto tri = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c) {
+        house.tri(part, a, b, c);
+    };
     const glm::vec3 lo(3, 0, 2), hi(4, 2, 3);
     tri({lo.x, hi.y, lo.z}, {hi.x, hi.y, lo.z}, {hi.x, hi.y, hi.z});
     tri({lo.x, hi.y, lo.z}, {hi.x, hi.y, hi.z}, {lo.x, hi.y, hi.z});
@@ -1413,13 +1433,15 @@ TEST_CASE("a region re-bake replaces only the derived boxes inside the region an
     map.grid = grid;
     map.colliders.push_back({{6, 0, 1}, {7, 1, 2}}); // an authored wall
     {
-        const BakePiece pieces[] = {{&ground.model, glm::mat4(1)}, {&post.model, placementMatrix(left)},
-                                  {&post.model, placementMatrix(right)}};
+        const BakePiece pieces[] = {{&ground.model, glm::mat4(1)},
+                                    {&post.model, placementMatrix(left)},
+                                    {&post.model, placementMatrix(right)}};
         applyBake(map, bakeWalkability(pieces, grid, options), options);
     }
     const auto boxesNear = [&](float x, float z) {
         return std::count_if(map.bake.colliders.begin(), map.bake.colliders.end(), [&](const Box& b) {
-            return b.min.x >= x - 1e-3f && b.max.x <= x + 1 + 1e-3f && b.min.z >= z - 1e-3f && b.max.z <= z + 1 + 1e-3f;
+            return b.min.x >= x - 1e-3f && b.max.x <= x + 1 + 1e-3f && b.min.z >= z - 1e-3f &&
+                   b.max.z <= z + 1 + 1e-3f;
         });
     };
     CHECK(boxesNear(1, 1) > 0);
@@ -1456,7 +1478,8 @@ TEST_CASE("overrides round-trip through JSON and apply after a bake") {
     map.grid = flatGrid(8, 6);
     map.bake.options = BakeOptions{}.toJson();
     map.bake.overrides.push_back({1, 1, 0, 2, 1, true, std::nullopt, std::nullopt, 1, {}, {}});
-    map.bake.overrides.push_back({3, 3, 0, 1, 1, std::nullopt, 0.5f, Ramp::East, 0.5f, {"encounter:slimes"}, {"water"}});
+    map.bake.overrides.push_back(
+        {3, 3, 0, 1, 1, std::nullopt, 0.5f, Ramp::East, 0.5f, {"encounter:slimes"}, {"water"}});
     const auto json = map.toJson();
     REQUIRE(json.contains("bake"));
     CHECK(json["bake"]["overrides"][0]["w"] == 2);
@@ -1503,7 +1526,8 @@ TEST_CASE("the bake fingerprint changes with placements, geometry, models and op
     house.position = {2, 0, 2};
     house.props = {{"model", "fx/house.glb"}};
     map.placements.push_back(house);
-    std::map<std::string, std::string> files = {{"maps/fp/geometry.glb", "terrain"}, {"fx/house.glb", "house"}};
+    std::map<std::string, std::string> files = {{"maps/fp/geometry.glb", "terrain"},
+                                                {"fx/house.glb", "house"}};
     const auto reader = [&](const std::string& path) -> std::optional<std::string> {
         const auto found = files.find(path);
         return found == files.end() ? std::nullopt : std::optional(found->second);
@@ -1655,7 +1679,7 @@ TEST_CASE("map files: blank maps, copies, renames and deletions in a scratch gam
     const auto placeholder = Model::load(root / "maps/cellar/geometry.gltf");
     CHECK(placeholder.parts.size() == 1);
     {
-        AssetCache assets(root, FENGINE_LUALIB);
+        AssetCache assets(root, FENGINE_BUILTIN);
         World world("blank", loaded, assets, 1);
         CHECK(world.geometryPath() == "maps/cellar/geometry.gltf");
         CHECK(assets.tryModel(world.geometryPath()) != nullptr);
@@ -1708,4 +1732,85 @@ TEST_CASE("a snapped draw camera shows its new values at once instead of interpo
     const auto& snapped = cameras.update(&world, "", c, 7, true);
     CHECK(snapped.focus(0).x == doctest::Approx(20));
     CHECK(snapped.focus(1).x == doctest::Approx(20));
+}
+
+TEST_CASE("links come from the game's schemas, not from prop names") {
+    const auto schemas = Json::parse(R"json({
+      "entities": {
+        "talker": {"fields": {"behaviour": {"type": "module", "folder": "events", "label": "on talk"},
+                              "leads_to": {"type": "map_id"},
+                              "steps": {"type": "list", "of": {"type": "record", "fields": {
+                                  "run": {"type": "module"}}}}}},
+        "crate": {"fields": {"script": {"type": "string"}}}
+      },
+      "zones": {"tripwire": {"fields": {"on_enter": {"type": "module"}}}}
+    })json");
+    const Json props = {{"behaviour", "events.elder"},
+                        {"leads_to", "grotto"},
+                        {"steps", {{{"run", "events.one"}}, {{"run", "events.two"}}}},
+                        {"script", "ignored.because.untyped"}};
+    const auto links = propLinks(typeFields(schemas, "entities", "talker"), props);
+    REQUIRE(links.size() == 4);
+    CHECK(links[0].kind == PropLink::Kind::Script);
+    CHECK(links[0].field == "behaviour");
+    CHECK(links[0].value == "events.elder");
+    CHECK(links[0].label == "on talk");
+    CHECK(links[1].kind == PropLink::Kind::Map);
+    CHECK(links[1].value == "grotto");
+    CHECK(links[2].field == "steps/1/run");
+    CHECK(links[3].value == "events.two");
+    // A prop called `script` is nothing special unless the game types it as one.
+    CHECK(propLinks(typeFields(schemas, "entities", "crate"), {{"script", "events.elder"}}).empty());
+    CHECK(propLinks(typeFields(schemas, "entities", "unknown"), props).empty());
+    CHECK(propLinks(typeFields(schemas, "zones", "tripwire"), {{"on_enter", "events.trap"}}).size() == 1);
+    // A game that describes nothing gets one placement and one zone type with a script field.
+    CHECK(propLinks(typeFields(defaultSchemas(), "entities", "object"), {{"script", "hello"}}).size() == 1);
+    CHECK(propLinks(typeFields(defaultSchemas(), "zones", "area"), {{"script", "hello"}}).size() == 1);
+}
+
+TEST_CASE("zones are boxes, ellipses or polygons, and survive a save") {
+    auto map = makeBlankMap("shapes", "Shapes", 12, 12);
+    Zone box{"box", "area", {1, 1}, {5, 3}, -1, Json::object()};
+    Zone ellipse = box;
+    ellipse.id = "ellipse";
+    ellipse.shape = ZoneShape::Ellipse;
+    Zone polygon;
+    polygon.id = "wedge";
+    polygon.type = "area";
+    polygon.shape = ZoneShape::Polygon;
+    polygon.points = {{6, 6}, {10, 6}, {6, 10}}; // a right triangle
+    polygon.fitBounds();
+    CHECK(polygon.min == glm::vec2(6, 6));
+    CHECK(polygon.max == glm::vec2(10, 10));
+    // The corner of the box is inside the box and outside its ellipse.
+    CHECK(box.contains({1.1f, 0, 1.1f}, 0));
+    CHECK_FALSE(ellipse.contains({1.1f, 0, 1.1f}, 0));
+    CHECK(ellipse.contains({3, 0, 2}, 0));
+    // Inside the triangle, and inside its bounds but beyond the long side.
+    CHECK(polygon.contains({7, 0, 7}, 0));
+    CHECK_FALSE(polygon.contains({9.5f, 0, 9.5f}, 0));
+    CHECK_FALSE(polygon.contains({5.5f, 0, 7}, 0));
+    map.zones = {box, ellipse, polygon};
+    const auto loaded = MapData::fromJson(map.toJson());
+    REQUIRE(loaded.zones.size() == 3);
+    CHECK(loaded.zones[0].shape == ZoneShape::Box);
+    CHECK_FALSE(map.toJson().at("zones")[0].contains("shape")); // the default is not written
+    CHECK(loaded.zones[1].shape == ZoneShape::Ellipse);
+    CHECK(loaded.zones[2].shape == ZoneShape::Polygon);
+    CHECK(loaded.zones[2].points == polygon.points);
+    CHECK(loaded.zones[2].max == glm::vec2(10, 10));
+    // Moving and stretching a polygon by its bounds carries its corners along.
+    SelectionTransform transform; // the triangle's bounds: centre (8, 8), 4 x 4
+    transform.position = {9, 0, 8};
+    transform.scale = {8, 1, 4};
+    transform.layer = -1;
+    REQUIRE(applySelectionTransform(map, Selection::zone("wedge"), transform));
+    CHECK(map.zones[2].points[0] == glm::vec2(5, 6));
+    CHECK(map.zones[2].points[1] == glm::vec2(13, 6));
+    // A polygon of two corners is refused.
+    auto json = map.toJson();
+    json["zones"][2]["points"] = Json::array({Json::array({1, 1}), Json::array({2, 2})});
+    CHECK_THROWS(MapData::fromJson(json));
+    json["zones"][2]["shape"] = "star";
+    CHECK_THROWS(MapData::fromJson(json));
 }

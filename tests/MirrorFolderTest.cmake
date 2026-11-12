@@ -1,5 +1,5 @@
 # cmake -DFOLDER=<scratch folder> -P MirrorFolderTest.cmake
-# cmake/MirrorFolder.cmake in copy mode (how Windows builds stage lualib and
+# cmake/MirrorFolder.cmake in copy mode (how Windows builds stage builtin and
 # shaders): a first copy, an update after files are changed, added and
 # removed, and removal with ENABLED off.
 cmake_minimum_required(VERSION 3.25)

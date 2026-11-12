@@ -23,7 +23,7 @@ if [[ ${1:-} == runtime ]]; then
   exit 0
 fi
 "$task_wine" build-windows/tests/fengine_tests.exe
-"$task_wine" build-windows/fengine_headless.exe --test lualib/tests/game
+"$task_wine" build-windows/fengine_headless.exe --test tests/game
 "$task_wine" build-windows/fengine_headless.exe --test build-windows/tests/sandbox-game
 for task_sample in samples/*/; do
   "$task_wine" build-windows/fengine_headless.exe --check "$task_sample"

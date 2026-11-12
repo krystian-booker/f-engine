@@ -199,12 +199,12 @@ TEST_CASE("loose files win in development mounts and the archive in ship mounts"
     CHECK(readFile(game / "only_loose.txt") == "loose");
     CHECK(listFolder(game) ==
           std::vector<std::string>{"art.png", "data.txt", "only_loose.txt", "only_packed.txt"});
-    CHECK(AssetCache(game, FENGINE_LUALIB).image("art.png")->rgba[0] == 2);
+    CHECK(AssetCache(game, FENGINE_BUILTIN).image("art.png")->rgba[0] == 2);
 
     mountPack(scratch.root / "game.pak", false);
     CHECK(readFile(game / "data.txt") == "packed");
     CHECK(slurp(localFile(game / "data.txt")) == "packed");
-    CHECK(AssetCache(game, FENGINE_LUALIB).image("art.png")->rgba[0] == 1);
+    CHECK(AssetCache(game, FENGINE_BUILTIN).image("art.png")->rgba[0] == 1);
     CHECK(readFile(game / "only_loose.txt") == "loose");
 
     unmountPacks();
@@ -229,14 +229,14 @@ TEST_CASE("the asset cache, scripts and fe.fs read a game from its pak") {
     const auto game = openGame(scratch.root / "dist" / "game.pak");
     REQUIRE_FALSE(std::filesystem::exists(game));
 
-    AssetCache assets(game, FENGINE_LUALIB);
+    AssetCache assets(game, FENGINE_BUILTIN);
     CHECK(assets.image("art/dot.png")->rgba[1] == 20);
     CHECK(assets.sprite("art/dot.anim.json")->atlas == "dot.png");
     CHECK_THROWS(assets.image("../source/art/dot.png"));
 
     EngineOptions options;
     options.gameRoot = game;
-    options.libraryRoot = FENGINE_LUALIB;
+    options.builtinRoot = FENGINE_BUILTIN;
     options.userData = scratch.root / "user";
     options.seed = 1;
     Engine engine(std::move(options));
@@ -303,7 +303,7 @@ TEST_CASE("content packs lay over the game in name order, user packs last, damag
         }
         EngineOptions options;
         options.gameRoot = game;
-        options.libraryRoot = FENGINE_LUALIB;
+        options.builtinRoot = FENGINE_BUILTIN;
         options.userData = user;
         options.seed = 1;
         Engine engine(std::move(options));
@@ -329,7 +329,7 @@ TEST_CASE("content packs lay over the game in name order, user packs last, damag
         CHECK(readFile(source / "data" / "base_only.json") == "{\"loose\": true}");
         EngineOptions options;
         options.gameRoot = source;
-        options.libraryRoot = FENGINE_LUALIB;
+        options.builtinRoot = FENGINE_BUILTIN;
         options.userData = scratch.root / "other-user";
         options.seed = 1;
         Engine engine(std::move(options));
@@ -346,11 +346,11 @@ TEST_CASE("user:// images load read-only from the user data folder and follow ch
     Scratch scratch("user");
     const auto user = scratch.root / "user";
     write(scratch.root / "outside.png", "");
-    AssetCache assets(FENGINE_TEST_GAME, FENGINE_LUALIB, user);
+    AssetCache assets(FENGINE_TEST_GAME, FENGINE_BUILTIN, user);
     const std::string path = "user://thumbnails/slot1.png";
     CHECK_FALSE(assets.tryImage(path));
     CHECK_THROWS(assets.image("user://../outside.png"));
-    CHECK_THROWS(AssetCache(FENGINE_TEST_GAME, FENGINE_LUALIB).image(path));
+    CHECK_THROWS(AssetCache(FENGINE_TEST_GAME, FENGINE_BUILTIN).image(path));
 
     std::filesystem::create_directories(user / "thumbnails");
     Image::solid(1, 2, 3).savePng(user / "thumbnails" / "slot1.png");
@@ -380,7 +380,7 @@ TEST_CASE("fe.save.thumbnail_path names a slot's thumbnail once it exists") {
     Scratch scratch("thumbnail");
     EngineOptions options;
     options.gameRoot = FENGINE_TEST_GAME;
-    options.libraryRoot = FENGINE_LUALIB;
+    options.builtinRoot = FENGINE_BUILTIN;
     options.userData = scratch.root / "user";
     options.seed = 1;
     Engine engine(std::move(options));
