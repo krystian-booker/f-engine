@@ -27,6 +27,17 @@ last_light.marks = {
 --- that wants to see the scene's frames without sitting through it.
 last_light.speed = 1
 
+--- The silhouette, for the few frames it exists (main.lua draws this
+--- under the dialogue).
+function last_light.draw()
+  local shape = last_light.shape
+  if not shape then return end
+  local h = 1000
+  local w = h * 384 / 512
+  fe.canvas.image("fx/battle/silhouette.png", shape.x - w / 2, shape.y - h, { w = w, h = h, linear = true,
+    color = 0x06021400 | 235 })
+end
+
 function last_light.run(stage)
   local world, boss, glow = stage.world, stage.boss, stage.glow
   local cael, rowan, lyra, darius = common.cast()
@@ -41,9 +52,11 @@ function last_light.run(stage)
   fx.letterbox(1, 0.5)
   audio.music("last_light", 0.1)
   local mark, stop_clock = common.clock(function() return last_light.speed end)
+  last_light.passed = {}
   local function beat(name, at)
     mark(at)
     last_light.beat = name
+    last_light.passed[name] = true -- tests and replays wait on these
   end
   for _, id in ipairs { "cael", "lyra", "darius" } do actors.pose(field.actors[id], "ready") end
 
@@ -133,14 +146,15 @@ function last_light.run(stage)
   local rumble = fx.shake(world, 0.08, 1, true)
   local stop_collapse = common.collapse(world, points.centre.position, 11, 1.1)
   aura:emitter({ paused = true })
-  local blaze = vfx.aura(world, rowan, { color = { 0.9, 0.8, 1.0 }, rate = 120, scale = 1.6 })
-  common.bind_rowan(rowan, 6)
+  local blaze = vfx.aura(world, rowan, { color = { 0.55, 0.45, 0.7 }, rate = 60, scale = 1.5 })
+  common.bind_rowan(rowan, 2.5)
+  -- He brightens slowly: by his last line he is still a face, not a glare.
   local brighten = task.spawn(function()
-    task.over(30, function(t)
+    task.over(m.column - m.swell, function(t)
       if rowan:valid() then
-        local k = 1 + t * 2.4
-        rowan:sprite({ tint = { k, k * 0.95, k * 1.1, 1 }, flash = { 1, 0.95, 1, t * 0.7 } })
-        rowan:light({ intensity = 6 + t * 30, radius = 6 + t * 14 })
+        local k = 1 + t * 0.7
+        rowan:sprite({ tint = { k, k * 0.96, k * 1.08, 1 }, flash = { 1, 0.95, 1, t * 0.22 } })
+        rowan:light({ intensity = 3 + t * 6, radius = 6 + t * 4 })
       end
     end)
   end, "rowan brightens")
@@ -173,7 +187,7 @@ function last_light.run(stage)
   fx.stop_shake(rumble)
   local quake = fx.shake(world, 0.25, 1, true)
   local at = rowan.position
-  local beam = world:spawn { position = { x = at.x - 1.5, y = 0, z = at.z }, keep_height = true,
+  local beam = world:spawn { position = { x = at.x - 1.5, y = 0, z = at.z - 0.6 }, keep_height = true,
     sprite = { animation = "fx/battle/beam.anim.json", mode = "upright", blend = "additive", unlit = true,
       scale = 0.2, tint = { 3, 2.6, 3.6, 1 }, cast_shadow = false },
     light = { color = { 0.85, 0.75, 1.0 }, radius = 40, intensity = 10, position = { x = 0, y = 6, z = 0 } } }
@@ -182,10 +196,10 @@ function last_light.run(stage)
     task.over(m.climax - m.column, function(t)
       if beam:valid() then
         beam:sprite({ scale = 0.2 + t * t * 3.2 })
-        beam:light({ intensity = 10 + t * 60 })
+        beam:light({ intensity = 8 + t * 22 })
       end
-      fe.screen.set { radial_blur = t * 0.5, radial_centre = { x = 0.42, y = 0.55 }, chromatic = t * 0.4,
-        flash = { 1, 0.96, 1, t * t * 0.55 } }
+      fe.screen.set { radial_blur = t * 0.45, radial_centre = { x = 0.42, y = 0.55 }, chromatic = t * 0.35,
+        flash = { 1, 0.96, 1, t * t * 0.3 } }
     end)
   end, "erupt")
   vfx.ring(world, { x = at.x - 1.5, y = 0.2, z = at.z }, { color = { 0.9, 0.8, 1.0 }, scale = 26, seconds = 1.6, flat = true })
@@ -194,13 +208,14 @@ function last_light.run(stage)
 
   -- For one frame, an enormous celestial silhouette appears behind Rowan.
   beat("silhouette", m.silhouette)
-  local shape = world:spawn { position = { x = at.x - 3, y = 0, z = at.z - 3 }, keep_height = true,
-    sprite = { animation = "fx/battle/silhouette.anim.json", mode = "upright", blend = "additive", unlit = true,
-      scale = 1.0, tint = { 4, 3.6, 4.6, 1 }, cast_shadow = false, depth_bias = 0.5 } }
-  task.frame()
-  task.frame()
-  task.frame()
-  shape:destroy()
+  -- A dark shape in the light: vast, winged, crowned; gone before it can be
+  -- looked at. It is drawn over the picture (the light would wash out
+  -- anything standing in it), where Rowan stands.
+  local sx, sy = rowan:screen_position(0)
+  last_light.shape = { x = sx - 60, y = sy + 40 }
+  for _ = 1, 4 do task.frame() end
+  last_light.shape = nil
+  last_light.shown = true
 
   -- He screams. The screen turns white. Silence.
   beat("climax", m.climax)

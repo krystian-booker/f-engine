@@ -49,6 +49,7 @@ end
 function main.draw(alpha)
   scenes.draw(alpha)
   require("story.chamber").draw()
+  require("story.last_light").draw()
   ui.draw_caption()
   dialogue.draw()
   if require("story.fortress").prompt then

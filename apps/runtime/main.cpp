@@ -5,6 +5,7 @@
 #include "engine/runtime/MainLoop.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
+#include <algorithm>
 #include <exception>
 #include <iostream>
 #include <string_view>
@@ -24,6 +25,8 @@ void usage() {
                  "  --replay <file>      play a scripted session; exit code reports failures\n"
                  "  --record <file>      write this session's input as a replay\n"
                  "  --realtime           pace a replay in real time (listening checks)\n"
+                 "  --replay-skip <n>    a replay ticks n times without rendering between frames (0-600);\n"
+                 "                       the frames it captures are always rendered\n"
                  "  --write-references   make a replay's captures its reference images for this backend\n"
                  "  --max-fps <n>        frame cap while vsync is off (0 = uncapped; default: game.json)\n"
                  "  --hdr                present to an HDR back buffer when the renderer has one\n"
@@ -119,6 +122,8 @@ int main(int argc, char* argv[]) {
                 options.replay = value();
             } else if (arg == "--record") {
                 options.record = value();
+            } else if (arg == "--replay-skip") {
+                options.replaySkip = std::clamp(std::stoi(value()), 0, 600);
             } else if (arg == "--max-fps") {
                 options.maxFps = std::stoi(value());
             } else if (arg == "--hdr") {

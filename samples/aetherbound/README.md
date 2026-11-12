@@ -66,8 +66,11 @@ sprites, skinned meshes, lights, particles, input, audio, text and the canvas.
 | `dev/autoplay.lua` | A player made of code, for the replays |
 
 `./build/fengine_headless --test samples/aetherbound` runs the rules tests and
-plays the whole story headless; `replays/*.json` play it in the windowed
-runtime and compare screenshots.
+plays the whole story headless. `replays/*.json` (written by
+`tools/aetherbound/make_replays.py`) play it in the windowed runtime through
+`dev/autoplay.lua` and compare screenshots; `playthrough.json` is the whole
+prologue from the title to the end card. In the F1 editor's Launch tab the
+scenes can be started one by one.
 
 ## Art, music and fonts
 
