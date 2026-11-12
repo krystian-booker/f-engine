@@ -40,9 +40,48 @@ const std::array<float, 256>& srgbToLinear() {
     return table;
 }
 
+// The sRGB byte nearest to a linear value. Mip chains call this for every
+// texel of every level, so it is a table lookup and a compare, not a pow():
+// `edges[v]` is the linear value where the answer turns from v - 1 to v, and
+// a coarse table gives a first guess that is never more than one step off
+// above the dark end, where the loop walks the last few values.
 std::uint8_t linearToSrgb(float c) {
-    const float encoded = c <= 0.0031308f ? c * 12.92f : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
-    return static_cast<std::uint8_t>(std::clamp(encoded, 0.0f, 1.0f) * 255.0f + 0.5f);
+    constexpr std::size_t Steps = 4096;
+    struct Tables {
+        std::array<float, 257> edges{};
+        std::array<std::uint8_t, Steps + 1> guess{};
+    };
+    static const Tables tables = [] {
+        Tables t;
+        const auto decode = [](double encoded) {
+            return encoded <= 0.04045 ? encoded / 12.92 : std::pow((encoded + 0.055) / 1.055, 2.4);
+        };
+        t.edges[0] = -std::numeric_limits<float>::infinity();
+        for (std::size_t v = 1; v < 256; ++v) {
+            t.edges[v] = static_cast<float>(decode((static_cast<double>(v) - 0.5) / 255.0));
+        }
+        t.edges[256] = std::numeric_limits<float>::infinity();
+        std::size_t v = 0;
+        for (std::size_t i = 0; i <= Steps; ++i) {
+            const float linear = static_cast<float>(i) / static_cast<float>(Steps);
+            while (linear >= t.edges[v + 1]) {
+                ++v;
+            }
+            t.guess[i] = static_cast<std::uint8_t>(v);
+        }
+        return t;
+    }();
+    if (!(c > 0)) {
+        return 0; // also NaN
+    }
+    if (c >= 1) {
+        return 255;
+    }
+    std::size_t v = tables.guess[static_cast<std::size_t>(c * static_cast<float>(Steps))];
+    while (c >= tables.edges[v + 1]) {
+        ++v;
+    }
+    return static_cast<std::uint8_t>(v);
 }
 } // namespace
 Image Image::load(const std::filesystem::path& path) {

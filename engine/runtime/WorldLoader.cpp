@@ -148,4 +148,17 @@ WorldLoader::Finished WorldLoader::finish(int ticket) {
     assets_.collect();
     return {std::move(load.name), std::move(load.mapId), std::move(*load.map)};
 }
+void WorldLoader::warmAssets(std::vector<WarmAsset>& out) const {
+    for (const auto& [ticket, load] : loads_) {
+        if (load.map) {
+            mapWarmAssets(*load.map, out);
+        }
+    }
+}
+
+void WorldLoader::warmAssets(int ticket, std::vector<WarmAsset>& out) const {
+    if (const auto found = loads_.find(ticket); found != loads_.end() && found->second.map) {
+        mapWarmAssets(*found->second.map, out);
+    }
+}
 } // namespace fe

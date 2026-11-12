@@ -711,12 +711,18 @@ void bindApp(Engine& engine) {
         .fn(
             "preload",
             [&engine](sol::object paths) {
-                return engine.assets().preload(lua::strings(lua::tableArg(paths, "paths")));
+                return engine.preload(lua::strings(lua::tableArg(paths, "paths")));
             },
-            "fun(paths: string[]): integer", "Decode assets on a worker thread; returns a ticket.")
+            "fun(paths: string[]): integer",
+            "Get assets ready before they are drawn: models, sprite animations (.anim.json) and images "
+            "decode on a worker thread, and the models and sprite animations (with their atlases) are then "
+            "uploaded to the GPU a little each frame, so spawning what uses them does not stall a frame. "
+            "Returns a ticket for progress.")
         .fn(
-            "progress", [&engine](int ticket) { return engine.assets().progress(ticket); },
-            "fun(ticket: integer): number", "Preload progress 0..1.")
+            "progress", [&engine](int ticket) { return engine.preloadProgress(ticket); },
+            "fun(ticket: integer): number",
+            "Preload progress 0..1; 1 once everything is decoded and uploaded (the last tenth is the "
+            "upload). A finished ticket stays at 1.")
         .fn(
             "image_size",
             [&engine](const std::string& path) {

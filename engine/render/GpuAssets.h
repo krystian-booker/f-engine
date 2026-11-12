@@ -153,7 +153,19 @@ public:
     // Null when the animation or its atlas is missing.
     const SpriteSheet* spriteSheet(const std::string& animationPath);
     bgfx::TextureHandle fontPage(const Font* font, int page);
+    // `bakeChunks` is how a map's geometry is drawn: baked into model space
+    // at rest, merged by material (bakeGeometry) and split into squares that
+    // are culled on their own. Without it each part keeps its node, for an
+    // entity's mesh that is placed and animated.
     const GpuModel* model(const std::string& path, bool bakeChunks);
+    // Uploads one texture the materials of an already decoded model use and
+    // model() would have to upload; false when there is none left (or the
+    // model is not decoded). Lets a big map's textures arrive over several
+    // frames, with model() then left to fill buffers.
+    bool uploadNextModelTexture(const std::string& path);
+    [[nodiscard]] bool hasModel(const std::string& path, bool bakeChunks) const {
+        return models_.contains({path, bakeChunks});
+    }
     // 16^3 colour grading texture from a .cube file ("" = identity).
     bgfx::TextureHandle lut(const std::string& path);
     [[nodiscard]] bgfx::TextureHandle white() const { return white_.get(); }
@@ -174,6 +186,7 @@ private:
     // Null when the material has no such image. `mips` false uploads the
     // image without a mip chain (and ignores a cooked file, which has one).
     std::shared_ptr<const ModelTexture> modelTexture(const ModelImage& image, bool srgb, bool mips);
+    [[nodiscard]] static std::string modelTextureKey(const ModelImage& image);
     // Creates a texture from the cooked file next to `original` when it exists
     // and the GPU samples its format; records what was used in `cooked`.
     bool uploadCooked(const std::filesystem::path& original, bool srgb, std::uint64_t flags, Texture& texture,

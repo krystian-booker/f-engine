@@ -120,6 +120,7 @@ std::unique_ptr<Engine> headlessEngine(const std::filesystem::path& game,
     options.userData = userData.path();
     options.development = true;
     options.testHooks = true;
+    options.blockingLoads = true;
     options.seed = 1234;
     auto engine = std::make_unique<Engine>(std::move(options));
     engine->setViewport(engine->config().windowWidth, engine->config().windowHeight);

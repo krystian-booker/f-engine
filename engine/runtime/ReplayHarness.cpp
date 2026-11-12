@@ -376,6 +376,7 @@ int runHeadlessReplay(const std::filesystem::path& game, const std::filesystem::
         options.userData = userData;
         options.development = true;
         options.testHooks = true;
+        options.blockingLoads = true;
         options.seed = seed ? seed : replay.seed() ? replay.seed() : std::optional<std::uint64_t>(1);
         Engine engine(std::move(options));
         engine.setViewport(engine.config().windowWidth, engine.config().windowHeight);

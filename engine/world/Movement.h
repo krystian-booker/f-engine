@@ -2,9 +2,9 @@
 #include "engine/nav/Query.h"
 #include "engine/world/Collision.h"
 #include <map>
-#include <unordered_map>
 #include <optional>
 #include <span>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace fe {

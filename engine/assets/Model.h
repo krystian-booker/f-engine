@@ -167,4 +167,26 @@ struct Model {
 // position, normal and tangent is the weighted sum of its joints' transforms.
 // `out` is resized to the part's vertex count; uv and colour are copied.
 void skinVertices(const ModelPart& part, const std::vector<glm::mat4>& joints, std::vector<MeshVertex>& out);
+
+// True when two materials draw identically: same factors, images (the same
+// decoded image, not merely equal pixels), samplers, flags and shader. Parts
+// with such materials can share one draw call.
+[[nodiscard]] bool sameMaterial(const Material& a, const Material& b);
+
+// Static geometry ready to draw as a map: a model's visible parts at rest, in
+// model space, merged by material.
+struct BakedMesh {
+    const Material* material = nullptr; // of the first part merged into it
+    std::vector<MeshVertex> vertices;
+    std::vector<std::uint32_t> indices;
+};
+
+// Every visible part is transformed by its node (a skinned part by its
+// joints at rest; a mirrored node's triangles are turned to face outwards
+// again), then parts whose materials are the same are joined into one mesh,
+// in the order their materials first appear. A map built from many small
+// pieces (one node per wall, floor tile or prop) becomes one mesh per
+// material rather than one per piece. Transparent and water materials are
+// not joined: their parts are sorted by distance, each on its own.
+[[nodiscard]] std::vector<BakedMesh> bakeGeometry(const Model& model);
 } // namespace fe

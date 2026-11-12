@@ -132,6 +132,7 @@ add_library(fengine_core STATIC
   engine/runtime/EmitterAudio.cpp
   engine/runtime/Headless.cpp
   engine/runtime/ReplayHarness.cpp
+  engine/runtime/WarmAssets.cpp
   engine/runtime/WorldLoader.cpp
   engine/editor/MapEdits.cpp
   engine/editor/AssetCatalog.cpp

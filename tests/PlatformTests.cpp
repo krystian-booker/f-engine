@@ -366,6 +366,67 @@ TEST_CASE("worlds load in the background and finish on the main thread") {
     CHECK_FALSE(engine.world("x"));
 }
 
+TEST_CASE("load and preload progress wait for the renderer to upload what will be drawn") {
+    Engine engine(options());
+    // A stand-in for the runtime's GPU warm-up: it uploads what it is told to.
+    std::set<WarmAsset> uploaded;
+    engine.setGpuWarm([&](const WarmAsset& asset) { return uploaded.contains(asset); });
+    const auto ticket = std::stoi(run(engine, "return fe.world.load_async('field', 'arena')"));
+    std::vector<WarmAsset> wanted;
+    tickUntil(engine, [&] {
+        wanted.clear();
+        engine.warmAssets(wanted);
+        return engine.loadProgress(ticket) >= 0.9f && !wanted.empty();
+    });
+    // Decoded, but nothing is on the GPU yet: the bar stops short of the end.
+    REQUIRE_FALSE(wanted.empty());
+    CHECK(wanted.front() == WarmAsset{WarmAsset::Kind::Geometry, "maps/arena/geometry.glb"});
+    CHECK(engine.loadProgress(ticket) == doctest::Approx(0.9f));
+    uploaded.insert(wanted.front());
+    if (wanted.size() > 1) {
+        CHECK(engine.loadProgress(ticket) > 0.9f);
+        CHECK(engine.loadProgress(ticket) < 1);
+    }
+    uploaded.insert(wanted.begin(), wanted.end());
+    CHECK(engine.loadProgress(ticket) == 1);
+    // A window that cannot render uploads nothing, so nothing waits for it.
+    uploaded.clear();
+    CHECK(engine.loadProgress(ticket) < 1);
+    engine.setGpuWarmActive(false);
+    CHECK(engine.loadProgress(ticket) == 1);
+    engine.setGpuWarmActive(true);
+    // Once the world exists it is drawn, not warmed.
+    engine.finishLoad(ticket);
+    wanted.clear();
+    engine.warmAssets(wanted);
+    CHECK(wanted.empty());
+
+    // Preloads: models as entity meshes and sprite animations; images only decode.
+    const auto preload = std::stoi(run(
+        engine,
+        "return fe.app.preload{'models/drake.glb', 'sprites/walker.anim.json', '@fe/assets/ui/spark.png'}"));
+    engine.warmAssets(wanted);
+    REQUIRE(wanted.size() == 2);
+    CHECK(wanted[0] == WarmAsset{WarmAsset::Kind::Mesh, "models/drake.glb"});
+    CHECK(wanted[1] == WarmAsset{WarmAsset::Kind::Sprite, "sprites/walker.anim.json"});
+    tickUntil(engine, [&] { return engine.preloadProgress(preload) >= 0.9f; });
+    CHECK(run(engine, "local p = fe.app.progress(" + std::to_string(preload) +
+                          ") return p > 0.89 and p < 1") == "true");
+    uploaded.insert(wanted.begin(), wanted.end());
+    CHECK(engine.preloadProgress(preload) == 1);
+    // A finished ticket is forgotten: it stays at 1 and asks for nothing.
+    uploaded.clear();
+    CHECK(engine.preloadProgress(preload) == 1);
+    wanted.clear();
+    engine.warmAssets(wanted);
+    CHECK(wanted.empty());
+    // Without a renderer (headless tests, tools) progress is the decode alone.
+    engine.setGpuWarm(nullptr);
+    const auto plain = engine.preload({"models/drake.glb"});
+    tickUntil(engine, [&] { return engine.preloadProgress(plain) >= 1; });
+    CHECK(engine.preloadProgress(plain) == 1);
+}
+
 TEST_CASE("cancelled background loads are dropped and never create a world") {
     Engine engine(options());
     // Cancelled at once, while the worker may still be parsing: the ticket is

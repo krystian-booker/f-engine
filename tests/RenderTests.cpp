@@ -928,3 +928,114 @@ TEST_CASE("a wrapping map is drawn under the mirror offsets the view reaches, an
     appendWrapOffsets(mapMin, mapMax, 12, 10, reaching({8, 2}, {16, 6}), offsets);
     CHECK(offsets == std::vector<glm::vec3>{glm::vec3(0), glm::vec3(12, 0, 0)});
 }
+
+TEST_CASE("map geometry is baked at rest and merged by material") {
+    Model model;
+    model.nodes.resize(4);
+    model.nodes[1].translation = {10, 0, 0};
+    model.nodes[2].scale = {-1, 1, 1}; // mirrored
+    model.nodes[3].parent = 1;
+    model.nodes[3].translation = {0, 5, 0};
+    model.order = {0, 1, 2, 3};
+    model.bakeRestPose();
+    const auto image = std::make_shared<Image>(Image::solid(1, 2, 3));
+    const auto triangle = [&](int node, Material material) {
+        ModelPart part;
+        part.vertices.resize(3);
+        part.vertices[0].position = {0, 0, 0};
+        part.vertices[1].position = {1, 0, 0};
+        part.vertices[2].position = {0, 0, 1};
+        part.indices = {0, 1, 2};
+        part.node = node;
+        part.material = std::move(material);
+        model.parts.push_back(std::move(part));
+    };
+    Material stone, moss, glass, water;
+    stone.albedo.image = image;
+    moss.albedo.image = image;
+    moss.color = {0, 1, 0, 1};
+    glass.transparent = true;
+    water.kind = MaterialKind::Water;
+    triangle(0, stone);
+    triangle(1, moss);
+    triangle(2, stone); // mirrored
+    triangle(3, stone); // a child node
+    triangle(0, glass);
+    triangle(1, glass);
+    triangle(0, water);
+    triangle(1, water);
+    triangle(0, stone);
+    model.parts.back().hidden = true;
+
+    // A sampler only tells materials apart where there is an image to sample.
+    Material plain, plainNearest;
+    plainNearest.albedoSampler.nearestMag = true;
+    CHECK(sameMaterial(plain, plainNearest));
+    Material stoneNearest = stone;
+    stoneNearest.albedoSampler.nearestMag = true;
+    CHECK_FALSE(sameMaterial(stone, stoneNearest));
+    CHECK_FALSE(sameMaterial(stone, moss));
+    Material shaded = stone;
+    shaded.shader = "glow";
+    CHECK_FALSE(sameMaterial(stone, shaded));
+
+    const auto meshes = bakeGeometry(model);
+    // Stone (three parts in one), moss, then glass and water each on their own.
+    REQUIRE(meshes.size() == 6);
+    const auto& merged = meshes[0];
+    CHECK(sameMaterial(*merged.material, stone));
+    REQUIRE(merged.vertices.size() == 9);
+    CHECK(merged.indices == std::vector<std::uint32_t>{0, 1, 2, 3, 5, 4, 6, 7, 8});
+    CHECK(merged.vertices[1].position == glm::vec3(1, 0, 0));
+    CHECK(merged.vertices[4].position == glm::vec3(-1, 0, 0)); // through the mirrored node
+    CHECK(merged.vertices[7].position == glm::vec3(11, 5, 0)); // through the child and its parent
+    // Every triangle keeps its facing, the mirrored one included.
+    for (std::size_t i = 0; i < merged.indices.size(); i += 3) {
+        const auto a = merged.vertices[merged.indices[i]].position;
+        const auto b = merged.vertices[merged.indices[i + 1]].position;
+        const auto c = merged.vertices[merged.indices[i + 2]].position;
+        CHECK(glm::cross(b - a, c - a).y < 0);
+    }
+    CHECK(sameMaterial(*meshes[1].material, moss));
+    CHECK(meshes[1].vertices[0].position == glm::vec3(10, 0, 0));
+    for (std::size_t i = 2; i < 6; ++i) {
+        CHECK(meshes[i].vertices.size() == 3);
+    }
+    CHECK(meshes[2].material->transparent);
+    CHECK(meshes[4].material->kind == MaterialKind::Water);
+}
+
+TEST_CASE("sRGB mip levels round to the nearest byte without a pow per texel") {
+    // A solid colour survives halving, whatever its value.
+    for (int v = 0; v < 256; ++v) {
+        const auto byte = static_cast<std::uint8_t>(v);
+        Image image;
+        image.width = 2;
+        image.height = 2;
+        for (int i = 0; i < 4; ++i) {
+            image.rgba.insert(image.rgba.end(), {byte, byte, byte, 255});
+        }
+        CHECK(image.halved(true).rgba[0] == byte);
+    }
+    // Averages match the sRGB formulas computed directly.
+    const auto decode = [](double c) {
+        return c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4);
+    };
+    const auto encode = [](double c) {
+        return c <= 0.0031308 ? c * 12.92 : 1.055 * std::pow(c, 1 / 2.4) - 0.055;
+    };
+    int worst = 0;
+    for (int a = 0; a < 256; a += 5) {
+        for (int b = a; b < 256; b += 7) {
+            Image image;
+            image.width = 2;
+            image.height = 1;
+            const auto x = static_cast<std::uint8_t>(a), y = static_cast<std::uint8_t>(b);
+            image.rgba = {x, x, x, 255, y, y, y, 255};
+            const double expected = encode((decode(a / 255.0) + decode(b / 255.0)) / 2) * 255.0;
+            const int got = image.halved(true).rgba[0];
+            worst = std::max(worst, std::abs(got - static_cast<int>(std::lround(expected))));
+        }
+    }
+    CHECK(worst <= 1); // a value on a rounding edge may fall either way
+}

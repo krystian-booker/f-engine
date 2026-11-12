@@ -249,11 +249,11 @@ fe.app.format_number = nil
 ---@type fun(path: string)
 fe.app.capture = nil
 
---- Decode assets on a worker thread; returns a ticket.
+--- Get assets ready before they are drawn: models, sprite animations (.anim.json) and images decode on a worker thread, and the models and sprite animations (with their atlases) are then uploaded to the GPU a little each frame, so spawning what uses them does not stall a frame. Returns a ticket for progress.
 ---@type fun(paths: string[]): integer
 fe.app.preload = nil
 
---- Preload progress 0..1.
+--- Preload progress 0..1; 1 once everything is decoded and uploaded (the last tenth is the upload). A finished ticket stays at 1.
 ---@type fun(ticket: integer): number
 fe.app.progress = nil
 
@@ -1005,7 +1005,7 @@ fe.world.list = nil
 ---@type fun(name: string, map: string): integer
 fe.world.load_async = nil
 
---- Background load progress 0..1; 1 when finish_load won't wait (or the load failed).
+--- Background load progress 0..1; 1 when finish_load won't wait (or the load failed) and what the map draws is on the GPU, so the first frame that shows it does not stall (the last tenth is that upload).
 ---@type fun(ticket: integer): number
 fe.world.load_progress = nil
 

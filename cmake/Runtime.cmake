@@ -8,6 +8,7 @@ add_library(fengine_runtime STATIC
   engine/platform/Window.cpp
   engine/input/SdlInput.cpp
   engine/render/GpuAssets.cpp
+  engine/render/GpuWarmup.cpp
   engine/render/Renderer.cpp
   engine/render/ImGuiRenderer.cpp
   engine/render/RenderCommon.cpp

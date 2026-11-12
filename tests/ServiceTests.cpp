@@ -315,6 +315,38 @@ TEST_CASE("asset preload decodes on the worker thread") {
     CHECK(assets.tryModel("maps/arena/geometry.glb"));
 }
 
+TEST_CASE("an asset asked for twice in the background is decoded once, and both tickets wait for it") {
+    AssetCache assets(FENGINE_TEST_GAME, FENGINE_BUILTIN);
+    const std::string model = "maps/arena/geometry.glb";
+    const int first = assets.preload({model, model});
+    const int second = assets.preload({model});
+    assets.decodeInBackground(model); // already on its way: nothing to add
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while ((assets.progress(first) < 1 || assets.progress(second) < 1 || assets.decoding(model)) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    CHECK(assets.progress(first) == 1);
+    CHECK(assets.progress(second) == 1);
+    CHECK_FALSE(assets.decoding(model));
+    const auto decoded = assets.cachedModel(model);
+    REQUIRE(decoded);
+    // A second decode would have been dropped in favour of the first, but it
+    // would also have kept the worker busy: nothing is queued any more.
+    const int again = assets.preload({model});
+    CHECK(assets.progress(again) == 1);
+    CHECK(assets.cachedModel(model) == decoded);
+    // A path with no ticket decodes too, and a missing file ends without one.
+    assets.decodeInBackground("@fe/assets/fonts/pixel.png");
+    assets.decodeInBackground("models/nowhere.glb");
+    while ((assets.decoding("@fe/assets/fonts/pixel.png") || assets.decoding("models/nowhere.glb")) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    CHECK(assets.loaded("@fe/assets/fonts/pixel.png"));
+    CHECK_FALSE(assets.loaded("models/nowhere.glb"));
+}
+
 TEST_CASE("a blank or unparseable JSON file is never copied over the backup") {
     const auto folder = std::filesystem::temp_directory_path() / "fengine-backup-guard-test";
     std::filesystem::remove_all(folder);

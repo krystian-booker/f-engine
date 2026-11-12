@@ -3,6 +3,7 @@
 #include "engine/core/GameConfig.h"
 #include "engine/core/Log.h"
 #include "engine/platform/Display.h"
+#include "engine/runtime/WarmAssets.h"
 #include "engine/services/Audio.h"
 #include "engine/services/Canvas.h"
 #include "engine/services/Clipboard.h"
@@ -13,6 +14,7 @@
 #include "engine/text/TextSystem.h"
 #include "engine/world/Camera.h"
 #include "engine/world/MapData.h"
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -38,7 +40,11 @@ struct EngineOptions {
     // Tests and replays: binds fe.input.feed and fe.dev.console even when
     // development is off.
     bool testHooks = false;
-    std::optional<std::uint64_t> seed;          // fixed seed (tests and replays)
+    std::optional<std::uint64_t> seed; // fixed seed (tests and replays)
+    // Tests, replays and recordings: a background load or preload is waited
+    // for the first time its progress is read, so a loading screen takes the
+    // same number of ticks on every machine and a recording stays in step.
+    bool blockingLoads = false;
     std::unique_ptr<Audio> audio;               // null = silent NullAudio
     std::unique_ptr<PlatformServices> platform; // null = LocalPlatformServices in userData
     std::unique_ptr<SaveBackend> saveBackend;   // null = files in userData
@@ -46,8 +52,8 @@ struct EngineOptions {
     // (QueuedSaveBackend); false writes them inside fe.save.write, as a tool
     // that inspects the files right afterwards wants.
     bool backgroundSaves = true;
-    std::unique_ptr<Clipboard> clipboard;       // null = MemoryClipboard (headless, tests, replays)
-    std::string locale = "en-US";               // the player's preferred locale, BCP 47
+    std::unique_ptr<Clipboard> clipboard; // null = MemoryClipboard (headless, tests, replays)
+    std::string locale = "en-US";         // the player's preferred locale, BCP 47
     // Decoded bytes the asset cache keeps before evicting assets no loaded
     // world references (see AssetCache).
     std::size_t assetBudget = AssetCache::DefaultBudget;
@@ -168,7 +174,9 @@ public:
     // models, images and sprites it names decode through AssetCache's worker.
     // Returns a ticket; loading advances every tick and while progress is read.
     int loadWorldAsync(const std::string& name, const std::string& mapId);
-    // 0..1; 1 once finishLoad will not wait (or the load failed).
+    // 0..1; 1 once finishLoad will not wait (or the load failed) and, with a
+    // renderer warming the GPU (setGpuWarm), once what the map draws has
+    // been uploaded: the last tenth of the range is that upload.
     float loadProgress(int ticket);
     // Creates the world on the calling (main) thread, waiting for the map
     // parse if needed; assets still decoding load on first use. Throws the
@@ -178,6 +186,23 @@ public:
     // a worker still parsing the map finishes and is discarded, assets it
     // queued stay cached, and the ticket becomes unknown.
     void cancelLoad(int ticket);
+    // Decodes assets on the asset cache's worker thread and, with a renderer
+    // warming the GPU, uploads the models (as entity meshes) and sprite
+    // animations (with their atlases) among them. Returns a ticket.
+    int preload(const std::vector<std::string>& paths);
+    // 0..1; 1 once everything is decoded and, with a renderer warming the
+    // GPU, uploaded. A finished ticket is forgotten and reads as 1.
+    float preloadProgress(int ticket);
+    // What a renderer should upload before it is drawn: the assets of
+    // pending world loads and of unfinished preloads, in the order asked for.
+    void warmAssets(std::vector<WarmAsset>& out) const;
+    // The runtime's side of that: `ready` says whether an asset is on the
+    // GPU (or never will be: it failed). While it is set and active, load and
+    // preload progress wait for it. The runtime turns it inactive while it
+    // cannot render (a minimised window), so a loading screen does not wait
+    // for uploads that are not happening.
+    void setGpuWarm(std::function<bool(const WarmAsset&)> ready) { gpuReady_ = std::move(ready); }
+    void setGpuWarmActive(bool active) { gpuWarmActive_ = active; }
     std::shared_ptr<World> world(const std::string& name) const;
     // Also runs releaseUnusedAssets().
     void unloadWorld(const std::string& name);
@@ -213,7 +238,7 @@ private:
     [[nodiscard]] std::filesystem::path resolveMap(const std::string& mapId) const;
     std::shared_ptr<World> addWorld(const std::string& name, const std::string& mapId, MapData map);
     GameConfig config_;
-    bool development_, testHooks_;
+    bool development_, testHooks_, blockingLoads_;
     std::uint64_t seed_, seedCounter_ = 0;
     std::unique_ptr<AssetCache> assets_;
     std::unique_ptr<TextSystem> text_;
@@ -230,6 +255,11 @@ private:
     DisplayState display_;
     std::string locale_;
     std::unique_ptr<WorldLoader> loader_;
+    // Unfinished preloads: the asset cache's ticket and what to upload.
+    std::map<int, std::vector<WarmAsset>> preloads_;
+    std::function<bool(const WarmAsset&)> gpuReady_;
+    bool gpuWarmActive_ = true;
+    [[nodiscard]] float uploaded(const std::vector<WarmAsset>& assets) const;
     std::unique_ptr<EmitterAudio> emitters_;
     FrameStats stats_;
     std::unique_ptr<BindingDocs> docs_;

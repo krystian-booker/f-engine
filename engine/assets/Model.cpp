@@ -810,4 +810,74 @@ void skinVertices(const ModelPart& part, const std::vector<glm::mat4>& joints, s
                                    source.tangent.w);
     }
 }
+
+bool sameMaterial(const Material& a, const Material& b) {
+    const auto sameSampler = [](const TextureSampler& x, const TextureSampler& y) {
+        return x.wrapU == y.wrapU && x.wrapV == y.wrapV && x.nearestMag == y.nearestMag &&
+               x.nearestMin == y.nearestMin && x.mips == y.mips;
+    };
+    // A sampler only matters where there is an image to sample.
+    const auto sameTexture = [&](const ModelImage& x, const TextureSampler& xs, const ModelImage& y,
+                                 const TextureSampler& ys) {
+        return x.image == y.image && (!x.image || sameSampler(xs, ys));
+    };
+    return a.color == b.color && a.emissive == b.emissive &&
+           sameTexture(a.albedo, a.albedoSampler, b.albedo, b.albedoSampler) &&
+           sameTexture(a.normal, a.normalSampler, b.normal, b.normalSampler) &&
+           sameTexture(a.emission, a.emissionSampler, b.emission, b.emissionSampler) &&
+           a.normalScale == b.normalScale && a.transparent == b.transparent &&
+           a.doubleSided == b.doubleSided && a.alphaCutoff == b.alphaCutoff && a.kind == b.kind &&
+           a.shader == b.shader;
+}
+
+std::vector<BakedMesh> bakeGeometry(const Model& model) {
+    std::vector<BakedMesh> meshes;
+    std::vector<glm::mat4> rest, joints;
+    model.pose(-1, 0, rest);
+    std::vector<MeshVertex> skinned;
+    for (const auto& part : model.parts) {
+        if (part.hidden || part.indices.empty()) {
+            continue;
+        }
+        // Water blends like a transparent material whatever its alpha mode says.
+        const bool sorted = part.material.transparent || part.material.kind == MaterialKind::Water;
+        auto target = meshes.end();
+        if (!sorted) {
+            target = std::find_if(meshes.begin(), meshes.end(), [&](const BakedMesh& mesh) {
+                return sameMaterial(*mesh.material, part.material);
+            });
+        }
+        if (target == meshes.end()) {
+            meshes.push_back({&part.material, {}, {}});
+            target = meshes.end() - 1;
+        }
+        auto& mesh = *target;
+        const auto base = static_cast<std::uint32_t>(mesh.vertices.size());
+        bool mirrored = false;
+        if (part.skin >= 0) {
+            model.jointMatrices(part.skin, rest, joints);
+            skinVertices(part, joints, skinned);
+            mesh.vertices.insert(mesh.vertices.end(), skinned.begin(), skinned.end());
+        } else {
+            const auto& matrix = rest[static_cast<std::size_t>(part.node)];
+            const glm::mat3 linear(matrix);
+            const auto normalMatrix = glm::transpose(glm::inverse(linear));
+            mirrored = glm::determinant(linear) < 0;
+            mesh.vertices.reserve(mesh.vertices.size() + part.vertices.size());
+            for (auto v : part.vertices) {
+                v.position = glm::vec3(matrix * glm::vec4(v.position, 1));
+                v.normal = glm::normalize(normalMatrix * v.normal);
+                v.tangent = glm::vec4(glm::normalize(linear * glm::vec3(v.tangent)), v.tangent.w);
+                mesh.vertices.push_back(v);
+            }
+        }
+        mesh.indices.reserve(mesh.indices.size() + part.indices.size());
+        for (std::size_t i = 0; i + 2 < part.indices.size(); i += 3) {
+            mesh.indices.push_back(base + part.indices[i]);
+            mesh.indices.push_back(base + part.indices[i + (mirrored ? 2 : 1)]);
+            mesh.indices.push_back(base + part.indices[i + (mirrored ? 1 : 2)]);
+        }
+    }
+    return meshes;
+}
 } // namespace fe

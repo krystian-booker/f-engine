@@ -284,10 +284,11 @@ local function place_camera(snap)
 end
 
 --- Load `map` and stand the party at `point` (a named point) or `position`.
-function field.start(map, point, position)
+--- `ticket` is a background load of that map to finish (see field.warp).
+function field.start(map, point, position, ticket)
   rng = rng or fe.random.new()
   if field.world then fe.world.unload(field.world.name) end
-  local world = fe.world.load("field", map)
+  local world = ticket and fe.world.finish_load(ticket) or fe.world.load("field", map)
   field.world = world
   local points = world:points()
   local at = point and points[point] or points.start or points.entry
@@ -320,7 +321,12 @@ function field.warp(map, point)
     state.data.riding = nil
   end
   task.over(0.25, function(t) fe.screen.set { fade = { 0, 0, 0, t } } end)
-  field.start(map, point)
+  -- The next map is read and decoded on worker threads and uploaded a little
+  -- each frame while the screen is black, so no frame stalls on it. Progress
+  -- reaches 1 once drawing the map has nothing left to load.
+  local ticket = fe.world.load_async("field", map)
+  task.wait_until(function() return fe.world.load_progress(ticket) >= 1 end)
+  field.start(map, point, nil, ticket)
   task.over(0.25, function(t) fe.screen.set { fade = { 0, 0, 0, 1 - t } } end)
 end
 

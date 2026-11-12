@@ -258,6 +258,7 @@ public:
             editor_.toggle();
         }
 #endif
+        engine_.setGpuWarm([this](const WarmAsset& asset) { return frame_.warmed(asset); });
         readViewport();
         auto& display = engine_.display();
         display.monitors = Window::monitors();
@@ -310,6 +311,7 @@ private:
         engine.development = FENGINE_DEV != 0;
         engine.seed = sessionSeed(options_, replay_);
         engine.testHooks = !options_.replay.empty() || !options_.record.empty();
+        engine.blockingLoads = engine.testHooks;
         // Replays and recordings must not depend on the machine's language or
         // clipboard (they keep the engine's in-memory one).
         engine.locale = engine.testHooks ? "en-US" : preferredLocale();
@@ -454,9 +456,12 @@ private:
 
     void render(double frameMilliseconds) {
         if (!renderer_.beginFrame()) {
-            SDL_Delay(16); // minimised
+            engine_.setGpuWarmActive(false); // nothing uploads: loads must not wait for it
+            SDL_Delay(16);                   // minimised
             return;
         }
+        engine_.setGpuWarmActive(true);
+        frame_.warm(engine_);
         engine_.draw(step_.alpha());
         auto& requests = engine_.requests();
         for (const auto& file : requests.sceneCaptures) {

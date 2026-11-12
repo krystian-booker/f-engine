@@ -1,11 +1,15 @@
+#include "engine/assets/Image.h"
 #include "engine/core/AssetCache.h"
 #include "engine/core/Pack.h"
 #include "engine/core/Paths.h"
 #include "engine/render/CustomShaders.h"
 #include "engine/render/GpuAssets.h"
+#include "engine/render/GpuWarmup.h"
 #include "engine/render/SpriteBatch.h"
+#include <chrono>
 #include <doctest/doctest.h>
 #include <fstream>
+#include <thread>
 
 using namespace fe;
 
@@ -134,6 +138,101 @@ TEST_CASE("GPU assets look at files only after a file change, and bake chunks pe
         // No fs_glint_shadow.sc or fs_glint_distort.sc: the variants are simply absent.
         CHECK_FALSE(bgfx::isValid(shaders.shadowProgram(shaders.slot("glint"), ShaderVertex::World)));
         CHECK_FALSE(bgfx::isValid(shaders.distortProgram(shaders.slot("glint"), ShaderVertex::Sprite)));
+    }
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("the GPU warm-up uploads ahead of the first draw, a step at a time, and never decodes itself") {
+    NoopGpu gpu;
+    REQUIRE(gpu.ok);
+    const auto root = std::filesystem::temp_directory_path() / "fengine-gpu-warmup";
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root / "sprites");
+    // Three pieces over two materials, each with its own texture: the two
+    // pieces that share a material are one draw per square once baked.
+    Image::solid(200, 40, 40).savePng(root / "brick.png");
+    Image::solid(40, 200, 40).savePng(root / "moss.png");
+    std::ofstream(root / "wall.gltf")
+        << R"({"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0, 1, 2]}],
+      "nodes": [{"mesh": 0}, {"mesh": 1}, {"mesh": 0, "translation": [0, 2, 0]}],
+      "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "material": 0}]},
+                 {"primitives": [{"attributes": {"POSITION": 0}, "material": 1}]}],
+      "materials": [{"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}},
+                    {"pbrMetallicRoughness": {"baseColorTexture": {"index": 1}}}],
+      "textures": [{"source": 0}, {"source": 1}],
+      "images": [{"uri": "brick.png"}, {"uri": "moss.png"}],
+      "buffers": [{"byteLength": 72, "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAAAAAAIA/AABAQQAAAAAAAAAAAABQQQAAAAAAAAAAAABAQQAAAAAAAIA/"}],
+      "bufferViews": [{"buffer": 0, "byteLength": 72}],
+      "accessors": [{"bufferView": 0, "componentType": 5126, "count": 6, "type": "VEC3",
+                     "min": [0, 0, 0], "max": [13, 0, 1]}]})";
+    const auto fixture = std::filesystem::path(FENGINE_TEST_GAME) / "sprites";
+    std::filesystem::copy_file(fixture / "walker.anim.json", root / "sprites" / "walker.anim.json");
+    std::filesystem::copy_file(fixture / "walker.png", root / "sprites" / "walker.png");
+    {
+        AssetCache cache(root, FENGINE_BUILTIN);
+        GpuAssets assets(cache);
+        GpuWarmup warmup(assets);
+        using Kind = WarmAsset::Kind;
+        const std::vector<WarmAsset> wanted = {{Kind::Geometry, "wall.gltf"},
+                                               {Kind::Mesh, "wall.gltf"},
+                                               {Kind::Sprite, "sprites/walker.anim.json"},
+                                               {Kind::Mesh, "missing.glb"},
+                                               {Kind::Lut, ""}};
+        // With no time at all a call still takes one step. The first calls
+        // only queue decodes on the worker: nothing is loaded on this thread.
+        const std::chrono::duration<double> none(0);
+        warmup.run(wanted, none);
+        CHECK_FALSE(cache.loaded("wall.gltf"));
+        CHECK_FALSE(assets.hasModel("wall.gltf", true));
+        CHECK_FALSE(warmup.ready(wanted[0]));
+        CHECK(warmup.backlog() >= 4);
+        int calls = 1, uploads = 0;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (warmup.backlog() > 0 && std::chrono::steady_clock::now() < deadline) {
+            const bool decoded = cache.loaded("wall.gltf");
+            const auto before = warmup.backlog();
+            warmup.run(wanted, none);
+            ++calls;
+            if (decoded) {
+                ++uploads;
+                CHECK(before - warmup.backlog() <= 1); // one step per call
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+        CHECK(warmup.backlog() == 0);
+        // The map alone took a call per texture and one for its buffers.
+        CHECK(uploads >= 3);
+        for (const auto& asset : wanted) {
+            CHECK(warmup.ready(asset));
+        }
+        CHECK_FALSE(warmup.ready({Kind::Mesh, "other.glb"}));
+        REQUIRE(assets.hasModel("wall.gltf", true));
+        REQUIRE(assets.hasModel("wall.gltf", false));
+        CHECK_FALSE(assets.hasModel("missing.glb", false)); // failed: ready, and reported when drawn
+        // Two squares, two materials: four draws for the three pieces (six unmerged).
+        CHECK(assets.model("wall.gltf", true)->parts.size() == 4);
+        CHECK(assets.model("wall.gltf", false)->parts.size() == 3);
+        CHECK(cache.loaded("sprites/walker.png")); // the atlas the animation names
+        CHECK(assets.spriteSheet("sprites/walker.anim.json"));
+        // With time to spare everything decoded goes in one call (the file
+        // that failed to decode is not tried again), and an empty list forgets.
+        GpuAssets fresh(cache);
+        GpuWarmup quick(fresh);
+        quick.run(wanted, std::chrono::seconds(10));
+        CHECK(quick.backlog() == 1);
+        CHECK_FALSE(quick.ready(wanted[3]));
+        quick.run(wanted, std::chrono::seconds(10));
+        CHECK(quick.backlog() == 0);
+        CHECK(fresh.hasModel("wall.gltf", true));
+        quick.run({}, none);
+        CHECK_FALSE(quick.ready(wanted[0]));
+        // Reloaded or evicted assets take their GPU copies with them: warm again.
+        cache.release("wall.gltf");
+        assets.sync();
+        CHECK_FALSE(assets.hasModel("wall.gltf", true));
+        warmup.run(wanted, none);
+        CHECK_FALSE(warmup.ready(wanted[0]));
     }
     std::filesystem::remove_all(root);
 }

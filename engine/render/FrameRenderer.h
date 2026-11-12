@@ -1,6 +1,7 @@
 #pragma once
 #include "engine/render/CanvasRenderer.h"
 #include "engine/render/FrameMath.h"
+#include "engine/render/GpuWarmup.h"
 #include "engine/render/PostPass.h"
 #include "engine/render/WorldRenderer.h"
 #include "engine/runtime/Engine.h"
@@ -24,6 +25,13 @@ public:
     FrameRenderer& operator=(const FrameRenderer&) = delete;
     // Loads every program first, so a failure keeps the current ones.
     void reload();
+    // Before render(): uploads what the engine says will be drawn soon (the
+    // assets of worlds loading in the background and of preloads), a few
+    // milliseconds' worth, so the frame that first draws them does not stall
+    // on it. See GpuWarmup.
+    void warm(const Engine& engine);
+    // Whether an asset the engine asked to warm is on the GPU.
+    [[nodiscard]] bool warmed(const WarmAsset& asset) const { return warmup_.ready(asset); }
     // `tick` counts logic ticks: a draw's camera override is interpolated
     // between the values it had on the previous tick and this one, like the
     // world camera, for each world and target (and the n-th such draw).
@@ -72,6 +80,8 @@ private:
     };
     Renderer& renderer_;
     GpuAssets gpu_;
+    GpuWarmup warmup_;
+    std::vector<WarmAsset> warmList_;
     Uniforms uniforms_;
     CustomShaders custom_;
     WorldRenderer worlds_;

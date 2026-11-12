@@ -907,7 +907,8 @@ void MovementSystem::platformCells(const Transform& transform, glm::vec2 half,
 void MovementSystem::restoreCells() {
     wanted_.clear();
     for (const auto& [platform, ride] : rides_) {
-        platformCells(registry_.get<Transform>(platform), registry_.get<Platform>(platform).size * 0.5f, wanted_);
+        platformCells(registry_.get<Transform>(platform), registry_.get<Platform>(platform).size * 0.5f,
+                      wanted_);
     }
     kept_.clear();
     for (auto it = overrides_.rbegin(); it != overrides_.rend(); ++it) {

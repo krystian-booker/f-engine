@@ -1,8 +1,8 @@
 #include "engine/editor/MapEdits.h"
+#include "engine/nav/Query.h"
 #include "engine/runtime/Engine.h"
 #include "engine/script/LuaHost.h"
 #include "engine/world/Animation.h"
-#include "engine/nav/Query.h"
 #include "engine/world/World.h"
 #include <cmath>
 #include <doctest/doctest.h>

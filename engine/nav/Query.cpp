@@ -187,8 +187,7 @@ private:
             return false;
         }
         const auto& cell = grid_.at(p);
-        return (rules_.fly || cell.walkable) && tagsAllow(cell) &&
-               !blockedCell(p);
+        return (rules_.fly || cell.walkable) && tagsAllow(cell) && !blockedCell(p);
     }
     [[nodiscard]] bool climbable(GridPos from, GridPos to, int dx, int dz) const {
         if (rules_.fly) {

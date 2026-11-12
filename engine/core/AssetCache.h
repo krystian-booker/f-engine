@@ -68,8 +68,15 @@ public:
     // Call once nothing refers to the faces of redefined fonts (frame start).
     void releaseRetiredFonts() { retiredFonts_.clear(); }
 
-    // Starts background decoding; returns a ticket for progress().
+    // Starts background decoding; returns a ticket for progress(). A path
+    // already being decoded (for another ticket) is not decoded twice: the
+    // ticket waits for that decode.
     int preload(const std::vector<std::string>& paths);
+    // The same for one path with no ticket to read (the renderer warming the
+    // GPU): nothing happens when it is cached or already being decoded.
+    void decodeInBackground(const std::string& path);
+    // True while a background decode of `path` is queued or running.
+    [[nodiscard]] bool decoding(const std::string& path);
     // 0..1; a finished ticket is forgotten and reads as 1 from then on.
     [[nodiscard]] float progress(int ticket);
     // Moves finished background results into the cache (main thread). Cheap
@@ -136,8 +143,11 @@ private:
     };
     std::mutex mutex_;
     std::condition_variable wake_;
-    std::deque<std::pair<int, std::string>> queue_;
+    std::deque<std::string> queue_;
+    // Paths queued or being decoded, each with the tickets waiting for it.
+    std::map<std::string, std::vector<int>> inFlight_;
     std::vector<std::pair<std::string, Decoded>> finished_;
+    std::vector<std::string> failedDecodes_; // paths whose decode threw, until collect()
     std::atomic<bool> hasFinished_ = false;
     std::map<int, Ticket> tickets_;
     int nextTicket_ = 1;

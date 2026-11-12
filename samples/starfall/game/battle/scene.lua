@@ -22,8 +22,29 @@ local ELEMENTS = { "physical", "fire", "ice", "bolt", "light", "dark" }
 
 -- ------------------------------------------------------------ the stage
 
-local function build(self)
-  local world = fe.world.load("battle", self.stage)
+--- Get the stage and everyone on it ready while the field is frozen on
+--- screen: the stage loads in the background, and the sprites and models of
+--- both sides decode and upload ahead of the frame that first draws them.
+local function prepare(self)
+  local ticket = fe.world.load_async("battle", self.stage)
+  local assets, seen = {}, {}
+  local function want(path)
+    if path and not seen[path] then
+      seen[path] = true
+      assets[#assets + 1] = path
+    end
+  end
+  for _, u in ipairs(self.rules.allies) do want(u.record.sprite) end
+  for _, u in ipairs(self.rules.foes) do want(u.record.model or u.record.sprite) end
+  local preload = fe.app.preload(assets)
+  task.wait_until(function()
+    return fe.world.load_progress(ticket) >= 1 and fe.app.progress(preload) >= 1
+  end)
+  return ticket
+end
+
+local function build(self, ticket)
+  local world = fe.world.finish_load(ticket)
   self.world = world
   local points = world:points()
   local camera = world:camera()
@@ -630,7 +651,7 @@ function battle.start(troop_id, options)
   -- The field freezes on screen and swirls away into the battle.
   fe.screen.freeze()
   audio.music(troop.music or "battle", 0.3)
-  build(self)
+  build(self, prepare(self))
   scenes.push(self)
   task.over(0.6, function(t) fe.screen.set { transition = { kind = "swirl", progress = t } } end)
   fe.screen.unfreeze()

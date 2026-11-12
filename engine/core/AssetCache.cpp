@@ -344,18 +344,41 @@ std::shared_ptr<FontSet> AssetCache::font(const std::string& name) {
 }
 
 int AssetCache::preload(const std::vector<std::string>& paths) {
+    collect();
     std::lock_guard lock(mutex_);
     const int ticket = nextTicket_++;
     auto& entry = tickets_[ticket];
     for (const auto& path : paths) {
-        if (models_.contains(path) || sprites_.contains(path) || images_.contains(path)) {
+        if (loaded(path) || failed_.contains(path)) {
             continue;
         }
-        queue_.emplace_back(ticket, path);
+        const auto [waiting, fresh] = inFlight_.try_emplace(path);
+        if (fresh) {
+            queue_.push_back(path);
+        } else if (std::find(waiting->second.begin(), waiting->second.end(), ticket) !=
+                   waiting->second.end()) {
+            continue; // named twice in `paths`
+        }
+        waiting->second.push_back(ticket);
         ++entry.total;
     }
     wake_.notify_one();
     return ticket;
+}
+
+void AssetCache::decodeInBackground(const std::string& path) {
+    collect();
+    std::lock_guard lock(mutex_);
+    if (!loaded(path) && !failed_.contains(path) && inFlight_.try_emplace(path).second) {
+        queue_.push_back(path);
+        wake_.notify_one();
+    }
+}
+
+bool AssetCache::decoding(const std::string& path) {
+    collect();
+    std::lock_guard lock(mutex_);
+    return inFlight_.contains(path);
 }
 
 float AssetCache::progress(int ticket) {
@@ -374,7 +397,7 @@ float AssetCache::progress(int ticket) {
 
 void AssetCache::worker() {
     for (;;) {
-        std::pair<int, std::string> job;
+        std::string job;
         {
             std::unique_lock lock(mutex_);
             wake_.wait(lock, [this] { return stopping_ || !queue_.empty(); });
@@ -385,15 +408,27 @@ void AssetCache::worker() {
             queue_.pop_front();
         }
         Decoded decoded;
+        bool failed = false;
         try {
-            decoded = decode(file(job.second));
+            decoded = decode(file(job));
         } catch (const std::exception& error) {
             log(LogLevel::Error, error.what());
+            failed = true;
         }
         std::lock_guard lock(mutex_);
-        finished_.emplace_back(job.second, std::move(decoded));
+        if (failed) {
+            failedDecodes_.push_back(job);
+        }
+        if (const auto waiting = inFlight_.find(job); waiting != inFlight_.end()) {
+            for (const int ticket : waiting->second) {
+                if (const auto found = tickets_.find(ticket); found != tickets_.end()) {
+                    ++found->second.done;
+                }
+            }
+            inFlight_.erase(waiting);
+        }
+        finished_.emplace_back(std::move(job), std::move(decoded));
         hasFinished_.store(true, std::memory_order_release);
-        ++tickets_[job.first].done;
     }
 }
 
@@ -405,6 +440,10 @@ void AssetCache::collect() {
     {
         std::lock_guard lock(mutex_);
         ready.swap(finished_);
+        // What could not be decoded there is not tried again here on first
+        // use (the error is already logged) until its file changes.
+        failed_.insert(failedDecodes_.begin(), failedDecodes_.end());
+        failedDecodes_.clear();
         hasFinished_.store(false, std::memory_order_relaxed);
     }
     for (auto& [path, value] : ready) {
