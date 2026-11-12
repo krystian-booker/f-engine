@@ -87,7 +87,7 @@ function fortress.run()
 
   -- The screen fades in: the fortress first, burning, the crystal over it;
   -- then down and back to the four on the bridge.
-  local wide = { target = { x = 16, y = 7.6, z = 52 }, yaw = 0, pitch = 1, distance = 24, fov = 70 }
+  local wide = { target = { x = 16, y = 6.3, z = 52 }, yaw = 0, pitch = 1, distance = 25, fov = 70 }
   fx.camera(world, wide, 0)
   task.spawn(function() fx.fade(0, 3) end, "fade in")
   wait(4.6)

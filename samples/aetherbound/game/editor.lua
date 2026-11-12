@@ -29,7 +29,8 @@ function editor.play_from(map, point)
 end
 
 function editor.list()
-  return { "Title", "Scene 1: The Fallen Fortress", "Scene 2: The Weapon Awakens", "Scene 5: What Remains" }
+  return { "Title", "Scene 1: The Fallen Fortress", "Scene 2: The Weapon Awakens", "Scene 4: The Sacrifice",
+    "Scene 5: What Remains" }
 end
 
 function editor.launch(name)
@@ -41,6 +42,8 @@ function editor.launch(name)
     prologue.start()
   elseif name:find("Scene 2") then
     prologue.start("chamber")
+  elseif name:find("Scene 4") then
+    prologue.start("last_light")
   else
     prologue.start("remains")
   end

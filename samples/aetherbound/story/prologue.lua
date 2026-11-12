@@ -47,7 +47,7 @@ function prologue.start(from)
       if name == from or (from == "last_light" and name == "chamber") then skip = false end
       if not skip then
         prologue.scene = name
-        local result = require("story." .. name).run(stage)
+        local result = require("story." .. name).run(stage, from)
         if result then stage = result end
       end
     end
