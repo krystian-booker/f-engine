@@ -120,7 +120,7 @@ foreach(replay IN LISTS replays)
   set_tests_properties(replay_headless_${sample}_${name} PROPERTIES TIMEOUT 300)
   if(FENGINE_BUILD_RUNTIME AND FENGINE_RUN_REPLAYS)
     add_test(NAME replay_${sample}_${name}
-      COMMAND fengine "${game}" --mute --replay "${replay}" --replay-skip 15
+      COMMAND fengine "${game}" --mute --replay "${replay}" --replay-skip 30
               --user-data "${CMAKE_BINARY_DIR}/replay-user/${sample}-${name}")
     # --replay-skip: between the frames a replay captures the game ticks
     # without rendering, so a ten-minute playthrough fits a CI runner whose

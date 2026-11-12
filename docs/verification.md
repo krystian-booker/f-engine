@@ -103,7 +103,7 @@ for replay in explore battle devices; do
 done
 ```
 
-A long replay need not render every tick. `--replay-skip <n>` lets a replay that is not paced in real time tick up to `n` times without rendering between frames; the tick of every capture is still rendered (as are the frames while a capture is written and while the screen is frozen), so the screenshots are the ones a run without it takes. The windowed CTest replays run with `--replay-skip 15`: `samples/aetherbound/replays/playthrough.json` is ten minutes of game, and a software renderer draws a handful of frames a second.
+A long replay need not render every tick. `--replay-skip <n>` lets a replay that is not paced in real time tick up to `n` times without rendering between frames; the tick of every capture is still rendered (as are the frames while a capture is written and while the screen is frozen), so the screenshots are the ones a run without it takes. The windowed CTest replays run with `--replay-skip 30`: `samples/aetherbound/replays/playthrough.json` is ten minutes of game, and a software renderer draws a handful of frames a second.
 
 This writes `reference/vulkan/` (or `direct3d11/`, `opengl43/`...) next to the replay. Linux picks Vulkan where available and OpenGL otherwise (`VK_ICD_FILENAMES=/nonexistent.json` forces OpenGL, for its references); Windows uses Direct3D 11. On Linux, run it under `xvfb-run -a -s "-screen 0 1280x720x24"` as CI does. A run with `--write-references` still applies the rendered-frame check but compares nothing.
 
