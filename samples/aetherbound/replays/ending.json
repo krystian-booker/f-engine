@@ -1,0 +1,57 @@
+[
+ {
+  "lua": "require('story.prologue').start('remains')",
+  "tick": 6
+ },
+ {
+  "lua": "require('dev.autoplay').start(false)",
+  "tick": 8
+ },
+ {
+  "wait_for": "require('game.field').world ~= nil and require('game.field').world.map_id == 'ruins'",
+  "timeout": 900,
+  "tick": 10
+ },
+ {
+  "assert": "require('game.field').actors.rowan == nil",
+  "message": "Rowan is not there",
+  "tick": 12
+ },
+ {
+  "wait_for": "require('game.dialogue').line ~= nil and require('game.dialogue').line.speaker == 'Darius'",
+  "timeout": 6000,
+  "tick": 14
+ },
+ {
+  "capture": "replay-out/aetherbound-ruins.png",
+  "compare": "reference/{backend}/ruins.png",
+  "tolerance": 0.035,
+  "tick": 44
+ },
+ {
+  "wait_for": "require('game.dialogue').line ~= nil and require('game.dialogue').line.markup:find('RIGHT HERE') ~= nil",
+  "timeout": 20000,
+  "tick": 46
+ },
+ {
+  "capture": "replay-out/aetherbound-crater.png",
+  "compare": "reference/{backend}/crater.png",
+  "tolerance": 0.035,
+  "tick": 66
+ },
+ {
+  "wait_for": "require('story.prologue').scene == 'end'",
+  "timeout": 30000,
+  "tick": 68
+ },
+ {
+  "wait_for": "require('story.prologue').ended",
+  "timeout": 3000,
+  "tick": 70
+ },
+ {
+  "assert": "#fe.dev.errors() == 0",
+  "message": "script errors",
+  "tick": 80
+ }
+]

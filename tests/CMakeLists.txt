@@ -60,7 +60,7 @@ add_test(NAME unicode_path_copy COMMAND "${CMAKE_COMMAND}" -E copy_directory
 add_test(NAME check_unicode_path COMMAND fengine_headless --check "${unicode_game}")
 set_tests_properties(unicode_path_copy PROPERTIES FIXTURES_SETUP unicode_game)
 set_tests_properties(check_unicode_path PROPERTIES FIXTURES_REQUIRED unicode_game)
-foreach(sample IN ITEMS starfall)
+foreach(sample IN ITEMS starfall aetherbound)
   if(EXISTS "${PROJECT_SOURCE_DIR}/samples/${sample}/game.json")
     add_test(NAME check_${sample} COMMAND fengine_headless --check "${PROJECT_SOURCE_DIR}/samples/${sample}")
     if(EXISTS "${PROJECT_SOURCE_DIR}/samples/${sample}/tests")

@@ -646,10 +646,10 @@ local function draw_floats(self)
         local pop = f.age < 0.12 and (1.5 - f.age / 0.12 * 0.5) or 1
         local alpha = t > 0.7 and (1 - (t - 0.7) / 0.3) or 1
         local number = tonumber(f.text) ~= nil or f.text:sub(1, 1) == "+"
-        local size = (number and (f.big and 80 or 58) or 34) * pop
+        local size = (number and (f.big and 80 or 58) or 30) * pop
         fe.canvas.push({ alpha = alpha })
-        ui.centred(f.text, x + f.drift, y - 20 - t * 70, { font = "digits", size = size, color = f.color,
-          outline = 0x000000e0 })
+        ui.centred(f.text, x + f.drift, y - 20 - t * 70, { font = number and "digits" or "label", size = size,
+          color = f.color, outline = 0x000000e0 })
         fe.canvas.pop()
       end
     end

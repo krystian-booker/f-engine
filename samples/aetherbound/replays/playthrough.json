@@ -1,0 +1,90 @@
+[
+ {
+  "input": {
+   "key:Return": 1
+  },
+  "tick": 124
+ },
+ {
+  "input": {
+   "key:Return": 0
+  },
+  "tick": 126
+ },
+ {
+  "wait_for": "require('story.prologue').scene == 'fortress' and require('game.field').world ~= nil",
+  "timeout": 900,
+  "tick": 128
+ },
+ {
+  "lua": "require('dev.autoplay').start(true)",
+  "tick": 130
+ },
+ {
+  "wait_for": "require('game.field').locked == 0 and not require('game.dialogue').active()",
+  "timeout": 9000,
+  "tick": 132
+ },
+ {
+  "lua": "require('dev.autoplay').walk('enc1')",
+  "tick": 134
+ },
+ {
+  "wait_for": "require('game.battle.scene').active ~= nil",
+  "timeout": 9000,
+  "tick": 136
+ },
+ {
+  "wait_for": "require('game.battle.scene').active == nil and require('game.field').locked == 0",
+  "timeout": 30000,
+  "tick": 138
+ },
+ {
+  "lua": "require('dev.autoplay').walk('enc2')",
+  "tick": 140
+ },
+ {
+  "wait_for": "require('game.battle.scene').active ~= nil",
+  "timeout": 9000,
+  "tick": 142
+ },
+ {
+  "wait_for": "require('game.battle.scene').active == nil and require('game.field').locked == 0",
+  "timeout": 30000,
+  "tick": 144
+ },
+ {
+  "lua": "require('dev.autoplay').walk('to_chamber')",
+  "tick": 146
+ },
+ {
+  "wait_for": "require('story.prologue').scene == 'chamber'",
+  "timeout": 9000,
+  "tick": 148
+ },
+ {
+  "wait_for": "require('story.prologue').scene == 'last_light'",
+  "timeout": 90000,
+  "tick": 150
+ },
+ {
+  "wait_for": "require('story.prologue').scene == 'remains'",
+  "timeout": 12000,
+  "tick": 152
+ },
+ {
+  "wait_for": "require('story.prologue').scene == 'end'",
+  "timeout": 30000,
+  "tick": 154
+ },
+ {
+  "wait_for": "require('story.prologue').ended",
+  "timeout": 3000,
+  "tick": 156
+ },
+ {
+  "assert": "#fe.dev.errors() == 0",
+  "message": "script errors",
+  "tick": 166
+ }
+]
