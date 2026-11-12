@@ -9,7 +9,7 @@ The engine reads `game.json`, maps, sprites, models, images, fonts, sounds and s
 ```text
 game.json                 title, id, entry (the entry module, default "main"), window {width,height},
                           virtual_resolution {width,height}, pixels_per_unit, pause_on_focus_loss (default true),
-                          max_fps (default 0), canvas_fit (default "letterbox"), hdr_output (default false),
+                          max_fps (default 0), canvas_fit (default "letterbox"), canvas_scale (default "integer"), hdr_output (default false),
                           hdr_paper_white (nits, default 200)
 main.lua                  the entry module (see scripting.md)
 <any>/*.lua               the game's own modules, required by dotted name ("game.field", "events.elder")
@@ -33,7 +33,7 @@ Only `game.json`, the entry module, `maps/<id>/`, `shaders/`, `packs/`, `tests/`
 
 With `pause_on_focus_loss` (the default), the windowed runtime stops ticking the game and pauses audio while its window is minimised or in the background, and resumes where it left off. Replays and headless runs never pause.
 
-`max_fps` caps the frame rate while vsync is off (0, the default, is uncapped; `fengine --max-fps n` overrides it). `canvas_fit` says what the virtual canvas does in a window of another aspect ratio: `"letterbox"` (default) keeps `virtual_resolution` and centres it with bars; `"expand"` widens the canvas to the window's aspect ratio (never below the configured width), so UI anchored to the width `fe.canvas.size()` returns reaches the edges of an ultrawide screen. The 3D world fills the window either way.
+`max_fps` caps the frame rate while vsync is off (0, the default, is uncapped; `fengine --max-fps n` overrides it). `canvas_fit` says what the virtual canvas does in a window of another aspect ratio: `"letterbox"` (default) keeps `virtual_resolution` and centres it with bars; `"expand"` widens the canvas to the window's aspect ratio (never below the configured width), so UI anchored to the width `fe.canvas.size()` returns reaches the edges of an ultrawide screen. The 3D world fills the window either way. `canvas_scale` says how the canvas is enlarged for a bigger window: `"integer"` (default) by whole factors, so pixel-art UI keeps square pixels (a 640×360 canvas is exact at 720p, 1080p, 1440p and 4K); `"smooth"` by exactly what fits, for a high-resolution UI with smooth fonts (a 1920×1080 canvas then fills 1440p instead of sitting inside it with bars). A canvas larger than the window is always shrunk exactly.
 
 `hdr_output` (or `fengine --hdr`) presents to a high dynamic range back buffer when the renderer has one: RGBA16F in scRGB (Metal, Direct3D, Vulkan), else RGB10A2 HDR10, else the 8-bit buffer as before. The frame is still composed in sRGB (the post pass grades and encodes each world; the canvas draws on top); the screen pass decodes it to linear light and places its white at `hdr_paper_white` nits (80 to 10000; on macOS the system's own SDR white, which the player sets with the display brightness, stands in for it), so an SDR-authored game is shown without clipping or dimming and the OS does not re-tone-map it. `fe.app.display().hdr` says whether the back buffer is HDR; with `hdr_output` off every pixel is what it was before, so replays and their reference captures are unaffected.
 

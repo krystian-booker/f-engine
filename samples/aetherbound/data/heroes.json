@@ -1,0 +1,43 @@
+{
+  "cael": {
+    "name": "Cael", "sprite": "sprites/cael.anim.json",
+    "hp": 980, "mp": 64, "atk": 46, "def": 30, "mag": 38, "res": 28, "spd": 56,
+    "commands": [
+      {"label": "Attack", "skill": "attack"},
+      {"label": "Aether", "skills": ["ember", "mend", "ward"]},
+      {"label": "Guard", "skill": "guard"},
+      {"label": "Item", "items": true}
+    ]
+  },
+  "rowan": {
+    "name": "Rowan", "sprite": "sprites/rowan.anim.json",
+    "hp": 1120, "mp": 0, "atk": 54, "def": 34, "mag": 30, "res": 26, "spd": 60,
+    "corruption": true,
+    "commands": [
+      {"label": "Attack", "skill": "attack"},
+      {"label": "Resonance", "skill": "resonance"},
+      {"label": "Guard", "skill": "guard"},
+      {"label": "Item", "items": true}
+    ]
+  },
+  "lyra": {
+    "name": "Lyra", "sprite": "sprites/lyra.anim.json",
+    "hp": 720, "mp": 120, "atk": 22, "def": 20, "mag": 56, "res": 40, "spd": 50,
+    "commands": [
+      {"label": "Attack", "skill": "attack"},
+      {"label": "Aether", "skills": ["frost", "surge", "mend"]},
+      {"label": "Guard", "skill": "guard"},
+      {"label": "Item", "items": true}
+    ]
+  },
+  "darius": {
+    "name": "Darius", "sprite": "sprites/darius.anim.json",
+    "hp": 1380, "mp": 30, "atk": 48, "def": 46, "mag": 12, "res": 24, "spd": 40,
+    "commands": [
+      {"label": "Attack", "skill": "attack"},
+      {"label": "Arts", "skills": ["bash", "bulwark"]},
+      {"label": "Guard", "skill": "guard"},
+      {"label": "Item", "items": true}
+    ]
+  }
+}

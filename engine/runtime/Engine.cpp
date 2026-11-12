@@ -72,6 +72,7 @@ Engine::Engine(EngineOptions&& options, std::optional<GameConfig> config)
       docs_(std::make_unique<BindingDocs>()),
       lua_(std::make_unique<LuaHost>(options.gameRoot, options.builtinRoot, options.development)),
       script_(std::make_unique<Script>()), ownsLogSink_(static_cast<bool>(options.logSink)) {
+    canvas_->setSmoothScale(config_.canvasSmooth);
     if (ownsLogSink_) {
         setLogSink(std::move(options.logSink));
     }

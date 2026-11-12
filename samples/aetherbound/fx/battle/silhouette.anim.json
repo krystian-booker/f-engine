@@ -1,0 +1,26 @@
+{
+ "atlas": "silhouette.png",
+ "pixels_per_unit": 16,
+ "pivot": [
+  0.5,
+  1
+ ],
+ "clips": {
+  "idle": {
+   "loop": false,
+   "directions": [
+    [
+     {
+      "rect": [
+       0,
+       0,
+       384,
+       512
+      ],
+      "duration": 1
+     }
+    ]
+   ]
+  }
+ }
+}

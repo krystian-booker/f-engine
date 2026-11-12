@@ -153,6 +153,7 @@ void Canvas::glyphs(const TextLayout& layout, glm::vec2 origin, const TextOption
             ImageOptions image;
             image.source = {icon->rect.x, icon->rect.y, icon->rect.z, icon->rect.w};
             image.color = tint ? tint : 0xffffffff;
+            image.linear = icon->linear;
             this->image(icon->image, area, image);
             continue;
         }
@@ -193,7 +194,7 @@ Canvas::Presentation Canvas::present(glm::ivec2 viewport) const {
     const float fit = std::min(static_cast<float>(viewport.x) / static_cast<float>(width_),
                                static_cast<float>(viewport.y) / static_cast<float>(height_));
     Presentation p;
-    p.scale = fit >= 1 ? std::max(1.0f, std::floor(fit)) : fit;
+    p.scale = fit >= 1 && !smoothScale_ ? std::max(1.0f, std::floor(fit)) : fit;
     p.offset = {(static_cast<float>(viewport.x) - static_cast<float>(width_) * p.scale) * 0.5f,
                 (static_cast<float>(viewport.y) - static_cast<float>(height_) * p.scale) * 0.5f};
     return p;

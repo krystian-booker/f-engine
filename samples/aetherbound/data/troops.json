@@ -1,0 +1,5 @@
+{
+  "gate": {"enemies": ["guard", "guard"], "weakened": 0.6, "music": "battle"},
+  "yard": {"enemies": ["guard", "lancer", "guard"], "weakened": 0.6, "music": "battle"},
+  "colossus": {"enemies": ["colossus"], "music": "colossus", "boss": true}
+}

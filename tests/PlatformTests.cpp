@@ -680,6 +680,29 @@ TEST_CASE("canvas_fit expand widens the canvas to the viewport; letterbox keeps 
     CHECK(engine.canvas().height() == 180);
 }
 
+TEST_CASE("canvas_scale smooth fills a window that is not a whole multiple of the canvas") {
+    auto config = GameConfig::load(FENGINE_TEST_GAME);
+    CHECK_FALSE(config.canvasSmooth);
+    {
+        Engine engine(options(), config);
+        CHECK(engine.canvas().present({800, 450}).scale == doctest::Approx(2)); // 2.5 fits, whole pixels win
+        CHECK(engine.canvas().present({800, 450}).offset.x == doctest::Approx(80));
+    }
+    config.canvasSmooth = true;
+    Engine engine(options(), config);
+    const auto p = engine.canvas().present({800, 450});
+    CHECK(p.scale == doctest::Approx(2.5f));
+    CHECK(p.offset.x == doctest::Approx(0));
+    CHECK(engine.canvas().present({160, 90}).scale == doctest::Approx(0.5f)); // shrinking was always exact
+    const auto root = std::filesystem::temp_directory_path() / "fengine-canvas-scale";
+    std::filesystem::create_directories(root);
+    std::ofstream(root / "game.json") << R"({"title": "Plain", "canvas_scale": "smooth"})";
+    CHECK(GameConfig::load(root).canvasSmooth);
+    std::ofstream(root / "game.json") << R"({"title": "Plain", "canvas_scale": "blurry"})";
+    CHECK_THROWS_WITH(GameConfig::load(root), doctest::Contains("canvas_scale"));
+    std::filesystem::remove_all(root);
+}
+
 TEST_CASE("the log writes a rotated file, filters by level and reports crashes") {
     const auto folder = std::filesystem::temp_directory_path() / "fengine-log-test";
     std::filesystem::remove_all(folder);

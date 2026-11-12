@@ -1,0 +1,17 @@
+{
+  "guard": {
+    "name": "Fortress Guard", "sprite": "sprites/guard.anim.json",
+    "hp": 420, "atk": 30, "def": 16, "mag": 0, "res": 10, "spd": 30,
+    "pattern": ["attack"]
+  },
+  "lancer": {
+    "name": "Fortress Lancer", "sprite": "sprites/lancer.anim.json",
+    "hp": 520, "atk": 34, "def": 18, "mag": 0, "res": 12, "spd": 34,
+    "pattern": ["attack", "lunge"]
+  },
+  "colossus": {
+    "name": "Aetherbound Colossus", "model": "models/colossus.glb", "boss": true,
+    "hp": 8000, "atk": 58, "def": 24, "mag": 50, "res": 20, "spd": 36,
+    "pattern": ["slam", "sweep", "slam", "charge", "pulse"]
+  }
+}

@@ -69,6 +69,11 @@ GameConfig GameConfig::load(const std::filesystem::path& folder) {
         } else {
             throw std::runtime_error("canvas_fit must be \"letterbox\" or \"expand\", got \"" + fit + "\"");
         }
+        const auto scale = data.value("canvas_scale", std::string("integer"));
+        if (scale != "integer" && scale != "smooth") {
+            throw std::runtime_error("canvas_scale must be \"integer\" or \"smooth\", got \"" + scale + "\"");
+        }
+        config.canvasSmooth = scale == "smooth";
         const bool valid =
             !config.title.empty() && !config.entry.empty() && config.pixelsPerUnit >= 1 &&
             config.pixelsPerUnit <= 4096 && config.windowWidth >= 64 && config.windowHeight >= 64 &&

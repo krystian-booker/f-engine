@@ -1,0 +1,8 @@
+{
+  "tonic": {"name": "Tonic", "kind": "heal", "amount": 400, "target": "ally", "count": 5, "fx": "mend",
+    "help": "Restores 400 HP."},
+  "vial": {"name": "Aether Vial", "kind": "mp", "amount": 50, "target": "ally", "count": 2, "fx": "ward",
+    "help": "Restores 50 MP."},
+  "kindle": {"name": "Kindling Ash", "kind": "revive", "amount": 0.4, "target": "fallen", "count": 2, "fx": "mend",
+    "help": "Brings a fallen ally back with some HP."}
+}
