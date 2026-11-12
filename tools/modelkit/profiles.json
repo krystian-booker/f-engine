@@ -1,0 +1,116 @@
+{
+  "_comment": "Budgets and conventions per kind of model. A game's manifest may override any value or add profiles. Sizes are world units (one unit is one grid cell; a hero is about 1.5 tall). texel_density is pixels per unit of the base colour texture.",
+  "default": {
+    "max_triangles": 30000,
+    "max_vertices": 40000,
+    "max_materials": 6,
+    "max_draws": 12,
+    "max_texture_size": 2048,
+    "max_file_megabytes": 16,
+    "texel_density": null,
+    "texel_density_tolerance": 0.5,
+    "texel_density_spread": 2.5,
+    "uv": "any",
+    "origin": "any",
+    "watertight": false,
+    "sliver_ratio": 40,
+    "sliver_percent": 2.0,
+    "needle_ratio": 400,
+    "max_normal_deviation": 80,
+    "smeared_normal_percent": 1.0,
+    "ngon_corners": 16,
+    "ngon_triangles": 7,
+    "uv_stretch": 3.0,
+    "uv_stretch_percent": 10.0,
+    "uv_collapsed_percent": 0.5,
+    "tiny_island_texels": 4
+  },
+  "prop": {
+    "_comment": "A thing standing on a map: crate, brazier, banner, pillar. Origin at the centre of its base.",
+    "max_triangles": 3000,
+    "max_vertices": 5000,
+    "max_materials": 3,
+    "max_draws": 4,
+    "max_texture_size": 512,
+    "max_file_megabytes": 2,
+    "texel_density": 32,
+    "origin": "base_centre"
+  },
+  "pickup": {
+    "_comment": "A small loose thing: shard, key, coin. Origin at its centre.",
+    "max_triangles": 400,
+    "max_vertices": 800,
+    "max_materials": 1,
+    "max_draws": 2,
+    "max_texture_size": 128,
+    "max_file_megabytes": 0.25,
+    "texel_density": 32,
+    "origin": "centre",
+    "height": [
+      0.1,
+      1.5
+    ]
+  },
+  "set_piece": {
+    "_comment": "A large one-off: a statue, a floating crystal, a siege engine.",
+    "max_triangles": 8000,
+    "max_vertices": 12000,
+    "max_materials": 3,
+    "max_draws": 6,
+    "max_texture_size": 1024,
+    "max_file_megabytes": 4,
+    "texel_density": 32
+  },
+  "character": {
+    "_comment": "A rigged, animated figure about as tall as the heroes. Origin between the feet.",
+    "max_triangles": 5000,
+    "max_vertices": 6000,
+    "max_skinned_vertices": 6000,
+    "max_joints": 60,
+    "max_materials": 3,
+    "max_draws": 4,
+    "max_texture_size": 512,
+    "max_file_megabytes": 3,
+    "texel_density": 64,
+    "origin": "base_centre",
+    "height": [
+      1.0,
+      2.5
+    ]
+  },
+  "boss": {
+    "_comment": "A rigged, animated creature or machine that fills a battle. Origin between the feet.",
+    "max_triangles": 20000,
+    "max_vertices": 15000,
+    "max_skinned_vertices": 15000,
+    "max_joints": 96,
+    "max_materials": 5,
+    "max_draws": 8,
+    "max_texture_size": 1024,
+    "max_file_megabytes": 6,
+    "texel_density": 32,
+    "origin": "base_centre",
+    "height": [
+      3.0,
+      12.0
+    ]
+  },
+  "map": {
+    "_comment": "A map's own geometry (maps/<id>/geometry.glb): terrain, walls, fixed architecture. Origin where cell (0, 0) begins; the engine merges it by material and culls it in 8 x 8 squares.",
+    "max_triangles": 150000,
+    "max_vertices": 220000,
+    "max_materials": 8,
+    "max_draws": 8,
+    "max_texture_size": 1024,
+    "max_file_megabytes": 12,
+    "texel_density": [
+      12,
+      40
+    ],
+    "texel_density_spread": 3.5,
+    "origin": "corner",
+    "review": "map",
+    "sliver_percent": 4.0,
+    "ngon_corners": 24
+  }
+}

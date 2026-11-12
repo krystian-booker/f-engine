@@ -212,6 +212,8 @@ Exporting a rigged model from Blender:
 
 Scripts play animations by name; names are the game's convention, not the engine's. The sample's creature has `idle`, `attack`, `cast`, `hit` and `die`, which its battle scene maps onto the same events that play `idle`, `attack`, `cast`, `hurt` and `ko` sprite clips. `entity:play(animation, loop, fade)` starts an animation from its beginning; with `fade` (seconds) the pose blends from the one showing into the new animation, so `idle` flows into `attack` and back instead of snapping. A non-looping animation holds its last pose and emits `anim_finished` (with its name) in `world:events()`. A name the model lacks shows the rest pose.
 
+`tools/modelkit/` is the process for getting a model ready: a guide to building one, Blender helpers that clean and export it, and `validate.py`, which checks the exported file (mesh integrity, normals, topology, UVs, budgets and conventions per kind of model, and whether the engine loads it) and requires a recorded visual review. Run it on every model before it goes into a game; `tools/modelkit/README.md` is the guide.
+
 Skinning runs on the CPU, per vertex, every frame for every rigged entity that has an animation set, so keep the vertex counts of rigged meshes modest, and prefer sprites for crowds. On a map, give a rigged placement `solid = false` so the walkability bake does not take its rest pose for an obstacle, and let the game give the entity a collider (the sample's `boss` type does). `tools/generate_creature.py <out.glb>` writes a small rigged, animated placeholder creature to start from (`samples/starfall/fx/drake.glb`).
 
 ### Compressed textures

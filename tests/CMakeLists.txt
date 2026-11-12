@@ -108,6 +108,23 @@ if(Python3_Interpreter_FOUND)
     "$<TARGET_FILE:fengine_headless>")
 endif()
 
+# tools/modelkit: the validator proves itself on flawed fixtures, and every 3D
+# model a sample ships passes its manifest (mesh, normals, topology, UVs,
+# readiness, the engine's own loader, and a visual review of this exact file).
+# Needs numpy and pillow; without them the tests are not registered.
+if(Python3_Interpreter_FOUND)
+  execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import numpy, PIL"
+    RESULT_VARIABLE modelkit_missing OUTPUT_QUIET ERROR_QUIET)
+  if(modelkit_missing EQUAL 0)
+    add_test(NAME modelkit_selftest COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/modelkit/selftest.py")
+    add_test(NAME models_aetherbound COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/modelkit/validate.py"
+      --manifest "${PROJECT_SOURCE_DIR}/tools/aetherbound/models.json" --engine "$<TARGET_FILE:fengine_headless>")
+    set_tests_properties(modelkit_selftest models_aetherbound PROPERTIES TIMEOUT 300)
+  else()
+    message(STATUS "modelkit tests skipped: python3 lacks numpy or pillow (pip install numpy pillow)")
+  endif()
+endif()
+
 # Every replay runs headless (no GPU; captures skipped). With
 # FENGINE_RUN_REPLAYS it also runs in the windowed runtime (needs a display).
 file(GLOB replays CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/samples/*/replays/*.json")

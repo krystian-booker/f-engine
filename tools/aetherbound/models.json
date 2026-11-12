@@ -1,0 +1,166 @@
+{
+  "_comment": "Every model of samples/aetherbound, the profile it is judged by, the flaws it is allowed to keep (each with a reason and a cap, so it cannot grow), and its visual review. `python3 tools/modelkit/validate.py --manifest tools/aetherbound/models.json` must pass; see tools/modelkit/README.md. A waiver that starts 'Known debt' is a flaw to remove the next time its generator is touched: fix it, then delete the waiver.",
+  "root": "../../samples/aetherbound",
+  "art_direction": "tools/aetherbound/SPEC.md",
+  "reviews": "model_reviews",
+  "folders": [
+    "models",
+    "maps"
+  ],
+  "models": {
+    "models/aether_shard.glb": {
+      "profile": "pickup",
+      "review": {
+        "verdict": "pass",
+        "sha256": "3b81fb11071489cc8911094beea35c5e9740f9837666e5bff3d8f99b0bd74d76",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "Reads as a crystal splinter in silhouette at game size; six hard facets, clean clay view, even texel density; violet with a white core matches the aetherite palette of SPEC.md and the big crystal.",
+        "date": "2026-11-12"
+      }
+    },
+    "models/aether_crystal.glb": {
+      "profile": "set_piece",
+      "waive": {
+        "uv.texel_density": {
+          "reason": "By design: a 14-unit crystal that hangs over the tower and is only seen from the courtyard, through bloom; 13 to 14 px per unit from one 512 texture is enough there. Raise it if a scene ever brings the camera close.",
+          "max": 5
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "be8907424199a8af2e4214a9832f044afb6d7d36cef1c9ee09d3c8d1fd5c1e9c",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "Strong spiky silhouette with four orbiting satellites; facets are hard and clean with no faces seen from behind; glows violet-white in the engine as SPEC.md asks. Texel density is under the profile (waived: distant set piece).",
+        "date": "2026-11-12"
+      }
+    },
+    "models/colossus.glb": {
+      "profile": "boss",
+      "waive": {
+        "normals.shading": {
+          "reason": "Known debt from before modelkit: the thin rims of the armour plates and trim bands (5% of the surface) take the normal of the plate they border, so they shade as a soft bevel instead of a hard edge. Fix in tools/aetherbound/colossus/build_colossus.py: modelkit_bpy.clean(obj, sharp_angle=40) before export.",
+          "max": 1300
+        },
+        "topology.ngons": {
+          "reason": "Known debt from before modelkit: six flat plates of up to 28 corners left to the exporter's triangulation. Fix in build_colossus.py: build them from quads, or clean() so the triangulation is chosen.",
+          "max": 6
+        },
+        "topology.coplanar_overlap": {
+          "reason": "Known debt from before modelkit: four faces of overlapping parts in one plane. Fix in build_colossus.py: inset one part or cut the hidden face.",
+          "max": 4
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "ce0bb4e7e54527a2a73c51ffef3b54d558523500b6bbb621d43acfc4e8474db4",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "Hunched war-machine silhouette reads at both game sizes and towers over a hero; teal plate, brass trim and violet core follow SPEC.md; clay view has no holes or dark blotches; dormant, awaken, idle, slam, sweep and pulse poses hold together in the engine. Rims shade soft rather than hard (waived debt).",
+        "date": "2026-11-12"
+      }
+    },
+    "maps/fortress/geometry.glb": {
+      "profile": "map",
+      "waive": {
+        "integrity.non_manifold_edges": {
+          "reason": "Known debt from before modelkit: blocks that share an edge are fused without removing the faces between them. Fix in tools/aetherbound/fortress/build.py.",
+          "max": 26
+        },
+        "normals.flipped": {
+          "reason": "Known debt from before modelkit: 67 small faces of props and walls wound the wrong way. Fix in fortress/build.py: modelkit_bpy.clean() recalculates them.",
+          "max": 67
+        },
+        "normals.shading": {
+          "reason": "Known debt from before modelkit: props smoothed across their hard edges (6% of the props' surface). Fix in fortress/build.py: clean(obj, sharp_angle=40).",
+          "max": 938
+        },
+        "topology.ngons": {
+          "reason": "Known debt from before modelkit: one 26-corner slab triangulated by the exporter.",
+          "max": 1
+        },
+        "topology.t_junctions": {
+          "reason": "Known debt from before modelkit: walls, rock and mist sheets built from pieces whose edges do not meet vertex to vertex; can show as pinhole cracks. Fix in fortress/build.py by cutting the long edge where the neighbour ends.",
+          "max": 677
+        },
+        "topology.coplanar_overlap": {
+          "reason": "Known debt from before modelkit: props laid flat on one another in the same plane (planks, debris, cloth); can z-fight. Fix in fortress/build.py: lift each layer by a few millimetres.",
+          "max": 425
+        },
+        "uv.texel_density": {
+          "reason": "By design: the mist is a soft gradient on large sheets; 8 px per unit shows no texels.",
+          "max": 1
+        },
+        "uv.collapsed": {
+          "reason": "Known debt from before modelkit: 1% of the props' surface has UVs collapsed to a line (edge-on faces in the box projection). Fix in fortress/build.py with modelkit_bpy.box_unwrap.",
+          "max": 288
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "73557775aee7ae9de5e071a02bf1bb4b9ea8dce4ccfee86b5f49640bda760f5e",
+        "by": "Claude (AI agent), from the map review sheet and the replay captures of the game",
+        "notes": "Bridge, gate, courtyard, stair and tower read clearly from the game camera and match the in-game captures (bridge-wide, field). Flaws seen on the sheet: the inner side of the round towers' parapets and a few props are missing faces or wound backwards (small red marks); not noticeable at the game's camera distance, listed as debt in the waivers.",
+        "date": "2026-11-12"
+      }
+    },
+    "maps/chamber/geometry.glb": {
+      "profile": "map",
+      "waive": {
+        "integrity.degenerate_faces": {
+          "reason": "Known debt from before modelkit: the generator emits collapsed triangles (they draw nothing, they only cost). Fix in tools/aetherbound/chamber/build.py: modelkit_bpy.clean() before export.",
+          "max": 376
+        },
+        "integrity.non_manifold_edges": {
+          "reason": "Known debt from before modelkit: stone pieces fused along an edge with the faces between them left in. Fix in chamber/build.py.",
+          "max": 49
+        },
+        "topology.ngons": {
+          "reason": "Known debt from before modelkit: floor discs and plates of up to 102 corners triangulated by the exporter. Fix in chamber/build.py: build discs as rings of quads around a centre.",
+          "max": 8
+        },
+        "topology.t_junctions": {
+          "reason": "Known debt from before modelkit: pieces whose edges do not meet vertex to vertex. Fix in chamber/build.py.",
+          "max": 38
+        },
+        "topology.coplanar_overlap": {
+          "reason": "Known debt from before modelkit: faces of touching pieces in one plane; can z-fight. Fix in chamber/build.py.",
+          "max": 26
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "ebc5b11bf59cce9b7c862048498792b447cae9bda6d3b5a2d34f90040b186e10",
+        "by": "Claude (AI agent), from the map review sheet and the replay captures of the game",
+        "notes": "Round chamber with dais, tanks, pipes and brass ring reads well from the game camera; texel density even on everything walked on (the skirt below the floor is low and never close). The wall piers have no top caps: they end far above the camera's frame in every scene.",
+        "date": "2026-11-12"
+      }
+    },
+    "maps/ruins/geometry.glb": {
+      "profile": "map",
+      "waive": {
+        "integrity.degenerate_faces": {
+          "reason": "Known debt from before modelkit: the generator emits collapsed triangles (they draw nothing, they only cost). Fix in tools/aetherbound/chamber/build.py: modelkit_bpy.clean() before export.",
+          "max": 364
+        },
+        "integrity.non_manifold_edges": {
+          "reason": "Known debt from before modelkit: stone pieces fused along an edge with the faces between them left in. Fix in chamber/build.py.",
+          "max": 34
+        },
+        "topology.t_junctions": {
+          "reason": "Known debt from before modelkit: rubble and wall pieces whose edges do not meet vertex to vertex. Fix in chamber/build.py.",
+          "max": 144
+        },
+        "topology.ngons": {
+          "reason": "Known debt from before modelkit: one 68-corner slab triangulated by the exporter.",
+          "max": 1
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "943b29509d2273452a36f63fac2693587a27b11aa8b592d61a57ab21db265126",
+        "by": "Claude (AI agent), from the map review sheet and the replay captures of the game",
+        "notes": "The same footprint broken open: crater at the dais, standing wall stumps, rubble field; forms read from the game camera and texel density is even. No faces seen from behind in the play area.",
+        "date": "2026-11-12"
+      }
+    }
+  }
+}

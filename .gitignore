@@ -12,3 +12,7 @@ tools/editor_walkthrough/out/
 
 # Screenshots a windowed replay writes into the working directory
 /replay-out/
+
+# Model review sheets (tools/modelkit/review.py); regenerate them to look at a model
+tools/*/model_reviews/
+*.review.png
