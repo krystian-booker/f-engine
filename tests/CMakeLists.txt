@@ -108,20 +108,31 @@ if(Python3_Interpreter_FOUND)
     "$<TARGET_FILE:fengine_headless>")
 endif()
 
-# tools/modelkit: the validator proves itself on flawed fixtures, and every 3D
-# model a sample ships passes its manifest (mesh, normals, topology, UVs,
-# readiness, the engine's own loader, and a visual review of this exact file).
-# Needs numpy and pillow; without them the tests are not registered.
+# The asset kits (tools/modelkit, animkit, texturekit, spritekit): each
+# validator proves itself on flawed fixtures, and every model, animation,
+# texture and sprite a sample ships passes its manifest: the measured checks
+# for its profile, the engine's own loader, and a visual review of exactly
+# these files. Needs numpy and pillow; without them the tests are not registered.
 if(Python3_Interpreter_FOUND)
   execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import numpy, PIL"
-    RESULT_VARIABLE modelkit_missing OUTPUT_QUIET ERROR_QUIET)
-  if(modelkit_missing EQUAL 0)
-    add_test(NAME modelkit_selftest COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/modelkit/selftest.py")
-    add_test(NAME models_aetherbound COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/modelkit/validate.py"
-      --manifest "${PROJECT_SOURCE_DIR}/tools/aetherbound/models.json" --engine "$<TARGET_FILE:fengine_headless>")
-    set_tests_properties(modelkit_selftest models_aetherbound PROPERTIES TIMEOUT 300)
+    RESULT_VARIABLE kits_missing OUTPUT_QUIET ERROR_QUIET)
+  if(kits_missing EQUAL 0)
+    foreach(kit IN ITEMS model:models anim:animations texture:textures sprite:sprites)
+      string(REPLACE ":" ";" kit "${kit}")
+      list(GET kit 0 name)
+      list(GET kit 1 section)
+      if(EXISTS "${PROJECT_SOURCE_DIR}/tools/${name}kit/selftest.py")
+        add_test(NAME ${name}kit_selftest COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/${name}kit/selftest.py")
+        set_tests_properties(${name}kit_selftest PROPERTIES TIMEOUT 300)
+        if(EXISTS "${PROJECT_SOURCE_DIR}/tools/aetherbound/${section}.json")
+          add_test(NAME ${section}_aetherbound COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/${name}kit/validate.py"
+            --manifest "${PROJECT_SOURCE_DIR}/tools/aetherbound/${section}.json" --engine "$<TARGET_FILE:fengine_headless>")
+          set_tests_properties(${section}_aetherbound PROPERTIES TIMEOUT 300)
+        endif()
+      endif()
+    endforeach()
   else()
-    message(STATUS "modelkit tests skipped: python3 lacks numpy or pillow (pip install numpy pillow)")
+    message(STATUS "asset kit tests skipped: python3 lacks numpy or pillow (pip install numpy pillow)")
   endif()
 endif()
 

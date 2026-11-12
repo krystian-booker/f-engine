@@ -64,11 +64,14 @@ where they are the backdrop.
   `docs/architecture.md` (rendering).
 - `./build/fengine_headless --check samples/aetherbound` must report 0
   problems when you are done.
-- Every `.glb` follows `tools/modelkit/README.md`: build it with the
-  `modelkit_bpy` helpers, list it in `tools/aetherbound/models.json` with its
-  profile, and leave `python3 tools/modelkit/validate.py --manifest
-  tools/aetherbound/models.json --engine build/fengine_headless` passing,
-  with the review sheet looked at and signed.
+- Everything you generate follows its kit's guide and passes its gate: models
+  `tools/modelkit/README.md`, their animations `tools/animkit/README.md`,
+  textures `tools/texturekit/README.md`, sprite sheets
+  `tools/spritekit/README.md`. Build with the kit's helpers, list the asset in
+  `tools/aetherbound/<models|animations|textures|sprites>.json` with its
+  profile, and leave `python3 tools/<kit>/validate.py --manifest
+  tools/aetherbound/<manifest> --engine build/fengine_headless` passing, with
+  the review sheet looked at and signed.
 - Scratch files go in your own folder under
   `/tmp/claude-0/-home-user-f-engine/c427e0fc-76b4-5426-b107-9b52cd2adb5c/scratchpad/`.
 - Finish with a short report: files written, how to regenerate, the names and

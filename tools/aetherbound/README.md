@@ -25,24 +25,30 @@ JSON file names a map, a camera and entities (sprites with a clip, models
 with an animation) and the ticks to capture; see the docstring at its top.
 `preview/` is the tiny game it runs.
 
-## 3D models go through modelkit
+## Everything generated goes through a kit
 
-`models.json` lists every `.glb` the game ships (the three models and the
-three maps' geometry) with its profile, its visual review, and the flaws it
-is still allowed to keep. `tools/modelkit/README.md` is the process; the gate
-is
+Four manifests list what the game ships, each with its profile, its visual
+review, and the flaws it is still allowed to keep:
+
+| Manifest | Kit and guide | Covers |
+| --- | --- | --- |
+| `models.json` | `tools/modelkit/README.md` | the three models and the three maps' geometry |
+| `animations.json` | `tools/animkit/README.md` | the animations in `colossus.glb` and `aether_crystal.glb` |
+| `textures.json` | `tools/texturekit/README.md` | sky cards, UI art, colour grades, and every texture embedded in a `.glb` |
+| `sprites.json` | `tools/spritekit/README.md` | every `.anim.json`: the cast, the props, the battle and map effects |
+
+The gate for each is
 
 ```sh
-python3 tools/modelkit/validate.py --manifest tools/aetherbound/models.json --engine build/fengine_headless
+python3 tools/<kit>/validate.py --manifest tools/aetherbound/<manifest> --engine build/fengine_headless
 ```
 
-After regenerating a model its review is void (it is bound to the file's
-hash): make the sheet with `tools/modelkit/review.py`, look at it against
+After regenerating an asset its review is void (it is bound to the files'
+hash): make the sheet with that kit's `review.py`, look at it against
 `SPEC.md`, and sign it again. The waivers that start "Known debt" are flaws
-these generators produced before modelkit existed, each capped at its
-current count; when you touch a generator, use `modelkit_bpy.prepare` before
-export, fix what its waivers name, and delete them. A new model gets no
-waivers.
+these generators produced before the kits existed, each capped at its current
+count; when you touch a generator, use the kit's helpers, fix what its
+waivers name, and delete them. A new asset gets no waivers.
 
 After regenerating, `./build/fengine_headless --check samples/aetherbound` and
 `--test samples/aetherbound` say whether the game still has everything it

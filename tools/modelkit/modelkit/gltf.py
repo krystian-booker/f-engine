@@ -66,6 +66,7 @@ class Model:
         self.scene_nodes = set()
         self.problems = []  # structural problems found while reading: (severity, message)
         self.file_bytes = 0
+        self.accessor = None  # accessor(index) -> array: any accessor of the file (animkit reads samplers and skins with it)
 
     def material_name(self, index):
         if index is None or index < 0 or index >= len(self.materials):
@@ -179,6 +180,8 @@ def load(path):
             limit = float(np.iinfo(dtype).max)
             values = np.maximum(values.astype(np.float64) / limit, -1.0)
         return values
+
+    model.accessor = read
 
     for index, image in enumerate(document.get("images", [])):
         entry = {"name": image.get("name") or image.get("uri") or f"image{index}", "width": 0, "height": 0,
