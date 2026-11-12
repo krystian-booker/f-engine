@@ -11,6 +11,7 @@
 local actors = require("game.actors")
 local audio = require("game.audio")
 local dialogue = require("game.dialogue")
+local fx = require("game.fx")
 local party = require("game.party")
 local scenes = require("game.scenes")
 local task = require("game.task")
@@ -35,6 +36,7 @@ end
 function field.enter(map, places)
   if field.world then
     actors.clear(field.world)
+    fx.world_changed()
     fe.world.unload(field.world.name)
   end
   local ticket = fe.world.load_async("field", map)
@@ -70,6 +72,7 @@ function field.leave()
   scenes.pop(field.scene)
   if field.world then
     actors.clear(field.world)
+    fx.world_changed()
     fe.world.unload(field.world.name)
   end
   field.world, field.actors, field.on_zone, field.locked = nil, {}, {}, 0

@@ -56,7 +56,7 @@ local function fight(world, prefix, troop, guards, intro, script)
   local points = world:points()
   local centre = points[prefix .. "centre"].position
   battle.start { world = world, troop = troop, prefix = prefix, heroes = field.actors, enemies = guards,
-    camera = { target = { x = centre.x, y = 1.2, z = centre.z }, yaw = 0, pitch = 16, distance = 12.5 },
+    camera = { target = { x = centre.x, y = 0.6, z = centre.z + 0.4 }, yaw = 0, pitch = 16, distance = 13 },
     script = script }
   for _, guard in ipairs(guards) do actors.remove(guard) end
   audio.music("fortress", 1.5)
@@ -91,7 +91,7 @@ function fortress.run()
   fx.camera(world, { target = { x = 16, y = crystal_at.y - 14, z = 22 }, yaw = 0, pitch = 3, distance = 46, fov = 30 }, 0)
   task.spawn(function() fx.fade(0, 3.5) end, "fade in")
   common.camera({ target = { x = 16, y = 9, z = 40 }, pitch = 6, distance = 34 }, 6.5)
-  common.camera({ target = { x = 16, y = 2.4, z = 61.5 }, pitch = 13, distance = 13.5 }, 6.5)
+  common.camera({ target = { x = 16, y = 0.6, z = 63.4 }, pitch = 14, distance = 13 }, 6.5)
 
   director.face(darius, cael)
   say("Darius", "That's the last of their defenses.")
@@ -106,7 +106,7 @@ function fortress.run()
   common.crystal_pulse(1.6)
   common.all_face({ x = 0, z = -1 })
   wait(1.6)
-  common.camera({ target = { x = 16, y = 2.2, z = 62 }, pitch = 12, distance = 11 }, 1.8)
+  common.camera({ target = { x = 16, y = 0.5, z = 63.4 }, pitch = 13, distance = 11 }, 1.8)
 
   say("Rowan", "Then we destroy it.")
   director.face(cael, rowan)
@@ -119,7 +119,7 @@ function fortress.run()
 
   -- Rowan walks toward the fortress.
   local ahead = { x = 16.4, z = 57.2 }
-  common.camera_async({ target = { x = 16, y = 2.0, z = 59.5 }, pitch = 14, distance = 11.5 }, 3)
+  common.camera_async({ target = { x = 16, y = 0.5, z = 60.4 }, pitch = 14, distance = 12 }, 3)
   director.walk(rowan, ahead, { speed = 1.5 })
   say("Rowan", "Then we'd better hurry.")
 

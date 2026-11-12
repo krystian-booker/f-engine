@@ -46,8 +46,8 @@ function remains.run()
   fx.camera(world, { target = { x = 15, y = 5, z = 14 }, yaw = 0, pitch = 16, distance = 30, fov = 30 }, 0)
   audio.music("remains", 0.5)
   task.spawn(function() fx.fade(0, 5) end, "fade in")
-  common.camera({ target = { x = 20, y = 1.6, z = 16.5 }, pitch = 18, distance = 15 }, 9)
-  common.camera_async({ target = { x = 23.2, y = 1.2, z = 17 }, pitch = 12, distance = 8 }, 3)
+  common.camera({ target = { x = 20, y = 0.8, z = 16.8 }, pitch = 18, distance = 15 }, 9)
+  common.camera_async({ target = { x = 23.2, y = 0.4, z = 17.3 }, pitch = 12, distance = 8 }, 3)
   wait(1.5)
 
   line("Darius", "Your Highness! You're alive!", 2.8)
@@ -62,13 +62,13 @@ function remains.run()
   wait(0.8)
   line("Cael", "...Rowan?", 2.4)
   -- No answer.
-  common.camera_async({ target = { x = 17, y = 2.0, z = 16 }, pitch = 16, distance = 20 }, 3)
+  common.camera_async({ target = { x = 17, y = 0.8, z = 16.6 }, pitch = 16, distance = 20 }, 3)
   wait(3.4)
   line("Cael", "Rowan!", 2.0)
 
   -- He runs across the chamber. Lyra is already by the crater.
   director.walk(lyra, points.lyra_kneel, { speed = 2.2, wait = false, timeout = 20 })
-  common.camera_async({ target = { x = 15, y = 1.6, z = 16.3 }, pitch = 14, distance = 13 }, 3.2)
+  common.camera_async({ target = { x = 15, y = 0.5, z = 16.8 }, pitch = 14, distance = 13 }, 3.2)
   director.walk(cael, points.cael_run_end, { speed = 4.6 })
   director.face(cael, { x = -1, z = 0 })
   dialogue.say("Cael", "ROWAN!!", { shout = true, auto = 2.6 })
@@ -79,14 +79,14 @@ function remains.run()
   director.face(lyra, points.sword.position and { x = points.sword.position.x - lyra.position.x,
     z = points.sword.position.z - lyra.position.z })
   actors.pose(lyra, "kneel")
-  common.camera_async({ target = { x = 13.4, y = 1.0, z = 16 }, pitch = 13, distance = 7.5 }, 2.6)
+  common.camera_async({ target = { x = 13.4, y = 0.35, z = 16.3 }, pitch = 13, distance = 7.5 }, 2.6)
   wait(1.2)
   line("Lyra", "...Cael.", 2.4)
   -- Cael approaches. Rowan's sword lies broken in two.
   director.walk(cael, { x = points.sword.position.x + 0.9, z = points.sword.position.z + 0.5 }, { speed = 1.1 })
   director.face(cael, { x = -1, z = 0 })
-  common.camera_async({ target = { x = points.sword.position.x + 0.3, y = 0.6, z = points.sword.position.z }, pitch = 20,
-    distance = 5.5 }, 2.4)
+  common.camera_async({ target = { x = points.sword.position.x + 0.3, y = 0.1, z = points.sword.position.z + 0.3 },
+    pitch = 20, distance = 6 }, 2.4)
   wait(1.4)
   line("Cael", "No...", 2.4)
   -- He picks it up.
@@ -103,7 +103,7 @@ function remains.run()
   line("Lyra", "...", 2.2)
   dialogue.say("Cael", "He was RIGHT HERE!", { shout = true, auto = 2.8 })
   -- Long pause.
-  common.camera_async({ target = { x = 13.6, y = 1.2, z = 16 }, pitch = 14, distance = 9 }, 4)
+  common.camera_async({ target = { x = 13.6, y = 0.4, z = 16.4 }, pitch = 14, distance = 9 }, 4)
   wait(3.8)
   line("Lyra", "I couldn't detect his Aether signature.", 4)
   director.face(cael, lyra)

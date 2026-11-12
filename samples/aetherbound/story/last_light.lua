@@ -23,6 +23,10 @@ last_light.marks = {
   column = 113, silhouette = 119.4, climax = 120, black = 131, done = 138,
 }
 
+--- Seconds of the scene per second of play. 1 always, except in a replay
+--- that wants to see the scene's frames without sitting through it.
+last_light.speed = 1
+
 function last_light.run(stage)
   local world, boss, glow = stage.world, stage.boss, stage.glow
   local cael, rowan, lyra, darius = common.cast()
@@ -36,7 +40,11 @@ function last_light.run(stage)
   audio.music(nil, 0.3)
   fx.letterbox(1, 0.5)
   audio.music("last_light", 0.1)
-  local mark, stop_clock = common.clock()
+  local mark, stop_clock = common.clock(function() return last_light.speed end)
+  local function beat(name, at)
+    mark(at)
+    last_light.beat = name
+  end
   for _, id in ipairs { "cael", "lyra", "darius" } do actors.pose(field.actors[id], "ready") end
 
   -- Rowan walks toward the Colossus. His sword begins to dissolve into light.
@@ -46,41 +54,41 @@ function last_light.run(stage)
   local aura = vfx.aura(world, rowan, { color = { 0.8, 0.6, 1.0 }, rate = 22 })
   aura:attach(rowan, { x = 0, y = 0.4, z = 0 })
   local r = rowan.position
-  common.camera_async({ target = { x = (r.x + points.rowan_walk.position.x) / 2, y = 1.6, z = 16 }, pitch = 8,
+  common.camera_async({ target = { x = (r.x + points.rowan_walk.position.x) / 2, y = 0.5, z = 16.3 }, pitch = 8,
     distance = 12 }, 5)
   director.walk(rowan, points.rowan_walk, { speed = 0.85, wait = false, timeout = 20 })
 
-  mark(m.stop)
+  beat("stop", m.stop)
   director.face(cael, rowan)
   actors.pose(cael, "reach")
   line("Cael", "ROWAN! STOP!", 2.4, { shout = true })
 
-  mark(m.cael)
+  beat("cael", m.cael)
   rowan:stop()
   -- Rowan turns.
   director.face(rowan, cael)
-  common.camera_async({ target = { x = rowan.position.x + 0.6, y = 1.3, z = 16 }, pitch = 6, distance = 7 }, 3)
+  common.camera_async({ target = { x = rowan.position.x + 0.6, y = 0.45, z = 16.2 }, pitch = 6, distance = 7 }, 3)
   line("Rowan", "Cael...", 2.6)
 
-  mark(m.tower)
+  beat("tower", m.tower)
   line("Rowan", "Remember the old watchtower?", 3.6)
-  mark(m.what)
+  beat("what", m.what)
   actors.pose(cael, nil)
   line("Cael", "What...?", 2.2)
-  mark(m.world)
+  beat("world", m.world)
   line("Rowan", "You said we'd see the whole world someday.", 5)
-  mark(m.please)
-  common.camera_async({ target = { x = cael.position.x - 0.6, y = 1.3, z = 16 }, pitch = 6, distance = 7 }, 2)
+  beat("please", m.please)
+  common.camera_async({ target = { x = cael.position.x - 0.6, y = 0.45, z = 16.2 }, pitch = 6, distance = 7 }, 2)
   line("Cael", "Rowan, please...", 3)
-  mark(m.promise)
-  common.camera_async({ target = { x = rowan.position.x + 0.6, y = 1.3, z = 16 }, pitch = 6, distance = 6.5 }, 2.5)
+  beat("promise", m.promise)
+  common.camera_async({ target = { x = rowan.position.x + 0.6, y = 0.45, z = 16.2 }, pitch = 6, distance = 6.5 }, 2.5)
   line("Rowan", "...You'd better keep that promise.", 4.2)
 
   -- Cael runs toward him. An invisible wall of Aether throws him backward.
-  mark(m.run)
+  beat("run", m.run)
   director.face(rowan, { x = -1, z = 0 })
   director.walk(rowan, points.rowan_walk, { speed = 0.85, wait = false, timeout = 20 })
-  common.camera_async({ target = { x = 18.5, y = 1.5, z = 16 }, pitch = 9, distance = 12 }, 1.2)
+  common.camera_async({ target = { x = 18.5, y = 0.5, z = 16.3 }, pitch = 9, distance = 12 }, 1.2)
   director.walk(cael, points.cael_stop, { speed = 5.2 })
   local wall = cael.position
   audio.sfx("aether_wall", { volume = 1 })
@@ -94,18 +102,18 @@ function last_light.run(stage)
   director.slide(cael, { x = wall.x + 3.4, z = wall.z }, 0.5, { arc = 0.8, ease = fx.ease_out })
   actors.pose(cael, "ko")
 
-  mark(m.cry)
+  beat("cry", m.cry)
   actors.pose(cael, "critical")
   director.face(cael, rowan)
   line("Cael", "ROWAN!!", 2.6, { shout = true })
   actors.pose(cael, "reach")
 
   -- Rowan raises his hand. The crystal in the Colossus begins tearing apart.
-  mark(m.raise)
+  beat("raise", m.raise)
   rowan:stop()
   director.face(rowan, { x = -1, z = 0 })
   actors.pose(rowan, "raise")
-  common.camera_async({ target = { x = 14.5, y = 3.2, z = 16 }, pitch = 7, distance = 17 }, 3)
+  common.camera_async({ target = { x = 14.5, y = 2.0, z = 16 }, pitch = 7, distance = 19 }, 3)
   boss:play("sunder", false, 0.4)
   audio.sfx("aether_charge", { volume = 1, pitch = 0.7 })
   glow:light({ intensity = 12, radius = 26, flicker = 0.7, flicker_speed = 7 })
@@ -113,15 +121,15 @@ function last_light.run(stage)
   vfx.burst(world, core, "shard", 40)
   fx.shake(world, 0.2, 1.5)
 
-  mark(m.signature)
+  beat("signature", m.signature)
   audio.sfx("system_alert", { volume = 0.8, pitch = 1.1 })
   line("SYSTEM", "UNKNOWN AETHER SIGNATURE.", 3.2)
-  mark(m.failure)
+  beat("failure", m.failure)
   audio.sfx("system_alert", { volume = 0.9, pitch = 0.8 })
   line("SYSTEM", "CONTAINMENT FAILURE.", 3.2)
 
   -- The music swells. Rowan's body begins to glow.
-  mark(m.swell)
+  beat("swell", m.swell)
   local rumble = fx.shake(world, 0.08, 1, true)
   local stop_collapse = common.collapse(world, points.centre.position, 11, 1.1)
   aura:emitter({ paused = true })
@@ -136,29 +144,29 @@ function last_light.run(stage)
       end
     end)
   end, "rowan brightens")
-  common.camera_async({ target = { x = 17, y = 2.4, z = 16 }, pitch = 12, distance = 19 }, 6)
+  common.camera_async({ target = { x = 17, y = 1.4, z = 16.3 }, pitch = 12, distance = 21 }, 6)
 
-  mark(m.breaking)
+  beat("breaking", m.breaking)
   director.face(lyra, rowan)
   actors.pose(lyra, "shield")
   line("Lyra", "His body's breaking apart!", 3.4)
-  mark(m.out)
+  beat("out", m.out)
   director.walk(darius, { x = cael.position.x + 0.7, z = cael.position.z + 0.5 }, { speed = 4, wait = false })
   line("Darius", "WE HAVE TO GET OUT!", 3.2, { shout = true })
-  mark(m.leaving)
+  beat("leaving", m.leaving)
   actors.pose(darius, "shield")
   line("Cael", "NO! I'M NOT LEAVING HIM!", 3.6, { shout = true })
 
   -- Rowan looks at Cael one last time.
-  mark(m.look)
+  beat("look", m.look)
   actors.pose(rowan, nil)
   director.face(rowan, cael)
-  common.camera_async({ target = { x = rowan.position.x + 0.4, y = 1.25, z = 16 }, pitch = 4, distance = 5.2 }, 5)
-  mark(m.forgive)
+  common.camera_async({ target = { x = rowan.position.x + 0.4, y = 0.5, z = 16.1 }, pitch = 4, distance = 5.6 }, 5)
+  beat("forgive", m.forgive)
   line("Rowan", "...Forgive me.", 3.4)
 
   -- A brilliant column of starlight erupts from the chamber.
-  mark(m.column)
+  beat("column", m.column)
   director.face(rowan, { x = -1, z = 0 })
   actors.pose(rowan, "raise")
   audio.sfx("last_light", { volume = 1 })
@@ -185,7 +193,7 @@ function last_light.run(stage)
   for _, id in ipairs { "cael", "lyra", "darius" } do actors.pose(field.actors[id], "shield") end
 
   -- For one frame, an enormous celestial silhouette appears behind Rowan.
-  mark(m.silhouette)
+  beat("silhouette", m.silhouette)
   local shape = world:spawn { position = { x = at.x - 3, y = 0, z = at.z - 3 }, keep_height = true,
     sprite = { animation = "fx/battle/silhouette.anim.json", mode = "upright", blend = "additive", unlit = true,
       scale = 1.0, tint = { 4, 3.6, 4.6, 1 }, cast_shadow = false, depth_bias = 0.5 } }
@@ -195,7 +203,7 @@ function last_light.run(stage)
   shape:destroy()
 
   -- He screams. The screen turns white. Silence.
-  mark(m.climax)
+  beat("climax", m.climax)
   fx.fade(1, 0.5, { 1, 1, 1 })
   task.cancel(erupt)
   task.cancel(brighten)
@@ -207,10 +215,10 @@ function last_light.run(stage)
   end
 
   -- White, a ringing tone; then black.
-  mark(m.black)
+  beat("black", m.black)
   task.over(4, function(t) fe.screen.set { fade = { 1 - t, 1 - t, 1 - t, 1 } } end)
   fx.fade_color = { 0, 0, 0 }
-  mark(m.done)
+  beat("done", m.done)
   stop_clock()
   audio.music(nil, 2)
   audio.ambience(nil, 1, "hum")

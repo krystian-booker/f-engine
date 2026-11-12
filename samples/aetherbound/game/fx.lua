@@ -3,7 +3,14 @@
 --- calling task unless they say otherwise; `fx.update(dt)` runs every tick.
 local task = require("game.task")
 
-local fx = { shakes = {}, bars = 0, fade_alpha = 0, fade_color = { 0, 0, 0 }, cameras = {} }
+local fx = { shakes = {}, bars = 0, fade_alpha = 0, fade_color = { 0, 0, 0 }, cameras = {}, epoch = 0 }
+
+--- A world is about to be unloaded: camera moves, shakes and hit-stops
+--- still running on it end here instead of touching a world that is gone.
+function fx.world_changed()
+  fx.epoch = fx.epoch + 1
+  fx.shakes, fx.cameras = {}, {}
+end
 
 function fx.ease(t)
   return t * t * (3 - 2 * t)
@@ -96,15 +103,15 @@ function fx.camera(world, to, seconds, ease)
     camera:snap()
     return
   end
-  local token = {}
-  fx.cameras[world.name] = token
+  local token, name = {}, world.name
+  fx.cameras[name] = token
   local elapsed = 0
   while elapsed < seconds do
-    if fx.cameras[world.name] ~= token then return end -- a newer move took over
+    if fx.cameras[name] ~= token then return end -- a newer move took over, or the world is gone
     apply(elapsed / seconds)
     elapsed = elapsed + task.frame()
   end
-  if fx.cameras[world.name] == token then apply(1) end
+  if fx.cameras[name] == token then apply(1) end
 end
 
 function fx.camera_async(world, to, seconds, ease)
@@ -113,11 +120,12 @@ end
 
 --- Hit-stop: the world slows to `scale` for `seconds` of real time.
 function fx.hitstop(world, seconds, scale)
+  local epoch = fx.epoch
   task.spawn(function()
     world.time_scale = scale or 0.05
     local left = seconds
     while left > 0 do left = left - task.frame() end
-    world.time_scale = 1
+    if fx.epoch == epoch then world.time_scale = 1 end
   end, "hitstop")
 end
 
@@ -135,16 +143,14 @@ function fx.update(dt)
     end
   end
   for world, amount in pairs(totals) do
-    if fe.world.get(world.name) then
-      local t = fe.time.now() * 47
-      world:camera().shake = { x = math.sin(t * 1.3) * amount, y = math.cos(t * 1.7) * amount * 0.7, z = 0 }
-    end
+    local t = fe.time.now() * 47
+    world:camera().shake = { x = math.sin(t * 1.3) * amount, y = math.cos(t * 1.7) * amount * 0.7, z = 0 }
   end
 end
 
 --- Back to a clean screen (title, tests).
 function fx.reset()
-  fx.shakes, fx.cameras = {}, {}
+  fx.world_changed()
   fx.bars, fx.fade_alpha = 0, 0
   fe.screen.unfreeze()
   fe.screen.set { fade = { 0, 0, 0, 0 }, flash = { 1, 1, 1, 0 }, letterbox = 0, radial_blur = 0, chromatic = 0,

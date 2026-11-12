@@ -68,6 +68,7 @@ function prologue.stop()
   dialogue.clear()
   scenes.clear()
   actors.clear()
+  fx.world_changed()
   for _, name in ipairs(fe.world.list()) do fe.world.unload(name) end
   field.world, field.actors, field.on_zone, field.locked = nil, {}, {}, 0
   audio.stop_all(0.5)

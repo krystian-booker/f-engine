@@ -33,10 +33,10 @@ end
 
 --- A clock for a timed scene: `mark(t)` waits until `t` seconds after the
 --- clock was made (scenes cut to music count from the bar the track began).
-function common.clock()
+function common.clock(speed)
   local elapsed = 0
   local running = task.spawn(function()
-    while true do elapsed = elapsed + task.frame() end
+    while true do elapsed = elapsed + task.frame() * (speed and speed() or 1) end
   end, "scene clock")
   return function(t)
     while elapsed < t do task.frame() end

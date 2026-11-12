@@ -17,7 +17,7 @@ local vfx = require("game.vfx")
 local say, system, wait = common.say, common.system, common.wait
 local chamber = { card = nil, countdown = nil }
 
-local BATTLE_CAMERA = { target = { x = 16, y = 2.7, z = 16.2 }, yaw = 0, pitch = 19, distance = 23, fov = 30 }
+local BATTLE_CAMERA = { target = { x = 16, y = 1.7, z = 16.4 }, yaw = 0, pitch = 19, distance = 25, fov = 30 }
 
 --- What the Colossus's model file says about itself (eye and core
 --- positions, which way is east), with defaults while it is not there.
@@ -95,11 +95,11 @@ function chamber.run()
     light = { color = { 0.6, 0.32, 1.0 }, radius = 10, intensity = 1.6, flicker = 0.3, flicker_speed = 1.2 } }
   fx.letterbox(1, 0)
   field.camera_follow = false
-  fx.camera(world, { target = { x = 26, y = 1.6, z = 16 }, yaw = 0, pitch = 14, distance = 10, fov = 30 }, 0)
+  fx.camera(world, { target = { x = 26, y = 0.5, z = 16.4 }, yaw = 0, pitch = 14, distance = 10, fov = 30 }, 0)
   task.spawn(function() fx.fade(0, 1.4) end, "fade in")
 
   -- The party enters; the camera lets go of them and finds the machine.
-  common.camera_async({ target = { x = 17, y = 2.6, z = 16 }, pitch = 18, distance = 24 }, 6.5)
+  common.camera_async({ target = { x = 17, y = 1.3, z = 16.4 }, pitch = 18, distance = 27 }, 6.5)
   director.walk_all {
     { cael, points.intro1, { speed = 1.9, face = { x = -1, z = 0 } } },
     { rowan, points.intro2, { speed = 1.9, face = { x = -1, z = 0 } } },
@@ -109,10 +109,10 @@ function chamber.run()
   wait(1.2)
   say("Lyra", "An Aetherbound Colossus...")
   say("Darius", "That thing's supposed to be a myth.")
-  common.camera_async({ target = boss_point(boss, { 0, 3.0, 0 }), pitch = 10, distance = 12 }, 3)
+  common.camera_async({ target = boss_point(boss, { 0, 1.6, 0 }), pitch = 10, distance = 13 }, 3)
   say("Lyra", "They've been feeding it raw Aetherite.")
   director.face(cael, lyra)
-  common.camera_async({ target = { x = 23.6, y = 1.5, z = 16 }, pitch = 12, distance = 9 }, 1.6)
+  common.camera_async({ target = { x = 23.6, y = 0.45, z = 16.2 }, pitch = 12, distance = 9 }, 1.6)
   say("Cael", "Can we shut it down?")
   director.face(lyra, cael)
   dialogue.say("Lyra", "Perhaps. If we sever its core\u{2014}", { auto = 0.25 })
@@ -136,13 +136,13 @@ function chamber.run()
   local rumble = fx.shake(world, 0.07, 1, true)
   audio.sfx("rumble", { volume = 0.9 })
   local stop_collapse = common.collapse(world, points.centre.position, 10, 2.4)
-  common.camera({ target = { x = 15, y = 3.4, z = 16 }, pitch = 7, distance = 20 }, 2.2)
+  common.camera({ target = { x = 15, y = 2.6, z = 16 }, pitch = 7, distance = 21 }, 2.2)
   audio.sfx("colossus_step", { volume = 1 })
   fx.shake(world, 0.3, 0.6)
   wait(0.8)
   fx.stop_shake(rumble)
   boss:play("idle", true, 0.4)
-  common.camera_async({ target = { x = 23.6, y = 1.5, z = 16 }, pitch = 12, distance = 9 }, 1.2)
+  common.camera_async({ target = { x = 23.6, y = 0.45, z = 16.2 }, pitch = 12, distance = 9 }, 1.2)
   say("Darius", "Of course it talks.")
   dialogue.say("Cael", "Everyone! Weapons ready!", { shout = true })
   for _, hero in pairs(field.actors) do actors.pose(hero, "ready") end
@@ -160,7 +160,7 @@ function chamber.run()
   boss:play("stagger", false, 0.2)
   audio.sfx("colossus_step", { volume = 0.9 })
   fx.shake(world, 0.25, 0.8)
-  common.camera_async({ target = { x = 15.5, y = 2.8, z = 16 }, pitch = 12, distance = 18 }, 2.0)
+  common.camera_async({ target = { x = 15.5, y = 1.6, z = 16 }, pitch = 12, distance = 20 }, 2.0)
   wait(1.6)
   say("Darius", "We've got it!")
   dialogue.say("Lyra", "No! The core is\u{2014}", { auto = 0.2 })
@@ -190,7 +190,7 @@ function chamber.run()
     return true
   end)
   for _, hero in pairs(field.actors) do actors.pose(hero, "ko") end
-  common.camera_async({ target = { x = 15, y = 3.6, z = 16 }, pitch = 6, distance = 19 }, 2.6)
+  common.camera_async({ target = { x = 15, y = 2.8, z = 16 }, pitch = 6, distance = 21 }, 2.6)
   wait(2.6)
   boss:play("overload", true, 0.3)
   audio.sfx("klaxon", { volume = 0.7 })
@@ -202,7 +202,7 @@ function chamber.run()
   common.line("SYSTEM", "TOTAL RELEASE IN 180 SECONDS.", 2.0)
 
   -- They get up.
-  common.camera_async({ target = { x = 24.4, y = 1.4, z = 16 }, pitch = 12, distance = 9.5 }, 1.6)
+  common.camera_async({ target = { x = 24.4, y = 0.45, z = 16.2 }, pitch = 12, distance = 9.5 }, 1.6)
   for _, hero in pairs(field.actors) do actors.pose(hero, "rise") end
   wait(1.1)
   for _, hero in pairs(field.actors) do actors.pose(hero, "ready") end
@@ -222,7 +222,7 @@ function chamber.run()
   wait(2.2)
   local r = rowan.position
   actors.pose(rowan, nil)
-  common.camera_async({ target = { x = r.x - 1.2, y = 1.4, z = r.z }, pitch = 9, distance = 8 }, 2.6)
+  common.camera_async({ target = { x = r.x - 0.6, y = 0.45, z = r.z + 0.2 }, pitch = 9, distance = 8.5 }, 2.6)
   director.walk(rowan, { x = r.x - 1.8, z = r.z }, { speed = 0.9, face = { x = -1, z = 0 } })
   wait(0.4)
   say("Rowan", "...There is a way.")
@@ -315,7 +315,7 @@ function chamber.run()
         actors.pose(e, "cast")
         vfx.aura(world, e, { color = { 0.75, 0.45, 1.0 }, seconds = 1.6, rate = 70 })
         vfx.circle(world, e.position, { color = { 0.7, 0.45, 1.0 }, seconds = 1.6, scale = 1.6 })
-        fx.camera_async(world, { target = { x = e.position.x - 2, y = 1.8, z = 16 }, distance = 15 }, 1.0)
+        fx.camera_async(world, { target = { x = e.position.x - 2, y = 1.0, z = 16.4 }, distance = 16 }, 1.0)
         if round == 1 then
           -- Round 1: Rowan's veins glow. His HP falls to 50%.
           audio.sfx("unbound_1", { volume = 1 })
