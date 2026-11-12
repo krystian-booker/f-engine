@@ -59,7 +59,7 @@ def opening():
     r.add(input={"key:Return": 0})
     r.wait(f"{STORY}.scene == 'fortress' and {FIELD}.world ~= nil", 900)
     r.lua(f"{AUTO}.start(false)")
-    r.capture("bridge-wide", after=330)
+    r.capture("bridge-wide", after=520)
     r.wait(f"{DIALOGUE}.line ~= nil and {DIALOGUE}.line.speaker == 'Lyra' and {DIALOGUE}.line.shown >= {DIALOGUE}.line.total", 3000)
     r.capture("bridge-dialogue", after=4)
     r.lua(f"{AUTO}.start(true)")

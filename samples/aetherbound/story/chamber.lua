@@ -45,7 +45,7 @@ local function draw_card()
   fe.canvas.rect(0, 380, 1920, 3, ui.colors.aether)
   fe.canvas.rect(0, 697, 1920, 3, ui.colors.aether)
   ui.centred(card.small, 960, 410, { font = "label", color = ui.colors.dim })
-  ui.centred(card.title, 960, 458, { font = "title", size = 120, color = card.color or ui.colors.aether_hot })
+  ui.centred(card.title, 960, 458, { font = "card", color = card.color or ui.colors.aether_hot })
   ui.centred(card.note, 960, 620, { font = "small", color = ui.colors.text })
   fe.canvas.pop()
 end
@@ -63,8 +63,8 @@ local function draw_countdown()
   local text = string.format("%02d:%02d", math.floor(left / 60), math.floor(left % 60))
   local urgent = left < 60 and (0.6 + 0.4 * math.sin(ui.time * 8)) or 1
   ui.panel(1560, 150, 310, 110, "system")
-  ui.text("TOTAL RELEASE", 1596, 164, { font = "mono", size = 24, color = ui.colors.system })
-  ui.text(text, 1622, 190, { font = "mono", size = 56, color = ui.fade(0xffd0d0ff, urgent) })
+  ui.text("TOTAL RELEASE", 1596, 164, { font = "mono_small", color = ui.colors.system })
+  ui.text(text, 1622, 190, { font = "mono_big", color = ui.fade(0xffd0d0ff, urgent) })
 end
 
 function chamber.draw()

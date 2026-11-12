@@ -544,7 +544,7 @@ local function draw_party(self)
     local low = unit.hp <= unit.max_hp * 0.25
     ui.text(string.format("%d", hp), PANEL.x + 190, y - 2, { font = "small", width = 90, align = "right",
       color = low and ui.colors.hp_low or ui.colors.text })
-    ui.text("/ " .. unit.max_hp, PANEL.x + 288, y + 4, { font = "small", color = ui.colors.faint, size = 24 })
+    ui.text("/ " .. unit.max_hp, PANEL.x + 288, y + 4, { font = "tiny", color = ui.colors.faint })
     ui.bar(PANEL.x + 196, y + 34, 180, 6, shown.hp / unit.max_hp, low and ui.colors.hp_low or ui.colors.hp)
     if unit.max_mp > 0 then
       ui.text(string.format("%d", unit.mp), PANEL.x + 400, y - 2, { font = "small", width = 70, align = "right",
@@ -575,7 +575,7 @@ local function draw_commands(self)
       fe.canvas.rect(COMMAND.x + 14, y - 4, COMMAND.w - 28, 46, 0xffffff14)
       if not menu.sub and not menu.target then ui.cursor(COMMAND.x + 62, y + 20) end
     end
-    ui.text(command.label, COMMAND.x + 78, y, { font = "body", color = color, size = 40 })
+    ui.text(command.label, COMMAND.x + 78, y, { font = "menu", color = color })
   end
   local help
   local selected = menu.commands[menu.index]
@@ -590,7 +590,7 @@ local function draw_commands(self)
         fe.canvas.rect(x + 14, y - 4, w - 28, 46, 0xffffff14)
         if not menu.target then ui.cursor(x + 62, y + 20) end
       end
-      ui.text(row.label, x + 78, y, { font = "body", color = color, size = 40 })
+      ui.text(row.label, x + 78, y, { font = "menu", color = color })
       ui.text(row.right or "", x + 30, y + 6, { font = "small", color = row.disabled and ui.colors.faint or ui.colors.mp,
         width = w - 70, align = "right" })
     end
@@ -646,10 +646,9 @@ local function draw_floats(self)
         local pop = f.age < 0.12 and (1.5 - f.age / 0.12 * 0.5) or 1
         local alpha = t > 0.7 and (1 - (t - 0.7) / 0.3) or 1
         local number = tonumber(f.text) ~= nil or f.text:sub(1, 1) == "+"
-        local size = (number and (f.big and 80 or 58) or 30) * pop
-        fe.canvas.push({ alpha = alpha })
-        ui.centred(f.text, x + f.drift, y - 20 - t * 70, { font = number and "digits" or "label", size = size,
-          color = f.color, outline = 0x000000e0 })
+        local font = number and (f.big and "digits_big" or "digits") or "label"
+        fe.canvas.push({ alpha = alpha, x = x + f.drift, y = y - 20 - t * 70, scale = pop })
+        ui.centred(f.text, 0, 0, { font = font, color = f.color, outline = 0x000000e0 })
         fe.canvas.pop()
       end
     end

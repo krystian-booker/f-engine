@@ -21,7 +21,7 @@ local function end_card()
     fe.canvas.rect(0, 0, 1920, 1080, 0x000000ff)
     local a = math.min(1, self.age / 2.5)
     fe.canvas.push({ alpha = a })
-    ui.centred("AETHERBOUND", 960, 430, { font = "title", size = 110, color = ui.colors.text })
+    ui.centred("AETHERBOUND", 960, 430, { font = "card", color = ui.colors.text })
     ui.centred("End of the prologue", 960, 580, { font = "label", color = ui.colors.dim })
     fe.canvas.pop()
   end

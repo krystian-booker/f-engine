@@ -30,78 +30,78 @@
   "capture": "replay-out/aetherbound-bridge-wide.png",
   "compare": "reference/{backend}/bridge-wide.png",
   "tolerance": 0.035,
-  "tick": 492
+  "tick": 682
  },
  {
   "wait_for": "require('game.dialogue').line ~= nil and require('game.dialogue').line.speaker == 'Lyra' and require('game.dialogue').line.shown >= require('game.dialogue').line.total",
   "timeout": 3000,
-  "tick": 494
+  "tick": 684
  },
  {
   "capture": "replay-out/aetherbound-bridge-dialogue.png",
   "compare": "reference/{backend}/bridge-dialogue.png",
   "tolerance": 0.035,
-  "tick": 498
+  "tick": 688
  },
  {
   "lua": "require('dev.autoplay').start(true)",
-  "tick": 500
+  "tick": 690
  },
  {
   "wait_for": "require('game.field').locked == 0 and not require('game.dialogue').active()",
   "timeout": 9000,
-  "tick": 502
+  "tick": 692
  },
  {
   "assert": "require('game.field').actors.cael ~= nil and require('game.field').world.map_id == 'fortress'",
   "message": "the player has Cael on the fortress map",
-  "tick": 504
+  "tick": 694
  },
  {
   "capture": "replay-out/aetherbound-field.png",
   "compare": "reference/{backend}/field.png",
   "tolerance": 0.035,
-  "tick": 544
+  "tick": 734
  },
  {
   "lua": "require('dev.autoplay').walk('enc1')",
-  "tick": 546
+  "tick": 736
  },
  {
   "wait_for": "require('game.battle.scene').active ~= nil and require('game.battle.scene').active.hint ~= nil",
   "timeout": 6000,
-  "tick": 548
+  "tick": 738
  },
  {
   "capture": "replay-out/aetherbound-battle-tutorial.png",
   "compare": "reference/{backend}/battle-tutorial.png",
   "tolerance": 0.035,
-  "tick": 578
+  "tick": 768
  },
  {
   "wait_for": "require('game.battle.scene').active ~= nil and require('game.battle.scene').active.menu ~= nil and require('game.battle.scene').active.hint == nil",
   "timeout": 3000,
-  "tick": 580
+  "tick": 770
  },
  {
   "capture": "replay-out/aetherbound-battle-commands.png",
   "compare": "reference/{backend}/battle-commands.png",
   "tolerance": 0.035,
-  "tick": 600
+  "tick": 790
  },
  {
   "wait_for": "require('game.battle.scene').active == nil and require('game.field').locked == 0",
   "timeout": 20000,
-  "tick": 602
+  "tick": 792
  },
  {
   "assert": "require('game.party').state.cael.hp > 0",
   "message": "the party won",
-  "tick": 604
+  "tick": 794
  },
  {
   "assert": "#fe.dev.errors() == 0",
   "message": "script errors",
-  "tick": 614
+  "tick": 804
  }
 ]

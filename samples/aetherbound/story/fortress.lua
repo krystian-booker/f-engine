@@ -87,11 +87,12 @@ function fortress.run()
 
   -- The screen fades in: the fortress first, burning, the crystal over it;
   -- then down and back to the four on the bridge.
-  local crystal_at = common.point("crystal")
-  fx.camera(world, { target = { x = 16, y = crystal_at.y - 14, z = 22 }, yaw = 0, pitch = 3, distance = 46, fov = 30 }, 0)
-  task.spawn(function() fx.fade(0, 3.5) end, "fade in")
-  common.camera({ target = { x = 16, y = 9, z = 40 }, pitch = 6, distance = 34 }, 6.5)
-  common.camera({ target = { x = 16, y = 0.6, z = 63.4 }, pitch = 14, distance = 13 }, 6.5)
+  local wide = { target = { x = 16, y = 7.6, z = 52 }, yaw = 0, pitch = 1, distance = 24, fov = 70 }
+  fx.camera(world, wide, 0)
+  task.spawn(function() fx.fade(0, 3) end, "fade in")
+  wait(4.6)
+  common.camera({ target = { x = 16, y = 3, z = 52 }, pitch = 9, distance = 21, fov = 52 }, 7)
+  common.camera({ target = { x = 16, y = 0.6, z = 63.4 }, pitch = 14, distance = 13, fov = 30 }, 4.5)
 
   director.face(darius, cael)
   say("Darius", "That's the last of their defenses.")
@@ -102,11 +103,11 @@ function fortress.run()
   say("Lyra", "The Aether readings. They're still climbing.")
 
   -- The crystal pulses. The screen shakes.
-  common.camera({ target = { x = 16, y = crystal_at.y - 6, z = 20 }, pitch = 2, distance = 40 }, 1.6)
+  common.camera(wide, 1.8)
   common.crystal_pulse(1.6)
   common.all_face({ x = 0, z = -1 })
-  wait(1.6)
-  common.camera({ target = { x = 16, y = 0.5, z = 63.4 }, pitch = 13, distance = 11 }, 1.8)
+  wait(1.8)
+  common.camera({ target = { x = 16, y = 0.5, z = 63.4 }, pitch = 13, distance = 11, fov = 30 }, 2.0)
 
   say("Rowan", "Then we destroy it.")
   director.face(cael, rowan)

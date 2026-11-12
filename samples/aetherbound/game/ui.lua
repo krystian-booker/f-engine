@@ -16,18 +16,30 @@ local ui = {
 
 --- Fonts of the game; called once from main.init.
 function ui.setup()
-  local body = { "ui/fonts/CrimsonPro_500Medium.ttf" }
-  local bold = { files = { "ui/fonts/CrimsonPro_700Bold.ttf" } }
-  fe.text.font("default", { files = body, size = 40, bold = bold })
-  fe.text.font("body", { files = body, size = 46, bold = bold })
-  fe.text.font("small", { files = body, size = 30, bold = bold })
-  fe.text.font("italic", { files = { "ui/fonts/CrimsonPro_500Medium_Italic.ttf" }, size = 46 })
-  fe.text.font("label", { files = { "ui/fonts/Cinzel_600SemiBold.ttf" }, size = 30 })
-  fe.text.font("name", { files = { "ui/fonts/Cinzel_600SemiBold.ttf" }, size = 38 })
-  fe.text.font("title", { files = { "ui/fonts/Cinzel_400Regular.ttf" }, size = 84 })
-  fe.text.font("banner", { files = { "ui/fonts/Cinzel_600SemiBold.ttf" }, size = 64 })
-  fe.text.font("mono", { files = { "ui/fonts/ShareTechMono_400Regular.ttf" }, size = 40 })
-  fe.text.font("digits", { files = { "ui/fonts/Cinzel_600SemiBold.ttf" }, size = 52 })
+  -- Smooth faces (`pixel = false`): the canvas is 1920 x 1080 and scales to
+  -- the window, so glyphs are filtered, not point sampled.
+  local fonts = "ui/fonts/"
+  local function face(name, file, size, bold)
+    fe.text.font(name, { files = { fonts .. file }, size = size, pixel = false,
+      bold = bold and { files = { fonts .. bold }, size = size, pixel = false } or nil })
+  end
+  face("default", "CrimsonPro_500Medium.ttf", 40, "CrimsonPro_700Bold.ttf")
+  face("body", "CrimsonPro_500Medium.ttf", 46, "CrimsonPro_700Bold.ttf")
+  face("menu", "CrimsonPro_500Medium.ttf", 40, "CrimsonPro_700Bold.ttf")
+  face("small", "CrimsonPro_500Medium.ttf", 30, "CrimsonPro_700Bold.ttf")
+  face("tiny", "CrimsonPro_500Medium.ttf", 24)
+  face("italic", "CrimsonPro_500Medium_Italic.ttf", 46)
+  face("label", "Cinzel_600SemiBold.ttf", 30)
+  face("name", "Cinzel_600SemiBold.ttf", 38)
+  face("title", "Cinzel_400Regular.ttf", 84)
+  face("logo", "Cinzel_400Regular.ttf", 150)
+  face("card", "Cinzel_600SemiBold.ttf", 116)
+  face("banner", "Cinzel_600SemiBold.ttf", 64)
+  face("mono", "ShareTechMono_400Regular.ttf", 40)
+  face("mono_small", "ShareTechMono_400Regular.ttf", 24)
+  face("mono_big", "ShareTechMono_400Regular.ttf", 56)
+  face("digits", "Cinzel_600SemiBold.ttf", 58)
+  face("digits_big", "Cinzel_600SemiBold.ttf", 80)
   for name, color in pairs(ui.colors) do fe.text.color(name, color) end
 end
 
