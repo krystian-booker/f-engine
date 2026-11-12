@@ -15,7 +15,7 @@ builtin/         assets/ (default font, window skin, input glyph sheets, weather
 
 If a concept would appear in a JRPG design document, it does not belong in `engine/` C++. The engine knows about entities, sprites, meshes, lights, grids, paths, reachability, raycasts, text, sounds and files. It does not know about HP, parties, items, skills, battles, turns, shops, encounters or quests. `tools/ci/check_boundary.py` scans `engine/` for that vocabulary and is a CTest test.
 
-The same rule holds for Lua: the engine ships none. There is no field, dialogue, menu, battle, inventory or save-screen module to configure or override; a game starts from an empty `main.lua` and writes those against the `fe.*` bindings ([api.md](api.md)). `samples/starfall` is a complete small RPG built that way, and [The sample](#the-sample) below maps its modules to the bindings they use.
+The same rule holds for Lua: the engine ships none. There is no field, dialogue, menu, battle, inventory or save-screen module to configure or override; a game starts from an empty `main.lua` and writes those against the `fe.*` bindings ([api.md](api.md)). `samples/starfall` is a complete small RPG built that way, and [The samples](#the-samples) below maps its modules to the bindings they use.
 
 ## Libraries and programs
 
@@ -198,9 +198,9 @@ The runtime mixes with miniaudio at 48 kHz stereo; headless runs use a silent `N
 - **Positional one-shots** (`position` and optionally `world` on `fe.audio.sound`) are heard from that world's camera (the focus world by default) with the same model as entity emitters: gain falls linearly to 0 at `radius`, pan follows the camera's right vector. They are re-placed every tick and are silent while their world is not drawn.
 - **Devices**: the default output is followed when it changes (CoreAudio, WASAPI); if the device stops or disappears the mixer keeps time on the game thread, so fades and one-shots still finish, and the default device is reopened once a second.
 
-## The sample
+## The samples
 
-`samples/starfall` ("Starfall") is the one sample: a small turn-based RPG in the HD-2D style (sprites in 3D dioramas, tilt-shift, bloom) with a town, a wrapping world map, a dungeon, vehicles, random and visible encounters, a boss, a party menu, a shop and saves. All of it is the game's own Lua on the bindings; nothing in it is special to the engine, and a game may copy, change or ignore any of it. It is the worked example of the layering at the top of this page:
+`samples/aetherbound` is described in its own `README.md`; this section walks through `samples/starfall` ("Starfall"), the larger of the two: a small turn-based RPG in the HD-2D style (sprites in 3D dioramas, tilt-shift, bloom) with a town, a wrapping world map, a dungeon, vehicles, random and visible encounters, a boss, a party menu, a shop and saves. All of it is the game's own Lua on the bindings; nothing in it is special to the engine, and a game may copy, change or ignore any of it. It is the worked example of the layering at the top of this page:
 
 | Module | What it is | Bindings it stands on |
 | --- | --- | --- |

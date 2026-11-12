@@ -1,0 +1,1 @@
+{"atlas":"sword_broken.png","pixels_per_unit":32,"pivot":[0.5,0.5],"clips":{"idle":{"loop":true,"directions":[[{"rect":[0,0,48,24],"duration":1.0}]]}}}

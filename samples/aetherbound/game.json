@@ -1,0 +1,8 @@
+{
+  "title": "Aetherbound: Prologue",
+  "id": "aetherbound",
+  "window": {"width": 1280, "height": 720},
+  "virtual_resolution": {"width": 1920, "height": 1080},
+  "canvas_scale": "smooth",
+  "pixels_per_unit": 32
+}

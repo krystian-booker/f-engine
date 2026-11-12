@@ -31,6 +31,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # The asset kits (tools/modelkit, animkit, texturekit, spritekit) need numpy
+      # and pillow; their tests register only where those import, and one
+      # platform is enough.
+      - name: Asset validation dependencies
+        if: runner.os == 'Linux'
+        run: python -m pip install numpy pillow
       - uses: actions/cache@v4
         with:
           path: .cache/CPM

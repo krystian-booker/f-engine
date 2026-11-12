@@ -474,8 +474,8 @@ fe.text.font = nil
 ---@type fun(name: string, color: Color)
 fe.text.color = nil
 
---- Register an {icon:id} image.
----@type fun(id: string, spec: {image: string, rect?: Rect})
+--- Register an {icon:id} image, drawn as a square of the text's size. `linear` filters it when scaled, for glyphs drawn larger than they show; without it the image is point sampled, as pixel art wants.
+---@type fun(id: string, spec: {image: string, rect?: Rect, linear?: boolean})
 fe.text.icon = nil
 
 --- Resolve custom tags such as {player} or {var:name}; nil removes the resolver. It runs under a C call (from fe.text, fe.canvas.text and the frame's text layout) and must not yield: a coroutine.yield in it raises 'attempt to yield across a C-call boundary'. A resolver may replace or remove itself; the call in progress finishes with the old one. Its errors are reported and the tag is shown as written. A resolver that resolves markup with tags through fe.text or fe.canvas.text nests: more than 8 nested resolver calls raise one error from the outermost fe.text or fe.canvas.text call, as does the watchdog stopping a resolver. Tags in a replacement resolve too, up to 4 levels deep; replacements totalling more than 1 MiB (1048576 bytes) for one call raise an error.

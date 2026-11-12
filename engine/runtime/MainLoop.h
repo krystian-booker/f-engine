@@ -14,6 +14,12 @@ struct RuntimeOptions {
     std::optional<std::uint64_t> seed;
     std::uint64_t frameLimit = 0;
     bool mute = false, tools = false, realtime = false;
+    // A replay that is not paced in real time renders one frame, then ticks
+    // up to this many times without rendering (--replay-skip). Frames a
+    // replay looks at are never skipped: the tick of a capture is rendered,
+    // and so is every frame while a capture is being written or the screen
+    // is frozen. 0 renders every tick.
+    int replaySkip = 0;
     // Frame cap while vsync is off (--max-fps); unset uses game.json max_fps.
     std::optional<int> maxFps;
     // Ask for an HDR back buffer (--hdr); game.json hdr_output does too.

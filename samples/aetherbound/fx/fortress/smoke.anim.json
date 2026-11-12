@@ -1,0 +1,71 @@
+{
+ "atlas": "smoke.png",
+ "pixels_per_unit": 32,
+ "pivot": [
+  0.5,
+  0.5
+ ],
+ "clips": {
+  "idle": {
+   "loop": false,
+   "directions": [
+    [
+     {
+      "rect": [
+       0,
+       0,
+       48,
+       48
+      ],
+      "duration": 0.9
+     },
+     {
+      "rect": [
+       48,
+       0,
+       48,
+       48
+      ],
+      "duration": 0.9
+     },
+     {
+      "rect": [
+       96,
+       0,
+       48,
+       48
+      ],
+      "duration": 1.0
+     },
+     {
+      "rect": [
+       144,
+       0,
+       48,
+       48
+      ],
+      "duration": 1.1
+     },
+     {
+      "rect": [
+       192,
+       0,
+       48,
+       48
+      ],
+      "duration": 1.3
+     },
+     {
+      "rect": [
+       240,
+       0,
+       48,
+       48
+      ],
+      "duration": 9.0
+     }
+    ]
+   ]
+  }
+ }
+}

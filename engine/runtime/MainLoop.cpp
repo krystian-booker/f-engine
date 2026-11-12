@@ -287,6 +287,12 @@ public:
             const double frameSeconds = std::chrono::duration<double>(now - previous).count();
             previous = now;
             advance(replay_ && !options_.realtime ? step_.interval() : frameSeconds);
+            if (replay_ && !options_.realtime) {
+                // Between the frames a replay looks at, the game only needs to tick.
+                for (int skipped = 0; skipped < options_.replaySkip && !frameWanted(); ++skipped) {
+                    advance(step_.interval());
+                }
+            }
             if (engine_.display().vsync == VsyncMode::Adaptive) {
                 renderer_.setVsync(adaptive_.update(frameSeconds, refresh_, renderer_.vsync()));
             }
@@ -424,6 +430,16 @@ private:
         if (!pause) {
             step_.advance(elapsed, [&](double dt) { tick(dt); });
         }
+    }
+
+    // Whether a replay's next frame must be drawn rather than skipped: it
+    // is being captured (by the replay or by the game), a capture is still
+    // being written, the screen is frozen on the last frame drawn, or the
+    // replay or the game is about to end.
+    [[nodiscard]] bool frameWanted() {
+        const auto& requests = engine_.requests();
+        return !captures_.idle() || !requests.captures.empty() || !requests.sceneCaptures.empty() ||
+               requests.quit || engine_.screen().frozen || (replay_ && replay_->done(ticks_));
     }
 
     void tick(double dt) {

@@ -1,0 +1,193 @@
+{
+  "_comment": "Every animated model of samples/aetherbound, the profile its animations are judged by, what each animation is meant to be (under \"overrides\": loop or one-shot, length, what it hands over to, the moments the game acts on), the flaws it is allowed to keep (each with a reason and a cap, so it cannot grow), and its visual review. `python3 tools/animkit/validate.py --manifest tools/aetherbound/animations.json --engine build/fengine_headless` must pass; see tools/animkit/README.md. A waiver that starts 'Known debt' is a flaw to remove the next time its generator is touched: fix it, then delete the waiver. The mesh, rig and textures of the same files are modelkit's (models.json).",
+  "root": "../../samples/aetherbound",
+  "art_direction": "tools/aetherbound/SPEC.md",
+  "reviews": "animation_reviews",
+  "folders": [
+    "models",
+    "maps",
+    "fx"
+  ],
+  "models": {
+    "models/colossus.glb": {
+      "profile": "boss",
+      "overrides": {
+        "_comment": "The battle shows the Colossus from its right side, facing east (camera yaw 0, pitch 22; the model is spawned with yaw 90). Names, lengths and moments are SPEC.md's table and the game's code: data/skills.json (impact), game/battle/scene.lua (fades of 0.15 to 0.3 s), story/chamber.lua (dormant to awaken is a cut; stagger, overload_enter and overload follow one another) and story/last_light.lua (sunder). \"tremble\" is where the generator's tremble and shiver layers run (colossus_anim.py): the whole body under strain, or only the spire's fragments after a blow.",
+        "game_view": [
+          270,
+          22
+        ],
+        "ground_view": [
+          0,
+          0
+        ],
+        "required": [
+          "dormant",
+          "awaken",
+          "idle",
+          "slam",
+          "sweep",
+          "pulse",
+          "hit",
+          "stagger",
+          "overload_enter",
+          "overload",
+          "sunder"
+        ],
+        "animations": {
+          "dormant": {
+            "loop": true,
+            "seconds": 4,
+            "grounded": true,
+            "in_place": true
+          },
+          "awaken": {
+            "loop": false,
+            "seconds": 5,
+            "from": {
+              "animation": "dormant",
+              "fade": 0
+            },
+            "to": "idle",
+            "grounded": true,
+            "in_place": true,
+            "tremble": true
+          },
+          "idle": {
+            "loop": true,
+            "seconds": 3,
+            "grounded": true,
+            "in_place": true
+          },
+          "slam": {
+            "loop": false,
+            "seconds": 1.8,
+            "from": "idle",
+            "to": "idle",
+            "impacts": [
+              0.9
+            ],
+            "grounded": true,
+            "in_place": true,
+            "tremble": [
+              "shard_*"
+            ]
+          },
+          "sweep": {
+            "loop": false,
+            "seconds": 2.0,
+            "from": "idle",
+            "to": "idle",
+            "impacts": [
+              1.0
+            ],
+            "grounded": true,
+            "in_place": true
+          },
+          "pulse": {
+            "loop": false,
+            "seconds": 2.6,
+            "from": "idle",
+            "to": "idle",
+            "impacts": [
+              1.6
+            ],
+            "grounded": true,
+            "in_place": true,
+            "tremble": true
+          },
+          "hit": {
+            "loop": false,
+            "seconds": 0.6,
+            "from": "idle",
+            "to": "idle",
+            "grounded": true,
+            "in_place": true,
+            "tremble": [
+              "shard_*"
+            ]
+          },
+          "stagger": {
+            "loop": false,
+            "seconds": 2.5,
+            "from": "idle",
+            "to": "overload_enter",
+            "grounded": true,
+            "in_place": false,
+            "tremble": [
+              "shard_*",
+              "pauldron_*"
+            ]
+          },
+          "overload_enter": {
+            "loop": false,
+            "seconds": 3,
+            "from": "stagger",
+            "to": "overload",
+            "grounded": true,
+            "in_place": false,
+            "tremble": true
+          },
+          "overload": {
+            "loop": true,
+            "seconds": 2,
+            "grounded": true,
+            "in_place": true,
+            "tremble": true
+          },
+          "sunder": {
+            "loop": false,
+            "seconds": 6,
+            "from": "overload",
+            "grounded": true,
+            "in_place": true,
+            "tremble": true
+          }
+        }
+      },
+      "waive": {
+        "deform.stretch": {
+          "reason": "By design: the cable bundles that bridge each shoulder are weighted half to the chest and half to the upper arm so they span the joint; they pull out to as much as 5.8 times their length at rest (1.4 units) when an arm is thrown overhead (slam) or wide (overload, sunder), and read as cables drawn taut. 422 is the count over the nine animations in which an arm leaves its idle position.",
+          "max": 422
+        },
+        "deform.underground": {
+          "reason": "Known debt from before animkit: in the kneeling poses (dormant, the first half of awaken, the end of stagger, the start of overload_enter) the spike of the knee guard and the edge of the shin plate of the kneeling leg sink 0.16 to 0.28 units into the floor. Fix in tools/aetherbound/colossus/colossus_anim.py: raise the pinned knee of DORMANT and KNEEL (kneeL_pin / kneeR_pin z from 1.0 to about 1.25) and the hips of awaken's 'press' key until its floor_report prints nothing for shin_L and shin_R.",
+          "max": 238
+        },
+        "loops.handover": {
+          "reason": "Known debt from before animkit: awaken starts exactly in dormant's first pose, but samples/aetherbound/story/chamber.lua cuts to it (boss:play(\"awaken\", false)) wherever the dormant loop happens to be, which is up to 0.06 units away (the breathing chest and the shivering spire). Fix in story/chamber.lua: play it with a fade, boss:play(\"awaken\", false, 0.2), and change this entry's \"from\" to \"dormant\".",
+          "max": 1
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "b527d67bfba392a43ac1c80433f0cab6ee62a795566a3352f35474b38c82ad92",
+        "by": "Claude (AI agent), from the review sheets with engine shots",
+        "notes": "Re-signed after the file was rewritten to flip its normal map's green: every animation sampler verified identical to the reviewed file. Read the overview again: loops steady, slam, sweep and pulse peak at the game's marks, the kneeling poses still dip a knee spike into the floor (waived debt). Judged from stills, not from motion playing.",
+        "date": "2026-11-12"
+      }
+    },
+    "models/aether_crystal.glb": {
+      "profile": "set_piece",
+      "overrides": {
+        "required": [
+          "idle"
+        ],
+        "animations": {
+          "idle": {
+            "loop": true,
+            "seconds": 20,
+            "in_place": true
+          }
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "be8907424199a8af2e4214a9832f044afb6d7d36cef1c9ee09d3c8d1fd5c1e9c",
+        "by": "Claude (AI agent), from the review sheets with engine shots",
+        "notes": "Looked at the overview and the idle page (stills and engine shots at 0, 5.7, 14.3 and 20 s); not watched playing. One slow turn of the cluster in 20 s with the four satellites bobbing on closed, smooth paths; speed is even at about 1.5 units a second with no spike; first and last pose coincide exactly, so the loop has no seam. A slow turn and bob, as SPEC.md asks. Noted, not a fault: 6,010 keys where about 930 would play the same motion.",
+        "date": "2026-11-12"
+      }
+    }
+  }
+}

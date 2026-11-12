@@ -164,9 +164,15 @@ void bindText(Engine& engine) {
                     const auto r = lua::rect(rect);
                     icon.rect = {r.x, r.y, r.z, r.w};
                 }
+                if (const auto linear = lua::field(spec, "linear"); !lua::absent(linear)) {
+                    icon.linear = lua::as<bool>(linear, "Icon 'linear'");
+                }
                 text.defineIcon(id, icon);
             },
-            "fun(id: string, spec: {image: string, rect?: Rect})", "Register an {icon:id} image.")
+            "fun(id: string, spec: {image: string, rect?: Rect, linear?: boolean})",
+            "Register an {icon:id} image, drawn as a square of the text's size. `linear` filters it when "
+            "scaled, for glyphs drawn larger than they show; without it the image is point sampled, as "
+            "pixel art wants.")
         .fn(
             "resolver",
             [resolver, &host](sol::object fn) {

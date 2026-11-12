@@ -8,7 +8,8 @@
 namespace fe {
 struct IconDef {
     std::string image;
-    glm::vec4 rect{0}; // x, y, w, h in pixels; zero size = whole image
+    glm::vec4 rect{0};   // x, y, w, h in pixels; zero size = whole image
+    bool linear = false; // filtered when scaled (high-resolution glyphs), not point sampled (pixel art)
 };
 
 struct TextOptions {

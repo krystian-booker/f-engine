@@ -1,0 +1,846 @@
+{
+  "_comment": "Every sprite sheet (.anim.json) of samples/aetherbound, the profile it is judged by, the flaws it is allowed to keep (each with a reason and a cap, so it cannot grow), and its visual review. `python3 tools/spritekit/validate.py --manifest tools/aetherbound/sprites.json --engine build/fengine_headless` must pass; see tools/spritekit/README.md. A waiver that starts 'Known debt' is a flaw to remove the next time its generator is touched: fix it, then delete the waiver. The 'character' profile below is SPEC.md's clip table as the checks read it: the game's actors.lua, field.lua and battle/scene.lua rely on these names, on the 'step' events and on 'hit' landing 0.24 s into 'attack'.",
+  "root": "../../samples/aetherbound",
+  "art_direction": "tools/aetherbound/SPEC.md",
+  "reviews": "sprite_reviews",
+  "folders": [
+    "sprites",
+    "fx",
+    "ui"
+  ],
+  "profiles": {
+    "character": {
+      "directions": [
+        4
+      ],
+      "world_height": [
+        1.35,
+        1.65
+      ],
+      "normal": "required",
+      "event_names": [
+        "step",
+        "hit"
+      ],
+      "clips": {
+        "idle": {
+          "stance": "upright",
+          "loop": true,
+          "in_place": true,
+          "frames": 4,
+          "seconds": 1.2
+        },
+        "walk": {
+          "stance": "upright",
+          "loop": true,
+          "in_place": true,
+          "frames": 6,
+          "seconds": 0.6,
+          "events": {
+            "step": [
+              0.0,
+              0.3
+            ]
+          }
+        },
+        "run": {
+          "stance": "upright",
+          "loop": true,
+          "in_place": true,
+          "frames": 6,
+          "seconds": 0.48,
+          "events": {
+            "step": [
+              0.0,
+              0.24
+            ]
+          },
+          "baseline_jitter": 3
+        },
+        "ready": {
+          "stance": "upright",
+          "loop": true,
+          "in_place": true,
+          "frames": 4,
+          "seconds": 0.88
+        },
+        "attack": {
+          "stance": "upright",
+          "loop": false,
+          "frames": 6,
+          "seconds": 0.6,
+          "events": {
+            "hit": 0.24
+          }
+        },
+        "cast": {
+          "stance": "upright",
+          "loop": true,
+          "in_place": true,
+          "frames": 4,
+          "seconds": 0.64
+        },
+        "guard": {
+          "stance": "upright",
+          "loop": true,
+          "in_place": true,
+          "frames": 2,
+          "seconds": 0.8
+        },
+        "hurt": {
+          "stance": "upright",
+          "loop": false,
+          "frames": 2,
+          "seconds": 0.4
+        },
+        "critical": {
+          "stance": "low",
+          "loop": true,
+          "frames": 2,
+          "seconds": 1.0
+        },
+        "ko": {
+          "stance": "low",
+          "loop": false,
+          "frames": 1
+        },
+        "victory": {
+          "stance": "upright",
+          "loop": true,
+          "in_place": true,
+          "frames": 2,
+          "seconds": 0.8
+        },
+        "kneel": {
+          "stance": "low",
+          "loop": false,
+          "frames": 1
+        },
+        "thrown": {
+          "stance": "air",
+          "loop": false,
+          "frames": 1
+        },
+        "rise": {
+          "stance": "low",
+          "loop": false,
+          "frames": 3,
+          "seconds": 1.05
+        },
+        "reach": {
+          "stance": "upright",
+          "loop": false,
+          "frames": 1
+        },
+        "raise": {
+          "stance": "upright",
+          "loop": true,
+          "in_place": true,
+          "frames": 2,
+          "seconds": 0.7
+        },
+        "shield": {
+          "stance": "upright",
+          "loop": false,
+          "frames": 1
+        },
+        "look_up": {
+          "stance": "upright",
+          "loop": false,
+          "frames": 1
+        },
+        "hold": {
+          "stance": "low",
+          "loop": false,
+          "frames": 1
+        }
+      }
+    }
+  },
+  "sprites": {
+    "sprites/cael.anim.json": {
+      "profile": "character",
+      "waive": {
+        "pixels.edge": {
+          "reason": "Known debt from before spritekit: a scabbard, weapon tip or (in 'thrown') a limb reaches the last row of its 64 x 64 frame in 8 frames, so the engine's outline (battle/scene.lua puts one on Rowan) is cut there. Fix in tools/aetherbound/sprites/render.py: the ground row GROUND = 60 leaves three rows under the origin and tips hang lower; raise GROUND by one row (and keep the pivot on the soles), or lay the frames out with spritekit.tools.trim_and_centre(frames, margin=1).",
+          "max": 8
+        },
+        "pixels.bleed": {
+          "reason": "Known debt from before spritekit: the frames below those of pixels.edge have that tip right against their top edge in the atlas, and with the outline on it shows as a stray dot above the figure (seen in the review's outlined engine shot of Darius). Goes away with pixels.edge; generate.py could also pack with a 1 px gutter (spritekit.tools.pack).",
+          "max": 8
+        },
+        "pixels.pinholes": {
+          "reason": "Known debt from before spritekit: one-pixel holes where two parts of the ray-cast figure meet (arm against body, weapon against hand, under the crest), one or two in about a fifth of the frames; the ground flickers through as clips play. Fix in tools/aetherbound/sprites/framer.py render_frame: spritekit.tools.fill_pinholes(rgba, 1) after pixel.outline.",
+          "max": 57
+        },
+        "pixels.near_duplicates": {
+          "reason": "Known debt from before spritekit: tones computed per material land within a few steps of each other (#4a2a20 and #482a22, #fff0b0 and #fff4b0). Fix in tools/aetherbound/sprites/rig.py (the palette PAL): give the ramps that collide one shared tone, or run spritekit.tools.merge_near_duplicates over the frames in generate.py.",
+          "max": 3
+        },
+        "motion.baseline_pop": {
+          "reason": "Known debt from before spritekit: the kneeling poses ('kneel', 'critical', 'hold') touch the ground 3 to 4 px above the idle ground row, so the figure lifts off its shadow when it drops to a knee. Fix in tools/aetherbound/sprites/clips.py: 'hold' is posed with lift=5.0 and the kneeling poses do not bring the knee down to render.GROUND; pose them on the ground, or spritekit.tools.align_baseline(frames, row) per direction in generate.py.",
+          "max": 17
+        },
+        "motion.baseline_jitter": {
+          "reason": "Known debt from before spritekit: 'rise' goes from lying to one knee to standing and its kneeling frame floats 3 px above the other two (the same pose as 'kneel'; see motion.baseline_pop). Fix with it in tools/aetherbound/sprites/clips.py.",
+          "max": 3
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "bc062932f4d6506d5abd9b1fb6cc82aa3033446014c2ce813d655d6b48ececfa",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "All three pages read at full size. Navy coat, gold trim, royal-blue cape and sandy hair as SPEC.md; chibi 2.5 heads, dark 1 px outline, 3-4 tones, same build as the rest of the line-up. Walk reads contact-pass-contact with feet on the ground row, run leans with the cape trailing, attack has a wind-up, a white smear on the hit frame (event at 0.24 s) and a recovery; loop seams close. Lit from the upper left in every direction; in the engine the normal map brightens the side the lamp is on. Accepted as recorded debt: weapon or scabbard tips on the frame's last row, one-pixel pinholes at joints, and kneeling poses 3 to 4 px above the idle ground row.",
+        "date": "2026-11-12"
+      }
+    },
+    "sprites/darius.anim.json": {
+      "profile": "character",
+      "waive": {
+        "pixels.edge": {
+          "reason": "Known debt from before spritekit: a scabbard, weapon tip or (in 'thrown') a limb reaches the last row of its 64 x 64 frame in 7 frames, so the engine's outline (battle/scene.lua puts one on Rowan) is cut there. Fix in tools/aetherbound/sprites/render.py: the ground row GROUND = 60 leaves three rows under the origin and tips hang lower; raise GROUND by one row (and keep the pivot on the soles), or lay the frames out with spritekit.tools.trim_and_centre(frames, margin=1).",
+          "max": 7
+        },
+        "pixels.bleed": {
+          "reason": "Known debt from before spritekit: the frames below those of pixels.edge have that tip right against their top edge in the atlas, and with the outline on it shows as a stray dot above the figure (seen in the review's outlined engine shot of Darius). Goes away with pixels.edge; generate.py could also pack with a 1 px gutter (spritekit.tools.pack).",
+          "max": 7
+        },
+        "pixels.pinholes": {
+          "reason": "Known debt from before spritekit: one-pixel holes where two parts of the ray-cast figure meet (arm against body, weapon against hand, under the crest), one or two in about a fifth of the frames; the ground flickers through as clips play. Fix in tools/aetherbound/sprites/framer.py render_frame: spritekit.tools.fill_pinholes(rgba, 1) after pixel.outline.",
+          "max": 70
+        },
+        "pixels.near_duplicates": {
+          "reason": "Known debt from before spritekit: tones computed per material land within a few steps of each other (#242a3c and #2a2b3c, #f4f8fc and #f4f9ff). Fix in tools/aetherbound/sprites/rig.py (the palette PAL): give the ramps that collide one shared tone, or run spritekit.tools.merge_near_duplicates over the frames in generate.py.",
+          "max": 4
+        },
+        "motion.baseline_pop": {
+          "reason": "Known debt from before spritekit: the kneeling poses ('kneel', 'critical', 'hold') touch the ground 3 to 4 px above the idle ground row, so the figure lifts off its shadow when it drops to a knee. Fix in tools/aetherbound/sprites/clips.py: 'hold' is posed with lift=5.0 and the kneeling poses do not bring the knee down to render.GROUND; pose them on the ground, or spritekit.tools.align_baseline(frames, row) per direction in generate.py.",
+          "max": 15
+        },
+        "motion.baseline_jitter": {
+          "reason": "Known debt from before spritekit: 'rise' goes from lying to one knee to standing and its kneeling frame floats 3 px above the other two (the same pose as 'kneel'; see motion.baseline_pop). Fix with it in tools/aetherbound/sprites/clips.py.",
+          "max": 3
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "b86eb328da56e49b8833e014e98c4647d40001e393b47ef54d856f05fcd62600",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "Overview and both clip pages read. Steel-grey plate, ochre tabard, grey hair and beard, round shield and axe as SPEC.md; broader than the others but the same head-to-body ratio and outline. Shield leads in ready and guard, the axe swing smears on the hit frame; walk and run read, loops close. The outlined engine shot shows one stray outline dot above the head: the recorded pixels.bleed debt. Accepted as recorded debt: weapon or scabbard tips on the frame's last row, one-pixel pinholes at joints, and kneeling poses 3 to 4 px above the idle ground row.",
+        "date": "2026-11-12"
+      }
+    },
+    "sprites/guard.anim.json": {
+      "profile": "character",
+      "waive": {
+        "pixels.edge": {
+          "reason": "Known debt from before spritekit: a scabbard, weapon tip or (in 'thrown') a limb reaches the last row of its 64 x 64 frame in 8 frames, so the engine's outline (battle/scene.lua puts one on Rowan) is cut there. Fix in tools/aetherbound/sprites/render.py: the ground row GROUND = 60 leaves three rows under the origin and tips hang lower; raise GROUND by one row (and keep the pivot on the soles), or lay the frames out with spritekit.tools.trim_and_centre(frames, margin=1).",
+          "max": 8
+        },
+        "pixels.bleed": {
+          "reason": "Known debt from before spritekit: the frames below those of pixels.edge have that tip right against their top edge in the atlas, and with the outline on it shows as a stray dot above the figure (seen in the review's outlined engine shot of Darius). Goes away with pixels.edge; generate.py could also pack with a 1 px gutter (spritekit.tools.pack).",
+          "max": 8
+        },
+        "pixels.pinholes": {
+          "reason": "Known debt from before spritekit: one-pixel holes where two parts of the ray-cast figure meet (arm against body, weapon against hand, under the crest), one or two in about a fifth of the frames; the ground flickers through as clips play. Fix in tools/aetherbound/sprites/framer.py render_frame: spritekit.tools.fill_pinholes(rgba, 1) after pixel.outline.",
+          "max": 50
+        },
+        "pixels.near_duplicates": {
+          "reason": "Known debt from before spritekit: tones computed per material land within a few steps of each other (#07070c, #0a0a10 and #050508). Fix in tools/aetherbound/sprites/rig.py (the palette PAL): give the ramps that collide one shared tone, or run spritekit.tools.merge_near_duplicates over the frames in generate.py.",
+          "max": 4
+        },
+        "motion.baseline_pop": {
+          "reason": "Known debt from before spritekit: the kneeling poses ('kneel', 'critical', 'hold') touch the ground 3 to 4 px above the idle ground row, so the figure lifts off its shadow when it drops to a knee. Fix in tools/aetherbound/sprites/clips.py: 'hold' is posed with lift=5.0 and the kneeling poses do not bring the knee down to render.GROUND; pose them on the ground, or spritekit.tools.align_baseline(frames, row) per direction in generate.py.",
+          "max": 17
+        },
+        "motion.baseline_jitter": {
+          "reason": "Known debt from before spritekit: 'rise' goes from lying to one knee to standing and its kneeling frame floats 3 px above the other two (the same pose as 'kneel'; see motion.baseline_pop). Fix with it in tools/aetherbound/sprites/clips.py.",
+          "max": 3
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "0304db6aff559213df12392f4caca4a480994a16b98fa8c5932346171dca21df",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "Overview and both clip pages read at half size. Rust-red and black plate with a closed helm and ember eyes, as SPEC.md's fortress guards; same rig and proportions as the heroes, palette of 35 colours in one family. Sword clips mirror Cael's (wind-up, smear on the hit frame, recovery); walk, run, ko and rise read; loops close; normal map follows the lamp. Accepted as recorded debt: weapon or scabbard tips on the frame's last row, one-pixel pinholes at joints, and kneeling poses 3 to 4 px above the idle ground row.",
+        "date": "2026-11-12"
+      }
+    },
+    "sprites/lancer.anim.json": {
+      "profile": "character",
+      "waive": {
+        "pixels.edge": {
+          "reason": "Known debt from before spritekit: a scabbard, weapon tip or (in 'thrown') a limb reaches the last row of its 64 x 64 frame in 7 frames, so the engine's outline (battle/scene.lua puts one on Rowan) is cut there. Fix in tools/aetherbound/sprites/render.py: the ground row GROUND = 60 leaves three rows under the origin and tips hang lower; raise GROUND by one row (and keep the pivot on the soles), or lay the frames out with spritekit.tools.trim_and_centre(frames, margin=1).",
+          "max": 7
+        },
+        "pixels.bleed": {
+          "reason": "Known debt from before spritekit: the frames below those of pixels.edge have that tip right against their top edge in the atlas, and with the outline on it shows as a stray dot above the figure (seen in the review's outlined engine shot of Darius). Goes away with pixels.edge; generate.py could also pack with a 1 px gutter (spritekit.tools.pack).",
+          "max": 7
+        },
+        "pixels.pinholes": {
+          "reason": "Known debt from before spritekit: one-pixel holes where two parts of the ray-cast figure meet (arm against body, weapon against hand, under the crest), one or two in about a fifth of the frames; the ground flickers through as clips play. Fix in tools/aetherbound/sprites/framer.py render_frame: spritekit.tools.fill_pinholes(rgba, 1) after pixel.outline.",
+          "max": 92
+        },
+        "pixels.near_duplicates": {
+          "reason": "Known debt from before spritekit: tones computed per material land within a few steps of each other (#07070c, #0a0a10 and #050508). Fix in tools/aetherbound/sprites/rig.py (the palette PAL): give the ramps that collide one shared tone, or run spritekit.tools.merge_near_duplicates over the frames in generate.py.",
+          "max": 3
+        },
+        "motion.baseline_pop": {
+          "reason": "Known debt from before spritekit: the kneeling poses ('kneel', 'critical', 'hold') touch the ground 3 to 4 px above the idle ground row, so the figure lifts off its shadow when it drops to a knee. Fix in tools/aetherbound/sprites/clips.py: 'hold' is posed with lift=5.0 and the kneeling poses do not bring the knee down to render.GROUND; pose them on the ground, or spritekit.tools.align_baseline(frames, row) per direction in generate.py.",
+          "max": 3
+        },
+        "motion.baseline_jitter": {
+          "reason": "Known debt from before spritekit: 'rise' goes from lying to one knee to standing and its kneeling frame floats 3 px above the other two (the same pose as 'kneel'; see motion.baseline_pop). Fix with it in tools/aetherbound/sprites/clips.py.",
+          "max": 3
+        },
+        "pixels.stray_colors": {
+          "reason": "By design: #b8d4ff is the brightest tone of the spear-thrust flare, which only the two side-view hit frames of 'attack' show (5 px).",
+          "max": 1
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "c65df0d67b7a3549efa2c51381f4bf2866d082543b55b7371838640c4504120e",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "Overview and both clip pages read at half size. The guard's plate with a red crest and a spear, so it is told from the guard in silhouette. The thrust reads well from the sides with a flare on the hit frame; from south and north it is foreshortened to a small jab, accepted because enemies are seen from the side in battle. Walk and run read, loops close, normal map follows the lamp. Accepted as recorded debt: weapon or scabbard tips on the frame's last row, one-pixel pinholes at joints, and kneeling poses 3 to 4 px above the idle ground row.",
+        "date": "2026-11-12"
+      }
+    },
+    "sprites/lyra.anim.json": {
+      "profile": "character",
+      "waive": {
+        "pixels.edge": {
+          "reason": "Known debt from before spritekit: a scabbard, weapon tip or (in 'thrown') a limb reaches the last row of its 64 x 64 frame in 2 frames, so the engine's outline (battle/scene.lua puts one on Rowan) is cut there. Fix in tools/aetherbound/sprites/render.py: the ground row GROUND = 60 leaves three rows under the origin and tips hang lower; raise GROUND by one row (and keep the pivot on the soles), or lay the frames out with spritekit.tools.trim_and_centre(frames, margin=1).",
+          "max": 2
+        },
+        "pixels.bleed": {
+          "reason": "Known debt from before spritekit: the frames below those of pixels.edge have that tip right against their top edge in the atlas, and with the outline on it shows as a stray dot above the figure (seen in the review's outlined engine shot of Darius). Goes away with pixels.edge; generate.py could also pack with a 1 px gutter (spritekit.tools.pack).",
+          "max": 2
+        },
+        "pixels.pinholes": {
+          "reason": "Known debt from before spritekit: one-pixel holes where two parts of the ray-cast figure meet (arm against body, weapon against hand, under the crest), one or two in about a fifth of the frames; the ground flickers through as clips play. Fix in tools/aetherbound/sprites/framer.py render_frame: spritekit.tools.fill_pinholes(rgba, 1) after pixel.outline.",
+          "max": 49
+        },
+        "motion.baseline_jitter": {
+          "reason": "Known debt from before spritekit: 'rise' goes from lying to one knee to standing and its kneeling frame floats 3 px above the other two (the same pose as 'kneel'; see motion.baseline_pop). Fix with it in tools/aetherbound/sprites/clips.py.",
+          "max": 3
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "006544df6291b84e73f84d6faea50663b7a2dfad81c1685e6da4ff0248a5e6c1",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "Overview read at full size, both clip pages at half size. Cream long coat with teal trim, auburn hair tied back, staff with a small crystal: SPEC.md's Lyra, and the staff makes her silhouette distinct in the line-up. Walk and run keep the feet on the ground row, the staff swing has a smear on the hit frame, cast raises the staff; loops close. Normal map follows the lamp in the engine. Accepted as recorded debt: weapon or scabbard tips on the frame's last row, one-pixel pinholes at joints, and kneeling poses 3 to 4 px above the idle ground row.",
+        "date": "2026-11-12"
+      }
+    },
+    "sprites/rowan.anim.json": {
+      "profile": "character",
+      "waive": {
+        "pixels.edge": {
+          "reason": "Known debt from before spritekit: a scabbard, weapon tip or (in 'thrown') a limb reaches the last row of its 64 x 64 frame in 10 frames, so the engine's outline (battle/scene.lua puts one on Rowan) is cut there. Fix in tools/aetherbound/sprites/render.py: the ground row GROUND = 60 leaves three rows under the origin and tips hang lower; raise GROUND by one row (and keep the pivot on the soles), or lay the frames out with spritekit.tools.trim_and_centre(frames, margin=1).",
+          "max": 10
+        },
+        "pixels.bleed": {
+          "reason": "Known debt from before spritekit: the frames below those of pixels.edge have that tip right against their top edge in the atlas, and with the outline on it shows as a stray dot above the figure (seen in the review's outlined engine shot of Darius). Goes away with pixels.edge; generate.py could also pack with a 1 px gutter (spritekit.tools.pack).",
+          "max": 10
+        },
+        "pixels.pinholes": {
+          "reason": "Known debt from before spritekit: one-pixel holes where two parts of the ray-cast figure meet (arm against body, weapon against hand, under the crest), one or two in about a fifth of the frames; the ground flickers through as clips play. Fix in tools/aetherbound/sprites/framer.py render_frame: spritekit.tools.fill_pinholes(rgba, 1) after pixel.outline.",
+          "max": 45
+        },
+        "pixels.near_duplicates": {
+          "reason": "Known debt from before spritekit: tones computed per material land within a few steps of each other (#272b48 and #262c44, #161828 and #181a2e). Fix in tools/aetherbound/sprites/rig.py (the palette PAL): give the ramps that collide one shared tone, or run spritekit.tools.merge_near_duplicates over the frames in generate.py.",
+          "max": 3
+        },
+        "motion.baseline_pop": {
+          "reason": "Known debt from before spritekit: the kneeling poses ('kneel', 'critical', 'hold') touch the ground 3 to 4 px above the idle ground row, so the figure lifts off its shadow when it drops to a knee. Fix in tools/aetherbound/sprites/clips.py: 'hold' is posed with lift=5.0 and the kneeling poses do not bring the knee down to render.GROUND; pose them on the ground, or spritekit.tools.align_baseline(frames, row) per direction in generate.py.",
+          "max": 10
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "5cacfce771732d6a760f683ea5d98ab02485d54aea74eda309243413cefd261a",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "Overview and both clip pages read. Charcoal armour, crimson sash and half-cloak, black hair as SPEC.md; proportions and outline match Cael's. Cloak trails in walk and run, attack smear lands on the hit frame, ko/rise/kneel read at a glance; every loop closes (the cast clip alternates small and large steps, which is its design). Normal map lights the correct side in the engine shots. Accepted as recorded debt: weapon or scabbard tips on the frame's last row, one-pixel pinholes at joints, and kneeling poses 3 to 4 px above the idle ground row.",
+        "date": "2026-11-12"
+      }
+    },
+    "sprites/rowan_bound.anim.json": {
+      "profile": "character",
+      "waive": {
+        "pixels.edge": {
+          "reason": "Known debt from before spritekit: a scabbard, weapon tip or (in 'thrown') a limb reaches the last row of its 64 x 64 frame in 10 frames, so the engine's outline (battle/scene.lua puts one on Rowan) is cut there. Fix in tools/aetherbound/sprites/render.py: the ground row GROUND = 60 leaves three rows under the origin and tips hang lower; raise GROUND by one row (and keep the pivot on the soles), or lay the frames out with spritekit.tools.trim_and_centre(frames, margin=1).",
+          "max": 10
+        },
+        "pixels.bleed": {
+          "reason": "Known debt from before spritekit: the frames below those of pixels.edge have that tip right against their top edge in the atlas, and with the outline on it shows as a stray dot above the figure (seen in the review's outlined engine shot of Darius). Goes away with pixels.edge; generate.py could also pack with a 1 px gutter (spritekit.tools.pack).",
+          "max": 10
+        },
+        "pixels.pinholes": {
+          "reason": "Known debt from before spritekit: one-pixel holes where two parts of the ray-cast figure meet (arm against body, weapon against hand, under the crest), one or two in about a fifth of the frames; the ground flickers through as clips play. Fix in tools/aetherbound/sprites/framer.py render_frame: spritekit.tools.fill_pinholes(rgba, 1) after pixel.outline.",
+          "max": 45
+        },
+        "pixels.near_duplicates": {
+          "reason": "Known debt from before spritekit: tones computed per material land within a few steps of each other (#272b48 and #262c44, #161828 and #181a2e). Fix in tools/aetherbound/sprites/rig.py (the palette PAL): give the ramps that collide one shared tone, or run spritekit.tools.merge_near_duplicates over the frames in generate.py.",
+          "max": 3
+        },
+        "motion.baseline_pop": {
+          "reason": "Known debt from before spritekit: the kneeling poses ('kneel', 'critical', 'hold') touch the ground 3 to 4 px above the idle ground row, so the figure lifts off its shadow when it drops to a knee. Fix in tools/aetherbound/sprites/clips.py: 'hold' is posed with lift=5.0 and the kneeling poses do not bring the knee down to render.GROUND; pose them on the ground, or spritekit.tools.align_baseline(frames, row) per direction in generate.py.",
+          "max": 10
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "0198e460df45f6e52158a780ec150a13e34f014904a3c8029ccafba548297bc4",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "Overview page read; its atlas and normal map are rowan.png and rowan_n.png themselves (the clip pages are those read for rowan). The emissive image puts violet veins on the arms, neck and face only, inside the figure in all four directions, and they glow over the dimmed figure and in the engine shots as SPEC.md asks. Same recorded debts as rowan.",
+        "date": "2026-11-12"
+      }
+    },
+    "sprites/sword_broken.anim.json": {
+      "profile": "prop",
+      "review": {
+        "verdict": "pass",
+        "sha256": "4dce944b0beca752d2f5b9988b57c99473abb75b591d9917871a9c6517c9c962",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "One 48 x 24 frame: a longsword in two pieces lying apart, steel with a dark outline and a crimson grip in Rowan's colours, scorched dark near the break; reads as a broken blade at game size beside the hero bar. Hard pixels, 14 colours, no findings. The engine shot stands it upright; the game draws it flat.",
+        "date": "2026-11-12"
+      }
+    },
+    "sprites/sword_half.anim.json": {
+      "profile": "prop",
+      "review": {
+        "verdict": "pass",
+        "sha256": "5479f74812acd837f5a8878b3acd5253f95c7410625d3ba3a81f4b103cb0d637",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "One 24 x 32 frame: the hilt half of the same sword held upright, same steel, outline and crimson grip as sword_broken so the two read as one object; clean pixel clusters, 11 colours, no findings; reads at game size and with the engine's outline.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/battle/beam.anim.json": {
+      "profile": "image",
+      "waive": {
+        "pixels.edge": {
+          "reason": "By design: a shaft of light that stands on its pivot row (pivot [0.5, 1]) and is stretched into a column (story/last_light.lua); its foot is cut by the ground on purpose, and it fades to nothing at the top and the sides (alpha 2 to 3 of 255 there).",
+          "max": 1
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "1a1f9ac46029e9186590b63c1b2ff5c64e279ecaa965b8523381d6e8e1f53c59",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A violet-white shaft with a bright core, fading at the top and sides; drawn additively in the engine it is a clean column of light in the Aetherite colours of SPEC.md. Its foot is cut by the ground, which is how the game uses it (waived by design).",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/battle/circle.anim.json": {
+      "profile": "image",
+      "waive": {
+        "pixels.edge": {
+          "reason": "Known debt from before spritekit: the outer ring's glow still has alpha 47 of 255 where it meets the four edges of the 256 px frame, so the halo is squared off (visible in the review's engine shot). Fix in tools/aetherbound/ui/generate.py circle(): draw the ring 8 px smaller, or fade the glow to nothing before the edge.",
+          "max": 1
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "d267c8f833e91531fb76e6dd9ae36cf36c8742ab71ff648061cc4b444952586c",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A magic circle of two rings, a hexagram, ticks and diamonds in white (the game tints it); crisp and readable at game size. Accepted as recorded debt: the outer glow is squared off where it meets the frame's four edges, visible in the close engine shot as flat sides on the halo.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/battle/dust.anim.json": {
+      "profile": "particle",
+      "review": {
+        "verdict": "pass",
+        "sha256": "3c38bbc4eb5ed6f3d72f78fef04cd998582871539ae76d559145506c1f27ef12",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "Four soft grey puffs that loop without a seam (x0.9); reads as dust at game size and matches the softness of the other particles in the line-up. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/battle/ember.anim.json": {
+      "profile": "effect",
+      "waive": {
+        "pixels.edge": {
+          "reason": "Known debt from before spritekit: in three of its seven frames a tongue of the fireball reaches the edge of the 96 px frame (alpha up to 94 of 255) and is cut straight. Fix in tools/aetherbound/ui/generate.py ember(): a larger cell, or mask each frame with a radial fade.",
+          "max": 3
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "e20519c2b83602f5b71956599a314efad96657f76a4b7f9d444983fdd96c6b5b",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A fireball that bursts and breaks into darker orange cinders over seven frames, ending on an empty frame; fire colours of SPEC.md. Accepted as recorded debt: tongues of three frames are cut by the frame's edge at low alpha.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/battle/frost.anim.json": {
+      "profile": "effect",
+      "review": {
+        "verdict": "pass",
+        "sha256": "34fc4cd8581a171b6149d890f97ab70694fe07c1cc11145b2a14b62ac8d5b881",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A blue glow that snaps into an eight-point ice star and shatters, ending on an empty frame; builds, peaks and dies in 0.42 s, stays inside its frame, reads as frost in the engine shot. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/battle/glow.anim.json": {
+      "profile": "image",
+      "review": {
+        "verdict": "pass",
+        "sha256": "7c52cec7afa2ab2ddc3b055c3e1af88076fa7229ec6062082e9ac87ad796e598",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A round white glow that falls to nothing well inside its 64 px frame; a clean soft disc in the engine at both distances. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/battle/impact.anim.json": {
+      "profile": "effect",
+      "review": {
+        "verdict": "pass",
+        "sha256": "5206f417eef20cd94db9c9a259ce9450886a4fea7cc8aff0afa490fa935b47bb",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "An orange ring with spokes that expands from a white core and fades in 0.3 s, last frame empty; reads as a hit spark, fire palette, inside its frame. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/battle/mend.anim.json": {
+      "profile": "effect",
+      "waive": {
+        "pixels.edge": {
+          "reason": "Known debt from before spritekit: the column of light still has full alpha where it meets the top of the 96 x 128 frame, and a faint box shows at its sides when it is drawn additively (the review's engine shot). Fix in tools/aetherbound/ui/generate.py mend(): fade the column out towards the top and the sides.",
+          "max": 6
+        },
+        "sheet.empty_frame": {
+          "reason": "Known debt from before spritekit: the last two of its eight frames are empty (the fade reaches nothing a frame early): one wasted 96 x 128 cell and 0.07 s of nothing. Fix in tools/aetherbound/ui/generate.py mend(): end the fade on the last frame, or drop frame 7.",
+          "max": 1
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "73875f7d8147458dd49b336b12241d49002e1774c54d6eeb8c8119a4401511b5",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A green column with rising sparkles over a bright ring on the ground: reads as healing at a glance. Accepted as recorded debt: the column is cut by the top of the frame and shows a faint box when drawn additively (seen in the engine shot), and two empty frames end the clip where one would do.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/battle/mote.anim.json": {
+      "profile": "particle",
+      "review": {
+        "verdict": "pass",
+        "sha256": "85f4b92eb4d2ee717eaa12ef0357c8eb5b3629245812a94de0775159095bbea7",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A 16 px soft white dot, fading to nothing at its edge; the game tints and scales it for auras and sparks. Round and clean in the engine. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/battle/resonance.anim.json": {
+      "profile": "effect",
+      "review": {
+        "verdict": "pass",
+        "sha256": "85c8318cfae16894a1a5386d8af5f55f5e2f078812b0679197fa781a890b1a7f",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A violet-white starburst that opens into a ring with a cross flare and fades over eight frames, last frame empty: Rowan's strike, in the Aetherite violet of SPEC.md; stays inside its 160 px frames in the engine shot. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/battle/ring.anim.json": {
+      "profile": "image",
+      "review": {
+        "verdict": "pass",
+        "sha256": "db986985c2ed5ad6a3489c685f40a4257edc6339f7bbcc46c1bbb19a34587c7d",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A thin white ring with a soft edge, fully inside its frame; the game scales it for shock waves. Clean circle in the engine at both distances. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/battle/rubble.anim.json": {
+      "profile": "particle",
+      "review": {
+        "verdict": "pass",
+        "sha256": "3f160765fd7ee87acb6b93e7c06cd86d7c1de3f789aa925d97020b3636e5d4b5",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A 16 px chunk of pale stone with hard pixel edges and a darker underside; reads as debris at game size. Fills its cell, which is right for a particle. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/battle/shadow.anim.json": {
+      "profile": "image",
+      "waive": {
+        "pixels.edge": {
+          "reason": "By design in its alpha: the blob shadow is drawn as a 'multiply' decal (game/actors.lua), where white changes nothing, so the cell is opaque up to its edge on purpose. Known debt in its colour: the cell is 244 to 249 at its border, not 255, so it darkens a faint rectangle around the ellipse; in tools/aetherbound/ui/generate.py let the ellipse fall to pure white before the edge.",
+          "max": 1
+        }
+      },
+      "overrides": {
+        "stage_sprite": {
+          "mode": "decal",
+          "blend": "multiply"
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "09e8e31c81c34b36938f0da71479c42d0f8fe0b7b3adfa2204859c600d89135d",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A soft dark ellipse; drawn as a multiply decal on the stage floor it is a blob shadow with no visible box at either distance. Accepted: the cell is opaque to its edge by design and its border is 244-249 instead of white (recorded in the waiver).",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/battle/shard.anim.json": {
+      "profile": "particle",
+      "review": {
+        "verdict": "pass",
+        "sha256": "cdc46794071e210fba6fd1d8b1f269eebe25d0ed8eb86790d16dc7e90330d39d",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A two-tone violet crystal splinter, 16 x 32, hard edged; Aetherite colours of SPEC.md, reads as a shard next to the hero bar. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/battle/silhouette.anim.json": {
+      "profile": "image",
+      "waive": {
+        "pixels.edge": {
+          "reason": "Known debt from before spritekit: the halo behind the Colossus is cut by the top edge of the 384 x 512 frame at full alpha (and at 117 of 255 at the sides). Fix in tools/aetherbound/ui/generate.py silhouette(): shrink the halo or grow the canvas so it fades out inside the frame.",
+          "max": 1
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "035a6afabfe3da473b301cac2e35e1007a94d4ab9d665cfc410981fa5112b5fc",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "The Colossus as a pale violet-white silhouette with a ringed halo and rays: recognisable and dramatic. Accepted as recorded debt: the halo is cut by the top of the frame (flat top in the close engine shot).",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/battle/slash.anim.json": {
+      "profile": "effect",
+      "waive": {
+        "pixels.edge": {
+          "reason": "Known debt from before spritekit: the arc of the first frame (0.03 s) starts on the frame's left edge. Fix in tools/aetherbound/ui/generate.py slash(): start the arc 2 px inside the 96 px frame.",
+          "max": 1
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "41a1d6b0b07abb7ebfef37d7f303e3007a3b387bca5acec7eb5e1bd6bb57aaa7",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A blue-white arc that sweeps a quarter turn and thins out over six frames; reads as a blade slash, stays soft and inside the frame except for the first frame, whose arc starts on the left edge for 0.03 s (recorded debt).",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/battle/star.anim.json": {
+      "profile": "image",
+      "review": {
+        "verdict": "pass",
+        "sha256": "5f4dd40885830637ef41226d71270ca38ebb1d35b74338bf28300bf29432abe6",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A four-point violet-white star with a faint halo; reads as a single twinkle, in the Aetherite colours, inside its frame (edge alpha under the limit). No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/battle/surge.anim.json": {
+      "profile": "effect",
+      "waive": {
+        "pixels.edge": {
+          "reason": "Known debt from before spritekit: the horizontal flares run into the left and right edges of the 96 px frame and the column into its top and bottom at full alpha, so the surge shows as a box with straight sides (the review's engine shot). Fix in tools/aetherbound/ui/generate.py surge(): a 128 px wide cell, or fade the flares and the column before the edge.",
+          "max": 6
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "9c7b31f7edd871918f0bfa23e0f45362b03d1fc7a39ca1f4db4db746c75d2b2d",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A violet column with bright horizontal flares that rises and thins over seven frames: reads as an Aether surge. Accepted as recorded debt, and the most visible of the effects' flaws: the flares and the column are cut straight by the frame, so the close engine shot shows a box with hard sides.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/battle/veil.anim.json": {
+      "profile": "image",
+      "waive": {
+        "pixels.edge": {
+          "reason": "Known debt from before spritekit: the lattice still has alpha 58 of 255 at all four edges of the 128 px frame, so the veil ends in a soft square. Fix in tools/aetherbound/ui/generate.py: multiply the lattice by a radial fade that reaches zero inside the frame.",
+          "max": 1
+        }
+      },
+      "review": {
+        "verdict": "pass",
+        "sha256": "3524134a309034a1851c9297bb6ac46f638cc6c3210d0cf0500756cec7b3c7e2",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A violet hexagonal lattice of light, soft, in the Aetherite palette; reads as a barrier. Accepted as recorded debt: it still has some alpha at the frame's edges and ends in a soft square rather than fading out.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/battle/ward.anim.json": {
+      "profile": "effect",
+      "review": {
+        "verdict": "pass",
+        "sha256": "c257d6b7c363aa8cf09051ff60c12afec0da66c70bc0e3fcddc63df7a9c3d54e",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A violet lattice sphere that forms, brightens and fades over six frames, last frame empty; reads as a ward, same family as veil and circle, fully inside its frame. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/chamber/dust.anim.json": {
+      "profile": "particle",
+      "review": {
+        "verdict": "pass",
+        "sha256": "7bf23a0635c76aa17b94ee7e518a90733acf27ad113f6e8f03c69e881bbb2a1f",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "After the generator fix: a single ash-grey pixel in three tones that brightens then settles, visible as a faint mote in both engine shots; one pixel is right for drifting dust at 32 px per unit and sits with the other chamber particles in the line-up.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/chamber/ember.anim.json": {
+      "profile": "particle",
+      "review": {
+        "verdict": "pass",
+        "sha256": "2c6143712d1929c3c4216a888a9e6e8cd75e15714f76f7e879a1d07650c8f90f",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "After the generator fix: a five-pixel plus with a pale core for 1.2 s that cools to one orange pixel for the rest of its life, no empty frames; fire colours match the flame beside it in the line-up; reads as a spark at game size in the engine shot.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/chamber/flame.anim.json": {
+      "profile": "particle",
+      "review": {
+        "verdict": "pass",
+        "sha256": "ea209406fcead10fb803af3310e2bfe5a86f5f9068c1613a90df4b37c3e3123b",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "Six 16 px pixel-art flame puffs that shrink and darken from yellow-white to deep orange; hard pixels, fire palette of SPEC.md, reads as a brazier flame. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/chamber/glow.anim.json": {
+      "profile": "particle",
+      "review": {
+        "verdict": "pass",
+        "sha256": "f7a8b5f773816f427969475423105047a1a4ae7aaf4059596e09939218fc92f8",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A round soft glow that reaches zero inside its 64 px frame; clean disc in the engine. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/chamber/haze.anim.json": {
+      "profile": "particle",
+      "review": {
+        "verdict": "pass",
+        "sha256": "7de9890768c63b0654c771ad4918fd96544007498d9cd0509d0189b3453e3969",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A broad, flatter 32 px glow for heat haze; smooth, no box at its edge in the engine shot. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/chamber/mote.anim.json": {
+      "profile": "particle",
+      "review": {
+        "verdict": "pass",
+        "sha256": "f63b94aef03203330595d427128b426efd8fba282e7843eec0e5dcaad1a48bf1",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "An Aetherite mote: a white core in a violet-grey halo that swells and twinkles over eight frames and then holds; soft edged, reads as a drifting point of light. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/chamber/smoke.anim.json": {
+      "profile": "particle",
+      "review": {
+        "verdict": "pass",
+        "sha256": "5d32d1d09e6c671f8456f768c1ac7b3da90ecff1be03e74c4c6e522a70faf25c",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "Four dim blue-grey smoke puffs, soft and low in contrast as smoke should be against the dark chamber; holds its last frame. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/chamber/veil.anim.json": {
+      "profile": "particle",
+      "review": {
+        "verdict": "pass",
+        "sha256": "9d4e048ab63a4c4121550093071cb96d1920a510792704abb521d06c2d35bb38",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A soft round patch of mist that fades in over three frames, holds and fades out to an empty last frame; smooth, no visible edge. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/fortress/ash.anim.json": {
+      "profile": "particle",
+      "review": {
+        "verdict": "pass",
+        "sha256": "2552d3aa6c5314e0a2ecff34243e25c61edd0c685216acdf851e29d23133192e",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "Four tiny grey flakes (2 to 4 px) that tumble and loop (seam x1.1); reads as falling ash at game size. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/fortress/ember.anim.json": {
+      "profile": "particle",
+      "review": {
+        "verdict": "pass",
+        "sha256": "3338fd6ef987a1de566b01909ee3b1a6b5cbf5fede376f936df661c11daef651",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A small plus-shaped ember, yellow core in orange, shrinking to a single pixel over four frames; fire palette, reads as a spark. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/fortress/flame.anim.json": {
+      "profile": "particle",
+      "review": {
+        "verdict": "pass",
+        "sha256": "0b0fe9330ab04465e9454a4c445122a2e75d608ed2f8c1b31a04ea4758d72ffa",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "Eight 32 px pixel-art flame frames: a full tongue that leans, thins and breaks up; yellow core to deep red edge as SPEC.md's fire, hard pixels in keeping with the world's textures. Its base sits on the frame's bottom row, which is right for a particle. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/fortress/glow.anim.json": {
+      "profile": "particle",
+      "review": {
+        "verdict": "pass",
+        "sha256": "4bc36d47ac8f59d622eeeba9f26ab3e5ab46798646b145c75d5245c17e0256da",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A round soft glow reaching zero inside its frame, same as the chamber's; clean in the engine. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/fortress/haze.anim.json": {
+      "profile": "particle",
+      "review": {
+        "verdict": "pass",
+        "sha256": "19a9a1e33d6e9b0829bba6248a8c23afb2f9cbd015ee1734fbd54c597f5a7e13",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A flat 32 px glow for heat haze; smooth and without a visible edge. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/fortress/mist.anim.json": {
+      "profile": "particle",
+      "review": {
+        "verdict": "pass",
+        "sha256": "fdb3d8728549ec0ee6eec134d098342a44feac8370152e9729c6bd0ca13d37cb",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "Four pale blue lumps of mist in a few flat tones with soft edges; reads as drifting ground mist, moonlit-haze colours of SPEC.md. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/fortress/mote.anim.json": {
+      "profile": "particle",
+      "review": {
+        "verdict": "pass",
+        "sha256": "acc2035a970976887e503fe29ee35ee1f04125c63605a051593f807a67969270",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "A violet plus-shaped mote with a white core that pulses between two sizes and loops cleanly (seam x0.9); Aetherite colours, hard pixels. No findings.",
+        "date": "2026-11-12"
+      }
+    },
+    "fx/fortress/smoke.anim.json": {
+      "profile": "particle",
+      "review": {
+        "verdict": "pass",
+        "sha256": "e5be3328f7d1662f5fbf85ef5ae29dc9683aa25ca418941f17f233bfbbef1a85",
+        "by": "Claude (AI agent), from the review sheet with engine shots",
+        "notes": "Six dark violet-grey smoke puffs that swell and thin, holding the last; low contrast and soft, right for smoke over fire at night. No findings.",
+        "date": "2026-11-12"
+      }
+    }
+  }
+}

@@ -76,11 +76,13 @@ public:
     void popClip();
     void pushTransform(const Transform2D& transform);
     void popTransform();
+    // Enlarge by exactly what fits instead of by whole factors (game.json canvas_scale "smooth").
+    void setSmoothScale(bool smooth) { smoothScale_ = smooth; }
     void setLayer(int layer) { layer_ = layer; }
     void setAdditive(bool additive) { additive_ = additive; }
 
-    // How the virtual canvas maps onto a window: integer scaling when it fits,
-    // centred. Shared by the renderer and by picking.
+    // How the virtual canvas maps onto a window: integer scaling when it fits
+    // (or the exact fit with setSmoothScale), centred. Shared by the renderer and by picking.
     struct Presentation {
         float scale = 1;
         glm::vec2 offset{0};
@@ -98,6 +100,7 @@ private:
                 glm::vec2 offset);
     TextSystem& text_;
     int width_, height_;
+    bool smoothScale_ = false;
     int layer_ = 0;
     bool additive_ = false;
     std::vector<CanvasQuad> quads_;

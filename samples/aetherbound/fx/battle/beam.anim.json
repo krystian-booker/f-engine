@@ -1,0 +1,26 @@
+{
+ "atlas": "beam.png",
+ "pixels_per_unit": 8,
+ "pivot": [
+  0.5,
+  1
+ ],
+ "clips": {
+  "idle": {
+   "loop": false,
+   "directions": [
+    [
+     {
+      "rect": [
+       0,
+       0,
+       64,
+       256
+      ],
+      "duration": 1
+     }
+    ]
+   ]
+  }
+ }
+}

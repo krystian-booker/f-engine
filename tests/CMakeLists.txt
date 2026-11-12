@@ -60,7 +60,7 @@ add_test(NAME unicode_path_copy COMMAND "${CMAKE_COMMAND}" -E copy_directory
 add_test(NAME check_unicode_path COMMAND fengine_headless --check "${unicode_game}")
 set_tests_properties(unicode_path_copy PROPERTIES FIXTURES_SETUP unicode_game)
 set_tests_properties(check_unicode_path PROPERTIES FIXTURES_REQUIRED unicode_game)
-foreach(sample IN ITEMS starfall)
+foreach(sample IN ITEMS starfall aetherbound)
   if(EXISTS "${PROJECT_SOURCE_DIR}/samples/${sample}/game.json")
     add_test(NAME check_${sample} COMMAND fengine_headless --check "${PROJECT_SOURCE_DIR}/samples/${sample}")
     if(EXISTS "${PROJECT_SOURCE_DIR}/samples/${sample}/tests")
@@ -108,6 +108,34 @@ if(Python3_Interpreter_FOUND)
     "$<TARGET_FILE:fengine_headless>")
 endif()
 
+# The asset kits (tools/modelkit, animkit, texturekit, spritekit): each
+# validator proves itself on flawed fixtures, and every model, animation,
+# texture and sprite a sample ships passes its manifest: the measured checks
+# for its profile, the engine's own loader, and a visual review of exactly
+# these files. Needs numpy and pillow; without them the tests are not registered.
+if(Python3_Interpreter_FOUND)
+  execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import numpy, PIL"
+    RESULT_VARIABLE kits_missing OUTPUT_QUIET ERROR_QUIET)
+  if(kits_missing EQUAL 0)
+    foreach(kit IN ITEMS model:models anim:animations texture:textures sprite:sprites)
+      string(REPLACE ":" ";" kit "${kit}")
+      list(GET kit 0 name)
+      list(GET kit 1 section)
+      if(EXISTS "${PROJECT_SOURCE_DIR}/tools/${name}kit/selftest.py")
+        add_test(NAME ${name}kit_selftest COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/${name}kit/selftest.py")
+        set_tests_properties(${name}kit_selftest PROPERTIES TIMEOUT 300)
+        if(EXISTS "${PROJECT_SOURCE_DIR}/tools/aetherbound/${section}.json")
+          add_test(NAME ${section}_aetherbound COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/${name}kit/validate.py"
+            --manifest "${PROJECT_SOURCE_DIR}/tools/aetherbound/${section}.json" --engine "$<TARGET_FILE:fengine_headless>")
+          set_tests_properties(${section}_aetherbound PROPERTIES TIMEOUT 300)
+        endif()
+      endif()
+    endforeach()
+  else()
+    message(STATUS "asset kit tests skipped: python3 lacks numpy or pillow (pip install numpy pillow)")
+  endif()
+endif()
+
 # Every replay runs headless (no GPU; captures skipped). With
 # FENGINE_RUN_REPLAYS it also runs in the windowed runtime (needs a display).
 file(GLOB replays CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/samples/*/replays/*.json")
@@ -120,7 +148,11 @@ foreach(replay IN LISTS replays)
   set_tests_properties(replay_headless_${sample}_${name} PROPERTIES TIMEOUT 300)
   if(FENGINE_BUILD_RUNTIME AND FENGINE_RUN_REPLAYS)
     add_test(NAME replay_${sample}_${name}
-      COMMAND fengine "${game}" --mute --replay "${replay}" --user-data "${CMAKE_BINARY_DIR}/replay-user/${sample}-${name}")
-    set_tests_properties(replay_${sample}_${name} PROPERTIES LABELS windowed TIMEOUT 300)
+      COMMAND fengine "${game}" --mute --replay "${replay}" --replay-skip 30
+              --user-data "${CMAKE_BINARY_DIR}/replay-user/${sample}-${name}")
+    # --replay-skip: between the frames a replay captures the game ticks
+    # without rendering, so a ten-minute playthrough fits a CI runner whose
+    # renderer is software.
+    set_tests_properties(replay_${sample}_${name} PROPERTIES LABELS windowed TIMEOUT 900)
   endif()
 endforeach()

@@ -1,0 +1,13 @@
+{
+  "title": "spritekit stage",
+  "id": "spritekit-stage",
+  "window": {
+    "width": 1280,
+    "height": 720
+  },
+  "virtual_resolution": {
+    "width": 1280,
+    "height": 720
+  },
+  "pixels_per_unit": 32
+}

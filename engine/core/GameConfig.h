@@ -30,6 +30,12 @@ struct GameConfig {
     // Frame cap while vsync is off ("max_fps"); 0 = uncapped.
     int maxFps = 0;
     CanvasFit canvasFit = CanvasFit::Letterbox;
+    // How the canvas is enlarged for a window bigger than it ("canvas_scale"):
+    // false ("integer", the default) by whole factors, so pixel-art UI keeps
+    // square pixels (with bars when the window is not a multiple); true
+    // ("smooth") by exactly as much as fits, for a high-resolution UI with
+    // smooth fonts that should fill 1440p as it fills 1080p.
+    bool canvasSmooth = false;
     // Present to an HDR back buffer when the renderer offers one ("hdr_output",
     // default false; `fengine --hdr` turns it on too), with the frame's white
     // at "hdr_paper_white" nits (default 200, 80 to 10000).

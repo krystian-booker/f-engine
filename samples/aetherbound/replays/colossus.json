@@ -1,0 +1,84 @@
+[
+ {
+  "lua": "require('story.prologue').start('chamber')",
+  "tick": 6
+ },
+ {
+  "lua": "require('dev.autoplay').start(true)",
+  "tick": 8
+ },
+ {
+  "wait_for": "require('game.battle.scene').active ~= nil and require('game.battle.scene').active.menu ~= nil",
+  "timeout": 9000,
+  "tick": 10
+ },
+ {
+  "assert": "require('game.battle.scene').active.boss.hp == 8000",
+  "message": "the Colossus starts with 8,000 HP",
+  "tick": 12
+ },
+ {
+  "capture": "replay-out/aetherbound-colossus-battle.png",
+  "compare": "reference/{backend}/colossus-battle.png",
+  "tolerance": 0.035,
+  "tick": 42
+ },
+ {
+  "wait_for": "require('game.battle.scene').active == nil",
+  "timeout": 40000,
+  "tick": 44
+ },
+ {
+  "wait_for": "require('story.chamber').card ~= nil",
+  "timeout": 9000,
+  "tick": 46
+ },
+ {
+  "capture": "replay-out/aetherbound-overload.png",
+  "compare": "reference/{backend}/overload.png",
+  "tolerance": 0.035,
+  "tick": 106
+ },
+ {
+  "wait_for": "require('game.battle.scene').active ~= nil and require('game.battle.scene').active.menu ~= nil and require('game.battle.scene').active.menu.unit.id == 'rowan'",
+  "timeout": 40000,
+  "tick": 108
+ },
+ {
+  "assert": "require('game.battle.scene').active.boss.invulnerable and require('game.battle.scene').active.boss.hp == 4000",
+  "message": "the Colossus stopped at half and cannot be hurt",
+  "tick": 110
+ },
+ {
+  "capture": "replay-out/aetherbound-unbound.png",
+  "compare": "reference/{backend}/unbound.png",
+  "tolerance": 0.035,
+  "tick": 130
+ },
+ {
+  "wait_for": "require('game.battle.scene').active.menu ~= nil and #require('game.battle.scene').active.menu.commands == 1",
+  "timeout": 40000,
+  "tick": 132
+ },
+ {
+  "assert": "require('game.battle.scene').active.menu.commands[1].label == 'LAST LIGHT'",
+  "message": "one command is left",
+  "tick": 134
+ },
+ {
+  "capture": "replay-out/aetherbound-last-light.png",
+  "compare": "reference/{backend}/last-light.png",
+  "tolerance": 0.035,
+  "tick": 154
+ },
+ {
+  "wait_for": "require('story.prologue').scene == 'last_light'",
+  "timeout": 3000,
+  "tick": 156
+ },
+ {
+  "assert": "#fe.dev.errors() == 0",
+  "message": "script errors",
+  "tick": 166
+ }
+]

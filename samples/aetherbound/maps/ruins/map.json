@@ -1,0 +1,1164 @@
+{
+ "format": 2,
+ "id": "ruins",
+ "name": "The Chamber, Before Dawn",
+ "geometry": "geometry.glb",
+ "grid": {
+  "width": 32,
+  "depth": 32,
+  "tags": [],
+  "layers": [
+   {
+    "name": "ground",
+    "height": [
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 -0.05 -0.15 -0.2 -0.15 -0.05 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 -0.2 -0.35 -0.4 -0.35 -0.2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 -0.05 -0.3 -0.5 -0.6 -0.5 -0.3 -0.05 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 -0.05 -0.3 -0.5 -0.6 -0.5 -0.3 -0.05 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 -0.2 -0.35 -0.4 -0.35 -0.2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 -0.05 -0.15 -0.2 -0.15 -0.05 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
+    ],
+    "walk": [
+     "00000000000000000000000000000000",
+     "00000000000000000000000000000000",
+     "00000000000000000000000000000000",
+     "00000000000000000000000000000000",
+     "00000000000000000000000000000000",
+     "00000000000000000000000000000000",
+     "00000000000000000000000000000000",
+     "00000000000000110000000000000000",
+     "00000000000000110000000000000000",
+     "00000000001100110000000000000000",
+     "00000000001111100000000000000000",
+     "00000000100000010000000000000000",
+     "00000001000000011000011100000000",
+     "00000000001111111001111110000000",
+     "00000100011111111111111111111100",
+     "00001100111111111111111111111110",
+     "00001100111111111111111111111110",
+     "00001100111111111111111111111110",
+     "00000010011111111111111111000000",
+     "00000000011111111111111111000000",
+     "00000000111111111111111111100000",
+     "00000000011111111111111101100000",
+     "00000010011111111111111000000000",
+     "00000000001111111111111000000000",
+     "00000000001110111111100000000000",
+     "00000000001110001111000000000000",
+     "00000000001110001111000000000000",
+     "00000000000010001111000000000000",
+     "00000000000000000000000000000000",
+     "00000000000000000000000000000000",
+     "00000000000000000000000000000000",
+     "00000000000000000000000000000000"
+    ]
+   }
+  ]
+ },
+ "points": {
+  "start": {
+   "position": [
+    28.5,
+    0.0,
+    16.0
+   ],
+   "facing": [
+    -1.0,
+    0.0
+   ],
+   "layer": 0
+  },
+  "boss": {
+   "position": [
+    11.5,
+    -0.6,
+    16.0
+   ],
+   "facing": [
+    1.0,
+    0.0
+   ],
+   "layer": 0
+  },
+  "centre": {
+   "position": [
+    16.0,
+    0.0,
+    16.0
+   ],
+   "facing": [
+    -1.0,
+    0.0
+   ],
+   "layer": 0
+  },
+  "intro1": {
+   "position": [
+    23.0,
+    0.0,
+    14.5
+   ],
+   "facing": [
+    -1.0,
+    0.0
+   ],
+   "layer": 0
+  },
+  "intro2": {
+   "position": [
+    24.2,
+    0.0,
+    15.5
+   ],
+   "facing": [
+    -1.0,
+    0.0
+   ],
+   "layer": 0
+  },
+  "intro3": {
+   "position": [
+    23.4,
+    0.0,
+    16.6
+   ],
+   "facing": [
+    -1.0,
+    0.0
+   ],
+   "layer": 0
+  },
+  "intro4": {
+   "position": [
+    24.5,
+    0.0,
+    17.5
+   ],
+   "facing": [
+    -1.0,
+    0.0
+   ],
+   "layer": 0
+  },
+  "party1": {
+   "position": [
+    20.5,
+    0.0,
+    13.6
+   ],
+   "facing": [
+    -1.0,
+    0.0
+   ],
+   "layer": 0
+  },
+  "party2": {
+   "position": [
+    21.3,
+    0.0,
+    15.2
+   ],
+   "facing": [
+    -1.0,
+    0.0
+   ],
+   "layer": 0
+  },
+  "party3": {
+   "position": [
+    20.7,
+    0.0,
+    16.8
+   ],
+   "facing": [
+    -1.0,
+    0.0
+   ],
+   "layer": 0
+  },
+  "party4": {
+   "position": [
+    21.5,
+    0.0,
+    18.4
+   ],
+   "facing": [
+    -1.0,
+    0.0
+   ],
+   "layer": 0
+  },
+  "thrown1": {
+   "position": [
+    24.5,
+    0.0,
+    13.6
+   ],
+   "facing": [
+    -1.0,
+    0.0
+   ],
+   "layer": 0
+  },
+  "thrown2": {
+   "position": [
+    25.3,
+    0.0,
+    15.2
+   ],
+   "facing": [
+    -1.0,
+    0.0
+   ],
+   "layer": 0
+  },
+  "thrown3": {
+   "position": [
+    24.7,
+    0.0,
+    16.8
+   ],
+   "facing": [
+    -1.0,
+    0.0
+   ],
+   "layer": 0
+  },
+  "thrown4": {
+   "position": [
+    25.5,
+    0.0,
+    18.4
+   ],
+   "facing": [
+    -1.0,
+    0.0
+   ],
+   "layer": 0
+  },
+  "rowan_walk": {
+   "position": [
+    15.5,
+    0.0,
+    16.0
+   ],
+   "facing": [
+    -1.0,
+    0.0
+   ],
+   "layer": 0
+  },
+  "cael_stop": {
+   "position": [
+    18.5,
+    0.0,
+    16.0
+   ],
+   "facing": [
+    -1.0,
+    0.0
+   ],
+   "layer": 0
+  },
+  "cael_wake": {
+   "position": [
+    22.5,
+    0.0,
+    17.5
+   ],
+   "facing": [
+    -1.0,
+    0.0
+   ],
+   "layer": 0
+  },
+  "darius_wake": {
+   "position": [
+    24.5,
+    0.0,
+    16.0
+   ],
+   "facing": [
+    -1.0,
+    0.0
+   ],
+   "layer": 0
+  },
+  "lyra_kneel": {
+   "position": [
+    13.2,
+    -0.3,
+    15.4
+   ],
+   "facing": [
+    -0.7071,
+    0.7071
+   ],
+   "layer": 0
+  },
+  "sword": {
+   "position": [
+    12.5,
+    -0.5,
+    16.0
+   ],
+   "facing": [
+    -1.0,
+    0.0
+   ],
+   "layer": 0
+  },
+  "cael_run_end": {
+   "position": [
+    14.5,
+    -0.05,
+    16.6
+   ],
+   "facing": [
+    -1.0,
+    0.0
+   ],
+   "layer": 0
+  }
+ },
+ "placements": [],
+ "zones": [],
+ "props": {
+  "music": "remains",
+  "camera": {
+   "distance": 20,
+   "pitch": 24,
+   "fov": 30
+  }
+ },
+ "lights": [
+  {
+   "type": "point",
+   "position": [
+    11.5,
+    0.5,
+    16.0
+   ],
+   "color": [
+    0.5,
+    0.25,
+    1.0
+   ],
+   "intensity": 1.5,
+   "radius": 6.0,
+   "flicker": 0.05,
+   "flicker_speed": 1.5,
+   "flicker_curve": [
+    [
+     0.0,
+     1.0
+    ],
+    [
+     2.5,
+     1.35
+    ],
+    [
+     5.0,
+     1.0
+    ],
+    [
+     7.0,
+     0.8
+    ],
+    [
+     9.0,
+     1.0
+    ]
+   ],
+   "shadows": false
+  },
+  {
+   "type": "point",
+   "position": [
+    12.1,
+    -0.1,
+    15.7
+   ],
+   "color": [
+    0.7,
+    0.45,
+    1.0
+   ],
+   "intensity": 0.9,
+   "radius": 2.6,
+   "flicker": 0.1,
+   "flicker_speed": 2.0,
+   "flicker_curve": [
+    [
+     0.0,
+     1.0
+    ],
+    [
+     2.5,
+     1.35
+    ],
+    [
+     5.0,
+     1.0
+    ],
+    [
+     7.0,
+     0.8
+    ],
+    [
+     9.0,
+     1.0
+    ]
+   ],
+   "shadows": false
+  },
+  {
+   "type": "point",
+   "position": [
+    17.0,
+    0.3,
+    16.0
+   ],
+   "color": [
+    0.5,
+    0.25,
+    1.0
+   ],
+   "intensity": 0.55,
+   "radius": 2.6,
+   "flicker": 0.1,
+   "flicker_speed": 2.0,
+   "flicker_curve": [
+    [
+     0.0,
+     1.0
+    ],
+    [
+     2.5,
+     1.35
+    ],
+    [
+     5.0,
+     1.0
+    ],
+    [
+     7.0,
+     0.8
+    ],
+    [
+     9.0,
+     1.0
+    ]
+   ],
+   "shadows": false
+  },
+  {
+   "type": "point",
+   "position": [
+    11.5,
+    0.3,
+    10.4
+   ],
+   "color": [
+    0.5,
+    0.25,
+    1.0
+   ],
+   "intensity": 0.55,
+   "radius": 2.6,
+   "flicker": 0.1,
+   "flicker_speed": 2.0,
+   "flicker_curve": [
+    [
+     0.0,
+     1.0
+    ],
+    [
+     2.5,
+     1.35
+    ],
+    [
+     5.0,
+     1.0
+    ],
+    [
+     7.0,
+     0.8
+    ],
+    [
+     9.0,
+     1.0
+    ]
+   ],
+   "shadows": false
+  },
+  {
+   "type": "point",
+   "position": [
+    8.0,
+    0.3,
+    19.4
+   ],
+   "color": [
+    0.5,
+    0.25,
+    1.0
+   ],
+   "intensity": 0.55,
+   "radius": 2.6,
+   "flicker": 0.1,
+   "flicker_speed": 2.0,
+   "flicker_curve": [
+    [
+     0.0,
+     1.0
+    ],
+    [
+     2.5,
+     1.35
+    ],
+    [
+     5.0,
+     1.0
+    ],
+    [
+     7.0,
+     0.8
+    ],
+    [
+     9.0,
+     1.0
+    ]
+   ],
+   "shadows": false
+  },
+  {
+   "type": "point",
+   "position": [
+    46.0,
+    16.0,
+    -12.0
+   ],
+   "color": [
+    0.95,
+    0.72,
+    0.9
+   ],
+   "intensity": 1.5,
+   "radius": 70.0,
+   "flicker": 0.0,
+   "flicker_speed": 6.0,
+   "flicker_curve": [],
+   "shadows": false
+  },
+  {
+   "type": "point",
+   "position": [
+    24.6,
+    1.86,
+    11.6
+   ],
+   "color": [
+    1.0,
+    0.5,
+    0.2
+   ],
+   "intensity": 1.1,
+   "radius": 4.5,
+   "flicker": 0.35,
+   "flicker_speed": 5.0,
+   "flicker_curve": [],
+   "shadows": false
+  }
+ ],
+ "emitters": [
+  {
+   "position": [
+    24.6,
+    1.46,
+    11.6
+   ],
+   "sprite": "fx/chamber/ember.anim.json",
+   "rate": 1.6,
+   "burst": 0,
+   "lifetime": 2.4,
+   "lifetime_jitter": 0.8,
+   "velocity": [
+    0.1,
+    0.6,
+    0
+   ],
+   "velocity_jitter": [
+    0.2,
+    0.3,
+    0.2
+   ],
+   "gravity": [
+    0,
+    0,
+    0
+   ],
+   "area": [
+    0.25,
+    0.05,
+    0.25
+   ],
+   "size": 0.045,
+   "size_end": 0.02,
+   "drag": 0.0,
+   "stretch": 0.0,
+   "color": [
+    2.6,
+    1.2,
+    0.4,
+    1
+   ],
+   "color_end": [
+    1.6,
+    0.3,
+    0.1,
+    0
+   ],
+   "blend": "additive",
+   "unlit": true,
+   "world_space": true,
+   "distort": 0.0,
+   "max": 12
+  },
+  {
+   "position": [
+    24.6,
+    1.66,
+    11.6
+   ],
+   "sprite": "fx/chamber/smoke.anim.json",
+   "rate": 1.2,
+   "burst": 0,
+   "lifetime": 6.0,
+   "lifetime_jitter": 1.5,
+   "velocity": [
+    0.25,
+    0.6,
+    0.05
+   ],
+   "velocity_jitter": [
+    0.1,
+    0.1,
+    0.1
+   ],
+   "gravity": [
+    0,
+    0,
+    0
+   ],
+   "area": [
+    0.1,
+    0.05,
+    0.1
+   ],
+   "size": 0.4,
+   "size_end": 1.8,
+   "drag": 0.1,
+   "stretch": 0.0,
+   "color": [
+    0.32,
+    0.36,
+    0.5,
+    0.3
+   ],
+   "color_end": [
+    0.32,
+    0.36,
+    0.5,
+    0.0
+   ],
+   "blend": "alpha",
+   "unlit": false,
+   "world_space": true,
+   "distort": 0.0,
+   "max": 14
+  },
+  {
+   "position": [
+    16.0,
+    13.0,
+    15.0
+   ],
+   "sprite": "fx/chamber/mote.anim.json",
+   "rate": 120,
+   "burst": 1400,
+   "lifetime": 13.0,
+   "lifetime_jitter": 4.0,
+   "velocity": [
+    0.06,
+    -0.38,
+    0.03
+   ],
+   "velocity_jitter": [
+    0.12,
+    0.12,
+    0.12
+   ],
+   "gravity": [
+    0,
+    0,
+    0
+   ],
+   "area": [
+    21,
+    13,
+    19
+   ],
+   "size": 0.085,
+   "size_end": 0.06,
+   "drag": 0.0,
+   "stretch": 0.0,
+   "color": [
+    1.2,
+    0.8,
+    2.1,
+    1.0
+   ],
+   "color_end": [
+    1.0,
+    0.55,
+    1.9,
+    0.0
+   ],
+   "blend": "additive",
+   "unlit": true,
+   "world_space": true,
+   "distort": 0.0,
+   "max": 1900
+  },
+  {
+   "position": [
+    12.0,
+    3.6,
+    7.4
+   ],
+   "sprite": "fx/chamber/smoke.anim.json",
+   "rate": 0.9,
+   "burst": 3,
+   "lifetime": 11.0,
+   "lifetime_jitter": 3.0,
+   "velocity": [
+    0.35,
+    0.55,
+    0.05
+   ],
+   "velocity_jitter": [
+    0.12,
+    0.1,
+    0.1
+   ],
+   "gravity": [
+    0,
+    0,
+    0
+   ],
+   "area": [
+    0.5,
+    0.1,
+    0.5
+   ],
+   "size": 0.7,
+   "size_end": 3.4,
+   "drag": 0.05,
+   "stretch": 0.0,
+   "color": [
+    0.2,
+    0.23,
+    0.36,
+    0.26
+   ],
+   "color_end": [
+    0.2,
+    0.23,
+    0.36,
+    0.0
+   ],
+   "blend": "alpha",
+   "unlit": false,
+   "world_space": true,
+   "distort": 0.0,
+   "max": 18
+  },
+  {
+   "position": [
+    20.4,
+    3.2,
+    8.0
+   ],
+   "sprite": "fx/chamber/smoke.anim.json",
+   "rate": 0.9,
+   "burst": 3,
+   "lifetime": 11.0,
+   "lifetime_jitter": 3.0,
+   "velocity": [
+    0.35,
+    0.55,
+    0.05
+   ],
+   "velocity_jitter": [
+    0.12,
+    0.1,
+    0.1
+   ],
+   "gravity": [
+    0,
+    0,
+    0
+   ],
+   "area": [
+    0.5,
+    0.1,
+    0.5
+   ],
+   "size": 0.7,
+   "size_end": 3.4,
+   "drag": 0.05,
+   "stretch": 0.0,
+   "color": [
+    0.2,
+    0.23,
+    0.36,
+    0.26
+   ],
+   "color_end": [
+    0.2,
+    0.23,
+    0.36,
+    0.0
+   ],
+   "blend": "alpha",
+   "unlit": false,
+   "world_space": true,
+   "distort": 0.0,
+   "max": 18
+  },
+  {
+   "position": [
+    6.2,
+    1.4,
+    20.8
+   ],
+   "sprite": "fx/chamber/smoke.anim.json",
+   "rate": 0.9,
+   "burst": 3,
+   "lifetime": 11.0,
+   "lifetime_jitter": 3.0,
+   "velocity": [
+    0.35,
+    0.55,
+    0.05
+   ],
+   "velocity_jitter": [
+    0.12,
+    0.1,
+    0.1
+   ],
+   "gravity": [
+    0,
+    0,
+    0
+   ],
+   "area": [
+    0.5,
+    0.1,
+    0.5
+   ],
+   "size": 0.7,
+   "size_end": 3.4,
+   "drag": 0.05,
+   "stretch": 0.0,
+   "color": [
+    0.2,
+    0.23,
+    0.36,
+    0.26
+   ],
+   "color_end": [
+    0.2,
+    0.23,
+    0.36,
+    0.0
+   ],
+   "blend": "alpha",
+   "unlit": false,
+   "world_space": true,
+   "distort": 0.0,
+   "max": 18
+  },
+  {
+   "position": [
+    33.5,
+    1.5,
+    16.0
+   ],
+   "sprite": "fx/chamber/smoke.anim.json",
+   "rate": 0.9,
+   "burst": 3,
+   "lifetime": 11.0,
+   "lifetime_jitter": 3.0,
+   "velocity": [
+    0.35,
+    0.55,
+    0.05
+   ],
+   "velocity_jitter": [
+    0.12,
+    0.1,
+    0.1
+   ],
+   "gravity": [
+    0,
+    0,
+    0
+   ],
+   "area": [
+    0.5,
+    0.1,
+    0.5
+   ],
+   "size": 0.7,
+   "size_end": 3.4,
+   "drag": 0.05,
+   "stretch": 0.0,
+   "color": [
+    0.2,
+    0.23,
+    0.36,
+    0.26
+   ],
+   "color_end": [
+    0.2,
+    0.23,
+    0.36,
+    0.0
+   ],
+   "blend": "alpha",
+   "unlit": false,
+   "world_space": true,
+   "distort": 0.0,
+   "max": 18
+  },
+  {
+   "position": [
+    24.6,
+    1.6,
+    11.6
+   ],
+   "sprite": "fx/chamber/smoke.anim.json",
+   "rate": 0.9,
+   "burst": 3,
+   "lifetime": 11.0,
+   "lifetime_jitter": 3.0,
+   "velocity": [
+    0.35,
+    0.55,
+    0.05
+   ],
+   "velocity_jitter": [
+    0.12,
+    0.1,
+    0.1
+   ],
+   "gravity": [
+    0,
+    0,
+    0
+   ],
+   "area": [
+    0.5,
+    0.1,
+    0.5
+   ],
+   "size": 0.7,
+   "size_end": 3.4,
+   "drag": 0.05,
+   "stretch": 0.0,
+   "color": [
+    0.2,
+    0.23,
+    0.36,
+    0.26
+   ],
+   "color_end": [
+    0.2,
+    0.23,
+    0.36,
+    0.0
+   ],
+   "blend": "alpha",
+   "unlit": false,
+   "world_space": true,
+   "distort": 0.0,
+   "max": 18
+  },
+  {
+   "position": [
+    11.5,
+    0.2,
+    16.0
+   ],
+   "sprite": "fx/chamber/mote.anim.json",
+   "rate": 5,
+   "burst": 20,
+   "lifetime": 5.0,
+   "lifetime_jitter": 1.5,
+   "velocity": [
+    0,
+    0.3,
+    0
+   ],
+   "velocity_jitter": [
+    0.1,
+    0.15,
+    0.1
+   ],
+   "gravity": [
+    0,
+    0,
+    0
+   ],
+   "area": [
+    2.6,
+    0.1,
+    2.6
+   ],
+   "size": 0.08,
+   "size_end": 0.02,
+   "drag": 0.0,
+   "stretch": 0.0,
+   "color": [
+    1.4,
+    0.9,
+    2.4,
+    1
+   ],
+   "color_end": [
+    1.2,
+    0.6,
+    2.2,
+    0
+   ],
+   "blend": "additive",
+   "unlit": true,
+   "world_space": true,
+   "distort": 0.0,
+   "max": 48
+  }
+ ],
+ "colliders": [],
+ "environment": {
+  "ambient": [
+   0.052,
+   0.068,
+   0.13
+  ],
+  "sun_color": [
+   0.72,
+   0.98,
+   1.75
+  ],
+  "sun_direction": [
+   0.84,
+   -0.4,
+   0.3
+  ],
+  "fog_color": [
+   0.1,
+   0.115,
+   0.215
+  ],
+  "fog_density": 0.011,
+  "fog_height": 2.0,
+  "fog_height_falloff": 0.035,
+  "fog_max": 0.94,
+  "shadows": true,
+  "shadow_distance": 46.0,
+  "shadow_strength": 0.9,
+  "shadow_bias": 0.04,
+  "sprite_light_height": 0.8,
+  "anisotropic": true,
+  "pixel_snap": false,
+  "sky": {
+   "mode": "gradient",
+   "top": [
+    0.012,
+    0.016,
+    0.07
+   ],
+   "horizon": [
+    0.27,
+    0.26,
+    0.43
+   ],
+   "bottom": [
+    0.05,
+    0.06,
+    0.12
+   ],
+   "cloud_cover": 0.0,
+   "backdrops": []
+  },
+  "weather": {
+   "kind": "none",
+   "intensity": 0.0
+  },
+  "post": {
+   "bloom": true,
+   "bloom_strength": 0.6,
+   "bloom_threshold": 0.95,
+   "bloom_knee": 0.6,
+   "bloom_radius": 0.7,
+   "bloom_levels": 6,
+   "depth_of_field": true,
+   "dof_mode": "tilt",
+   "focus": 0.55,
+   "focus_range": 0.36,
+   "dof_radius": 5.0,
+   "aperture": 1.2,
+   "protect_sprites": true,
+   "ssao": true,
+   "ssao_radius": 0.7,
+   "ssao_strength": 1.0,
+   "ssao_bias": 0.03,
+   "vignette": true,
+   "vignette_strength": 0.5,
+   "exposure": 1.3,
+   "tonemap": "aces",
+   "color_grade": true,
+   "lut": "maps/ruins/grade.cube",
+   "antialias": "auto",
+   "distortion": 1.0
+  }
+ }
+}

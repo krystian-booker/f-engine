@@ -1,0 +1,7 @@
+{
+  "title": "Aetherbound asset preview",
+  "id": "aetherbound-preview",
+  "window": {"width": 1280, "height": 720},
+  "virtual_resolution": {"width": 640, "height": 360},
+  "pixels_per_unit": 32
+}
