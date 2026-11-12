@@ -9,7 +9,11 @@
 --- ```
 local actors = { list = {} }
 
-local RUN_SPEED = 3.4 -- faster than this and the walk becomes a run
+local RUN_SPEED = 3.0 -- faster than this and the walk becomes a run
+-- Ground the feet cover per second at the clips' own pace (the sprites'
+-- generator says so): the clip plays faster or slower to keep up with the
+-- body, within reason, so feet do not skate.
+local WALK_PACE, RUN_PACE = 1.5, 2.4
 
 --- options: `collide` (the player's character), `speed`, `shadow = false`,
 --- `scale`, `clip` (a starting pose).
@@ -43,6 +47,10 @@ function actors.pose(entity, clip, restart)
   actor.pose = clip
   if clip then
     actor.clip = clip
+    if actor.pace ~= 1 then
+      actor.pace = 1
+      entity:sprite({ speed = 1 })
+    end
     entity:clip(clip, restart ~= false)
   end
 end
@@ -80,11 +88,20 @@ function actors.update(dt)
       actor.speed = dt > 0 and math.sqrt(dx * dx + dz * dz) / dt or 0
       actor.last = p
       if not actor.pose then
-        local clip = actor.rest or "idle"
-        if actor.speed > RUN_SPEED then clip = "run" elseif actor.speed > 0.2 then clip = "walk" end
+        local clip, pace = actor.rest or "idle", 1
+        if actor.speed > RUN_SPEED then
+          clip, pace = "run", actor.speed / RUN_PACE
+        elseif actor.speed > 0.2 then
+          clip, pace = "walk", actor.speed / WALK_PACE
+        end
+        pace = math.max(0.7, math.min(1.7, pace))
         if clip ~= actor.clip then
           actor.clip = clip
           entity:clip(clip, false)
+        end
+        if pace ~= actor.pace then
+          actor.pace = pace
+          entity:sprite({ speed = pace })
         end
       end
     end

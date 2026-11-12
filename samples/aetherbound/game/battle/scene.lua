@@ -193,7 +193,7 @@ local function hero_strike(self, unit, use, events)
   actors.pose(e, "run")
   director.slide(e, spot, resonance and 0.16 or 0.22, { ease = fx.ease_out })
   actors.pose(e, "attack")
-  task.wait(0.2)
+  task.wait(0.24) -- the frame the blade lands on
   local at = body(self, target)
   if resonance then
     audio.sfx("resonance", { volume = 1 })
@@ -263,7 +263,7 @@ local function soldier_strike(self, unit, use, events)
   actors.pose(e, "run")
   director.slide(e, spot, 0.3, { ease = fx.ease_out })
   actors.pose(e, "attack")
-  task.wait(0.2)
+  task.wait(0.24)
   audio.sfx(use.skill == "lunge" and "slash_heavy" or "slash", { volume = 0.7 })
   vfx.sprite(self.world, "fx/battle/slash.anim.json", body(self, target), { scale = 1.0, life = 0.3,
     tint = { 1.0, 0.7, 0.6, 1 }, flip = self.to_enemies.x < 0 })

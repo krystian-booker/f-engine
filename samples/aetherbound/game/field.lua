@@ -19,7 +19,7 @@ local task = require("game.task")
 local field = { world = nil, actors = {}, on_zone = {}, locked = 0, follow = true, camera_follow = true,
   trail = {}, hud = true, scene = {} }
 
-local WALK, RUN = 3.0, 4.6
+local WALK, RUN = 2.3, 3.8
 local SPACING = 0.95 -- between followers, along the leader's trail
 
 local function heroes()

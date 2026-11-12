@@ -52,8 +52,8 @@ function remains.run()
 
   line("Darius", "Your Highness! You're alive!", 2.8)
   -- Cael slowly stands.
-  cael:sprite({ speed = 0.45 })
   actors.pose(cael, "rise")
+  cael:sprite({ speed = 0.45 })
   wait(2.4)
   cael:sprite({ speed = 1 })
   actors.pose(cael, nil)
