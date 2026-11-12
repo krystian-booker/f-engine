@@ -20,7 +20,7 @@ local field = { world = nil, actors = {}, on_zone = {}, locked = 0, follow = tru
   trail = {}, hud = true, scene = {} }
 
 local WALK, RUN = 2.3, 3.8
-local SPACING = 0.95 -- between followers, along the leader's trail
+local SPACING = 1.15 -- between followers, along the leader's trail
 
 local function heroes()
   return party.order
@@ -126,7 +126,7 @@ function field.place_camera(snap)
   if snap then camera:snap() end
 end
 
-local function follow()
+local function follow(dt)
   local leader = field.leader()
   local p = leader.position
   local head = field.trail[1]
@@ -145,10 +145,14 @@ local function follow()
       if walked + length >= wanted then
         local t = length > 0 and (wanted - walked) / length or 0
         local x, z = a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t
+        -- Walk towards the place in line, no faster than a run: after a
+        -- scene the others fall in behind Cael, they do not jump there.
         local now = follower.position
         local dx, dz = x - now.x, z - now.z
-        if dx * dx + dz * dz > 1e-5 then
-          follower:place({ x = x, z = z }, leader.layer)
+        local distance = math.sqrt(dx * dx + dz * dz)
+        if distance > 0.02 then
+          local step = math.min(distance, RUN * 1.15 * dt)
+          follower:place({ x = now.x + dx / distance * step, z = now.z + dz / distance * step }, leader.layer)
           follower:face({ x = dx, z = dz })
         end
         break
@@ -172,7 +176,7 @@ function field.scene:update(dt)
       leader:drive({ x = x * scale, z = z * scale })
       leader:face({ x = x, z = z })
     end
-    if field.follow then follow() end
+    if field.follow then follow(dt) end
   end
   if field.camera_follow and field.locked == 0 then field.place_camera(false) end
 end

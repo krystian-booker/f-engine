@@ -678,7 +678,7 @@ function Scene:draw()
   if self.script.draw then self.script.draw(self) end
   if self.menu then
     ui.hints(self.menu.target and { { "confirm", "Select" }, { "cancel", "Back" } }
-      or { { "confirm", "Choose" }, { "cancel", "Back" } })
+      or { { "confirm", "Choose" }, { "cancel", "Back" } }, 1, PANEL.y - 54)
   end
   fe.canvas.pop()
 end

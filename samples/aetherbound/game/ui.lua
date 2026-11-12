@@ -28,6 +28,7 @@ function ui.setup()
   face("menu", "CrimsonPro_500Medium.ttf", 40, "CrimsonPro_700Bold.ttf")
   face("small", "CrimsonPro_500Medium.ttf", 30, "CrimsonPro_700Bold.ttf")
   face("tiny", "CrimsonPro_500Medium.ttf", 24)
+  face("hint", "CrimsonPro_500Medium.ttf", 36)
   face("italic", "CrimsonPro_500Medium_Italic.ttf", 46)
   face("label", "Cinzel_600SemiBold.ttf", 30)
   face("name", "Cinzel_600SemiBold.ttf", 38)
@@ -95,13 +96,14 @@ function ui.cursor(x, y)
   fe.canvas.image("ui/cursor.png", x - 44 + bob, y - 20, { linear = true })
 end
 
---- The row of button prompts at the bottom right.
-function ui.hints(list, alpha)
+--- The row of button prompts, right-aligned: at the bottom of the screen,
+--- or with its top at `y`.
+function ui.hints(list, alpha, y)
   local w, h = ui.size()
   local text = input.hints(list)
-  local tw = fe.text.measure(text, { font = "small" })
+  local tw = fe.text.measure(text, { font = "hint" })
   fe.canvas.push({ alpha = alpha or 1 })
-  ui.text(text, w - tw - 48, h - 52, { font = "small", color = ui.colors.dim })
+  ui.text(text, w - tw - 56, y or (h - 64), { font = "hint", color = ui.colors.text })
   fe.canvas.pop()
 end
 
