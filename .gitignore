@@ -14,5 +14,5 @@ tools/editor_walkthrough/out/
 /replay-out/
 
 # Model review sheets (tools/modelkit/review.py); regenerate them to look at a model
-tools/*/model_reviews/
+tools/*/*_reviews/
 *.review.png

@@ -11,7 +11,7 @@ from collections import defaultdict
 
 import numpy as np
 
-ERROR, WARN, INFO = "error", "warn", "info"
+from kitcommon.kit import ERROR, INFO, WARN, Finding  # noqa: F401  (the kits share one Finding)
 
 GROUPS = [
     ("integrity", "Mesh integrity"),
@@ -20,20 +20,6 @@ GROUPS = [
     ("uv", "UV mapping"),
     ("ready", "Game readiness"),
 ]
-
-
-class Finding:
-    def __init__(self, check, severity, message, count=None, where=None, fix=None):
-        self.check, self.severity, self.message = check, severity, message
-        self.count, self.where, self.fix = count, where, fix
-        self.waived = None  # the reason, when a manifest waives this check
-
-    @property
-    def group(self):
-        return self.check.split(".")[0]
-
-    def to_json(self):
-        return {key: value for key, value in vars(self).items() if value is not None}
 
 
 # ------------------------------------------------------------------ surface

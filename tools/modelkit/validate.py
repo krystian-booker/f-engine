@@ -24,7 +24,9 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(HERE))
 
+from kitcommon import kit  # noqa: E402
 from modelkit import checks, gltf  # noqa: E402
 
 LABELS = dict(checks.GROUPS)
@@ -118,33 +120,8 @@ def validate(path, profile, waivers=None, review=None, engine=None, require_revi
             findings.append(checks.Finding("ready.engine_load", checks.ERROR, f"the engine cannot load it: {problem}", None, None,
                                            "The engine's own loader is the last word; fix what it names."))
     if require_review:
-        digest = sha256(path)
-        if not review:
-            findings.append(checks.Finding("visual.review", checks.ERROR, "no visual review on record", None, None,
-                                           "Make the review sheet (review.py), look at it against the art direction, and record the verdict (review.py --sign)."))
-        elif review.get("sha256") != digest:
-            findings.append(checks.Finding("visual.review", checks.ERROR, "the model changed after its visual review", None, None,
-                                           "Review the new version and sign it off again."))
-        elif review.get("verdict") != "pass":
-            findings.append(checks.Finding("visual.review", checks.ERROR,
-                                           f"its visual review says '{review.get('verdict')}': {review.get('notes', '')}", None, None,
-                                           "Fix what the review names, then review again."))
-    # A waiver is a reason, or {"reason", "max"}: with a cap, it holds only
-    # while the count stays at or under it, so a known flaw cannot grow.
-    totals = {}
-    for finding in findings:
-        totals[finding.check] = totals.get(finding.check, 0) + (finding.count or 1)
-    for finding in findings:
-        waiver = (waivers or {}).get(finding.check)
-        if not waiver or finding.severity == checks.INFO or finding.check in UNWAIVABLE:
-            continue
-        reason, cap = (waiver, None) if isinstance(waiver, str) else (waiver.get("reason"), waiver.get("max"))
-        if not reason:
-            continue
-        if cap is not None and totals[finding.check] > cap:
-            finding.message += f" (waived up to {cap:,}; now {totals[finding.check]:,})"
-            continue
-        finding.waived = reason
+        findings.extend(kit.review_findings(review, sha256(path), "model"))
+    kit.apply_waivers(findings, waivers, UNWAIVABLE)
     return findings, model
 
 
