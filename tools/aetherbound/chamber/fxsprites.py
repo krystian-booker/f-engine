@@ -44,10 +44,12 @@ def dot_frames(colours, sizes, canvas=8):
     frames = []
     for colour, halo, radius in sizes:
         frame = np.zeros((canvas, canvas, 4))
-        c = canvas // 2
+        # Centred on a pixel, not on the corner between four: there the nearest pixel is a
+        # whole unit away and a spark of radius under 1 covered nothing (spritekit: sheet.empty_frame).
+        c = canvas // 2 - 1
         for y in range(canvas):
             for x in range(canvas):
-                d = abs(x - c + 0.5) + abs(y - c + 0.5)
+                d = abs(x - c) + abs(y - c)
                 if d <= radius:
                     frame[y, x, :3] = colours[colour]
                     frame[y, x, 3] = 255

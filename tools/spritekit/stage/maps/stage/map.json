@@ -1,0 +1,195 @@
+{
+ "format": 2,
+ "id": "stage",
+ "name": "Sprite stage",
+ "grid": {
+  "width": 16,
+  "depth": 16,
+  "tags": [],
+  "layers": [
+   {
+    "name": "ground",
+    "height": [
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+     "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
+    ],
+    "walk": [
+     "1111111111111111",
+     "1111111111111111",
+     "1111111111111111",
+     "1111111111111111",
+     "1111111111111111",
+     "1111111111111111",
+     "1111111111111111",
+     "1111111111111111",
+     "1111111111111111",
+     "1111111111111111",
+     "1111111111111111",
+     "1111111111111111",
+     "1111111111111111",
+     "1111111111111111",
+     "1111111111111111",
+     "1111111111111111"
+    ]
+   }
+  ]
+ },
+ "environment": {
+  "ambient": [
+   0.16,
+   0.17,
+   0.21
+  ],
+  "anisotropic": true,
+  "fog_color": [
+   0.05000000074505806,
+   0.07999999821186066,
+   0.14000000059604645
+  ],
+  "fog_density": 0.0,
+  "fog_height": 0.0,
+  "fog_height_falloff": 0.07999999821186066,
+  "fog_max": 0.9200000166893005,
+  "pixel_snap": false,
+  "post": {
+   "antialias": "auto",
+   "aperture": 1.5,
+   "bloom": false,
+   "bloom_knee": 0.5,
+   "bloom_levels": 6,
+   "bloom_radius": 0.75,
+   "bloom_strength": 0.35,
+   "bloom_threshold": 0.8500000238418579,
+   "chromatic_aberration": 0.0,
+   "color_grade": false,
+   "custom": [],
+   "depth_of_field": false,
+   "distortion": 1.0,
+   "dof_mode": "both",
+   "dof_radius": 10.0,
+   "exposure": 1.0,
+   "focus": 0.550000011920929,
+   "focus_distance": 0.0,
+   "focus_range": 0.25,
+   "lut": "",
+   "lut_blend": 0.0,
+   "lut_blend_target": "",
+   "pixel_scale": 1,
+   "protect_sprites": false,
+   "ssao": false,
+   "ssao_bias": 0.029999999329447746,
+   "ssao_radius": 0.6000000238418579,
+   "ssao_strength": 1.0,
+   "tonemap": "aces",
+   "vignette": false,
+   "vignette_strength": 0.6499999761581421
+  },
+  "shadow_bias": 0.029999999329447746,
+  "shadow_distance": 24.0,
+  "shadow_strength": 0.699999988079071,
+  "shadows": false,
+  "sky": {
+   "mode": "color",
+   "horizon": [
+    0.06,
+    0.065,
+    0.09
+   ],
+   "top": [
+    0.06,
+    0.065,
+    0.09
+   ],
+   "bottom": [
+    0.06,
+    0.065,
+    0.09
+   ],
+   "backdrops": [],
+   "cloud_cover": 0.0,
+   "cloud_color": [
+    1,
+    1,
+    1
+   ],
+   "cloud_speed": 0.0,
+   "panorama": ""
+  },
+  "sprite_light_height": 0.800000011920929,
+  "sun_color": [
+   0.12,
+   0.12,
+   0.14
+  ],
+  "sun_direction": [
+   -0.2,
+   -0.9,
+   -0.4
+  ],
+  "water": {
+   "deep_color": [
+    0.019999999552965164,
+    0.07999999821186066,
+    0.11999999731779099
+   ],
+   "depth_falloff": 0.800000011920929,
+   "fresnel": 1.0,
+   "reflection": 0.6000000238418579,
+   "refraction": 0.03999999910593033,
+   "specular": 0.6000000238418579,
+   "wave_scale": 0.6000000238418579,
+   "wave_speed": 1.0
+  },
+  "weather": {
+   "color": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "intensity": 0.0,
+   "kind": "none",
+   "sprite": "",
+   "wind": [
+    0.0,
+    0.0,
+    0.0
+   ]
+  }
+ },
+ "colliders": [],
+ "emitters": [],
+ "lights": [],
+ "placements": [],
+ "points": {
+  "centre": {
+   "position": [
+    8,
+    0,
+    8
+   ],
+   "facing": [
+    0,
+    1
+   ],
+   "layer": 0
+  }
+ },
+ "props": {},
+ "zones": [],
+ "geometry": "geometry.glb"
+}
