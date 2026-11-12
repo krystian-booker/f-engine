@@ -311,15 +311,6 @@ def model_uses(loaded):
     return uses
 
 
-def use_has_tangents(use):
-    """Whether the meshes that draw a use's material carry a TANGENT attribute (True), leave
-    the engine to derive tangents from the UVs (False), or no mesh draws it (None)."""
-    parts = [primitive for primitive in model(use["model_path"]).primitives if primitive.material == use["material_index"]]
-    if not parts:
-        return None
-    return all(primitive.tangents is not None for primitive in parts)
-
-
 def _from_model(texture, loaded, index):
     """Role, uses and partner of image `index` of a model."""
     names = image_names(loaded)

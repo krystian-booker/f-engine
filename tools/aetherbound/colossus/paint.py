@@ -228,9 +228,10 @@ def paint_crystal(c, ctx):
 
 
 def normal_from_height(h, strength=1.6):
+    """glTF's convention, which is the engine's: red leans right, green leans up the image."""
     gx = np.zeros_like(h); gy = np.zeros_like(h)
     gx[:, 1:-1] = (h[:, 2:] - h[:, :-2]) * 0.5
-    gy[1:-1, :] = (h[2:, :] - h[:-2, :]) * 0.5
-    n = np.stack([-gx * strength, -gy * strength, np.ones_like(h)], axis=2)
+    gy[1:-1, :] = (h[2:, :] - h[:-2, :]) * 0.5   # taken down the image
+    n = np.stack([-gx * strength, gy * strength, np.ones_like(h)], axis=2)
     n /= np.linalg.norm(n, axis=2, keepdims=True)
     return n * 0.5 + 0.5

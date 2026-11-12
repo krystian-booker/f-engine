@@ -52,9 +52,9 @@
       },
       "review": {
         "verdict": "pass",
-        "sha256": "ce0bb4e7e54527a2a73c51ffef3b54d558523500b6bbb621d43acfc4e8474db4",
+        "sha256": "b527d67bfba392a43ac1c80433f0cab6ee62a795566a3352f35474b38c82ad92",
         "by": "Claude (AI agent), from the review sheet with engine shots",
-        "notes": "Hunched war-machine silhouette reads at both game sizes and towers over a hero; teal plate, brass trim and violet core follow SPEC.md; clay view has no holes or dark blotches; dormant, awaken, idle, slam, sweep and pulse poses hold together in the engine. Rims shade soft rather than hard (waived debt).",
+        "notes": "Re-reviewed after its normal map's green was flipped with the engine's tangent fix. Mesh, rig and animations verified identical to the reviewed file, accessor by accessor. In the new engine shots the plates, trim and rivets are lit as before and the poses hold together; the Colossus battle replay still matches its reference screenshots. Earlier verdict and waivers stand.",
         "date": "2026-11-12"
       }
     },
@@ -96,9 +96,9 @@
       },
       "review": {
         "verdict": "pass",
-        "sha256": "73557775aee7ae9de5e071a02bf1bb4b9ea8dce4ccfee86b5f49640bda760f5e",
+        "sha256": "0833e4eef6bf5d999d62709a67a4e27b09660678111b16d7522d8f7641de0713",
         "by": "Claude (AI agent), from the map review sheet and the replay captures of the game",
-        "notes": "Bridge, gate, courtyard, stair and tower read clearly from the game camera and match the in-game captures (bridge-wide, field). Flaws seen on the sheet: the inner side of the round towers' parapets and a few props are missing faces or wound backwards (small red marks); not noticeable at the game's camera distance, listed as debt in the waivers.",
+        "notes": "Re-signed after its five normal maps' green was flipped with the engine's tangent fix. Geometry verified identical to the reviewed file, accessor by accessor, and the opening replay (bridge, gate, courtyard) still matches its reference screenshots. The flaws noted before (tower parapets, a few props) are unchanged and stay listed as debt.",
         "date": "2026-11-12"
       }
     },

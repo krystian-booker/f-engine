@@ -361,9 +361,9 @@ def normal_from_height(height, strength=1.0, wrap=True):
 
 
 def flip_green(pixels):
-    """Turn a normal map between "green up" and "green down" (DirectX style). The engine lights
-    a map on a mesh *without* tangents as green down, and one on a mesh with tangents (and on a
-    sprite) as green up: see the guide, "What the engine expects"."""
+    """Turn a normal map between "green up" (glTF, and what the engine reads on models and
+    sprites alike) and "green down" (DirectX style), for a map that came from a tool of the
+    other convention."""
     rgba = as_rgba(pixels)
     rgba[..., 1] = 255 - rgba[..., 1]
     return _like(rgba, pixels)
@@ -444,3 +444,50 @@ def mip_chain(pixels, srgb=True):
     while levels[-1].shape[0] > 1 or levels[-1].shape[1] > 1:
         levels.append(halve(levels[-1], srgb))
     return levels
+
+
+def replace_glb_image(path, name, pixels):
+    """Write `pixels` (or ready PNG/JPEG bytes) over the image called `name` inside a .glb,
+    in place: for repairing an embedded texture without rebuilding the model. Every other
+    byte of the model's data is kept; buffer views are laid out again one after another."""
+    import json
+    import struct
+    data = pixels if isinstance(pixels, (bytes, bytearray)) else encode_png(pixels)
+    with open(path, "rb") as file:
+        blob = file.read()
+    if blob[:4] != b"glTF":
+        raise ValueError(f"{path} is not a .glb")
+    length, kind = struct.unpack_from("<II", blob, 12)
+    if kind != 0x4E4F534A:
+        raise ValueError(f"{path}: the first chunk is not JSON")
+    document = json.loads(blob[20:20 + length])
+    start = 20 + length
+    binary_length, binary_kind = struct.unpack_from("<II", blob, start)
+    if binary_kind != 0x004E4942:
+        raise ValueError(f"{path}: no binary chunk")
+    binary = blob[start + 8:start + 8 + binary_length]
+    images = [image for image in document.get("images", []) if image.get("name") == name and "bufferView" in image]
+    if len(images) != 1:
+        raise ValueError(f"{path}: {len(images)} embedded images are called '{name}'")
+    target = images[0]["bufferView"]
+    views = document["bufferViews"]
+    if any(view.get("buffer", 0) != 0 for view in views):
+        raise ValueError(f"{path}: more than one buffer")
+    out = bytearray()
+    for index in sorted(range(len(views)), key=lambda i: views[i].get("byteOffset", 0)):
+        view = views[index]
+        offset = view.get("byteOffset", 0)
+        content = data if index == target else binary[offset:offset + view["byteLength"]]
+        out += b"\0" * (-len(out) % 4)
+        view["byteOffset"], view["byteLength"] = len(out), len(content)
+        out += content
+    out += b"\0" * (-len(out) % 4)
+    document["buffers"][0]["byteLength"] = len(out)
+    if data[:4] == b"\x89PNG":
+        images[0]["mimeType"] = "image/png"
+    text = json.dumps(document, separators=(",", ":")).encode("utf-8")
+    text += b" " * (-len(text) % 4)
+    with open(path, "wb") as file:
+        file.write(b"glTF" + struct.pack("<II", 2, 12 + 8 + len(text) + 8 + len(out)))
+        file.write(struct.pack("<II", len(text), 0x4E4F534A) + text)
+        file.write(struct.pack("<II", len(out), 0x004E4942) + bytes(out))

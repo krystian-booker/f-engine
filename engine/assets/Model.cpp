@@ -460,7 +460,11 @@ void generateTangents(std::vector<MeshVertex>& vertices, const std::vector<std::
         // bigger triangles weigh more.
         const float area = glm::length(glm::cross(e1, e2));
         const float r = area / det;
-        const glm::vec3 t = (e1 * d2.y - e2 * d1.y) * r, bt = (e2 * d1.x - e1 * d2.x) * r;
+        // The bitangent is the direction a normal map's green channel points: up
+        // the image, as glTF defines it. A glTF v coordinate runs down the image,
+        // so that is against +v. Authored tangents (MikkTSpace on the flipped v)
+        // mean the same, so a map is lit alike with or without them.
+        const glm::vec3 t = (e1 * d2.y - e2 * d1.y) * r, bt = (e1 * d2.x - e2 * d1.x) * r;
         for (const auto index : {ia, ib, ic}) {
             tangents[index] += t;
             bitangents[index] += bt;

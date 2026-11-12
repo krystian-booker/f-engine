@@ -61,9 +61,8 @@
     "max_aspect": 8,
     "max_megabytes": 24,
 
-    "_normal_maps": "normal_green: the documented convention for a map (up). derived_tangents_green: how the engine lights a map on a mesh that has no TANGENT attribute, which is every .glb exported without tangents: its derived tangents put the bitangent down the image, so such a map must be green-down to be lit right (verified by rendering a dome both ways; engine/assets/Model.cpp generateTangents). Change this to \"up\" if the engine is changed to follow glTF there. A direction is trusted when it fits normal_green_confidence times better than the other.",
+    "_normal_maps": "normal_green: which way the engine reads a normal map's green channel: up the image, as glTF defines it, whether the mesh carries tangents or the engine derives them (engine/assets/Model.cpp, generateTangents). A map's own direction is trusted when it fits normal_green_confidence times better than the other.",
     "normal_green": "up",
-    "derived_tangents_green": "down",
     "normal_green_confidence": 1.5,
     "normal_length_tolerance": 0.15,
     "normal_bad_share": 0.02,

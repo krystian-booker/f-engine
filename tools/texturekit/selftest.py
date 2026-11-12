@@ -244,8 +244,8 @@ def main():
     normal = tk.normal_from_height(height_field(), 3.0)
     flat_emissive = np.zeros((64, 64, 3), dtype=np.uint8)
     flat_emissive[20:24, 8:56] = (155, 92, 255)
-    model = glb("set.glb", [("wall", wall), ("wall_n", tk.flip_green(normal)), ("wall_e", flat_emissive)], {"normal": 1, "emissive": 2})
-    case("its normal map (green down: the mesh has no tangents)", model + "#wall_n", "tile", clean=True)
+    model = glb("set.glb", [("wall", wall), ("wall_n", normal), ("wall_e", flat_emissive)], {"normal": 1, "emissive": 2})
+    case("its normal map (green up, on a mesh without tangents)", model + "#wall_n", "tile", clean=True)
     case("its emissive map", model + "#wall_e", "tile", clean=True)
     tangent_model = glb("tangents.glb", [("wall", wall), ("wall_n", normal)], {"normal": 1}, tangents=True)
     case("a green-up normal map on a mesh with tangents", tangent_model + "#wall_n", "tile", clean=True)
@@ -356,7 +356,7 @@ def main():
     case("a cutout in a MASK material is what MASK is for", glb("mask3.glb", [("wall", holes)], {"alpha": "MASK"}) + "#wall", "trim", clean=True)
     alpha_normal = np.dstack([normal, np.full(normal.shape[:2], 255, dtype=np.uint8)])
     alpha_normal[:8, :8, 3] = 0
-    case("a normal map with transparency", glb("an.glb", [("wall", wall), ("wall_n", tk.flip_green(alpha_normal))], {"normal": 1}) + "#wall_n",
+    case("a normal map with transparency", glb("an.glb", [("wall", wall), ("wall_n", alpha_normal)], {"normal": 1}) + "#wall_n",
          "tile", ["alpha.kind"])
     case("an icon with black under its transparency, filtered linearly", write("fringe.png", png_bytes(icon(hidden=(0, 0, 0)))), "ui",
          ["alpha.fringe"])
@@ -428,7 +428,7 @@ def main():
     case("an image the model does not have", model + "#nope", "tile", ["ready.structure"])
     case("a name with capitals and spaces", write("Stone Wall FINAL.png", wall), "tile", ["ready.name"])
     case("an embedded image without a name", glb("unnamed.glb", [("x", wall)], names=False) + "#image0", "tile", ["ready.name"])
-    case("a normal map whose name does not say so", glb("badname.glb", [("wall", wall), ("bumps", tk.flip_green(normal))], {"normal": 1}) + "#bumps",
+    case("a normal map whose name does not say so", glb("badname.glb", [("wall", wall), ("bumps", normal)], {"normal": 1}) + "#bumps",
          "tile", ["ready.name"])
     case("a colour map named like a normal map", glb("badname2.glb", [("wall_n", wall)]) + "#wall_n", "tile", ["ready.name"])
     case("a texture over the profile's size", write("huge.png", np.tile(wall, (16, 16, 1))), "tile", ["ready.max_size"],
@@ -452,18 +452,18 @@ def main():
     flat_normal = np.zeros((32, 32, 3), dtype=np.uint8) + [128, 128, 255]
     case("a normal map that is flat", glb("flat.glb", [("wall", wall[:32, :32]), ("wall_n", flat_normal)], {"normal": 1}) + "#wall_n", "tile",
          ["ready.normal_flat"])
-    gamma = (255 * (tk.flip_green(normal) / 255.0) ** (1 / 2.2)).astype(np.uint8)
+    gamma = (255 * (normal / 255.0) ** (1 / 2.2)).astype(np.uint8)
     case("a normal map saved through an sRGB conversion", glb("gamma.glb", [("wall", wall), ("wall_n", gamma)], {"normal": 1}) + "#wall_n", "tile",
          ["ready.normal_encoding"])
-    painted = tk.flip_green(normal).copy()
+    painted = normal.copy()
     painted[16:48, 16:48] = (painted[16:48, 16:48].astype(int) * 0.6 + 40).astype(np.uint8)
     case("a normal map that was painted on", glb("painted.glb", [("wall", wall), ("wall_n", painted)], {"normal": 1}) + "#wall_n", "tile",
          ["ready.normal_length"])
-    swapped = tk.flip_green(normal)[..., [2, 1, 0]]
+    swapped = normal[..., [2, 1, 0]]
     case("a normal map with red and blue swapped", glb("swapped.glb", [("wall", wall), ("wall_n", swapped)], {"normal": 1}) + "#wall_n", "tile",
          ["ready.normal_blue"], absent=["ready.normal_encoding"], overrides={"normal_centre_tolerance": 200})
-    case("a green-up normal map on a mesh without tangents", glb("up.glb", [("wall", wall), ("wall_n", normal)], {"normal": 1}) + "#wall_n", "tile",
-         ["ready.normal_green"])
+    case("a green-down normal map on a mesh without tangents",
+         glb("up.glb", [("wall", wall), ("wall_n", tk.flip_green(normal))], {"normal": 1}) + "#wall_n", "tile", ["ready.normal_green"])
     case("a green-down normal map on a mesh with tangents",
          glb("down.glb", [("wall", wall), ("wall_n", tk.flip_green(normal))], {"normal": 1}, tangents=True) + "#wall_n", "tile", ["ready.normal_green"])
     case("an emissive map with nothing lit",
@@ -472,7 +472,7 @@ def main():
     case("an emissive map that is lit all over", glb("bright.glb", [("wall", wall), ("wall_e", wall)], {"emissive": 1}) + "#wall_e", "tile",
          ["ready.emissive_coverage"])
     case("a normal map half the size of its colour map",
-         glb("half.glb", [("wall", wall), ("wall_n", tk.flip_green(tk.normal_from_height(height_field(32), 3.0)))], {"normal": 1}) + "#wall_n", "tile",
+         glb("half.glb", [("wall", wall), ("wall_n", tk.normal_from_height(height_field(32), 3.0))], {"normal": 1}) + "#wall_n", "tile",
          ["ready.map_size"])
     case("a nine-slice panel with scanlines in its middle", write("system.png", panel(scanlines=True)), "ui", ["ready.nine_slice"],
          overrides={"nine_slice": 12})
@@ -729,6 +729,14 @@ def helper_cases(wall, normal, rng):
           f"{relief[12, 16].tolist()} {relief[16, 12].tolist()}")
     texture.rgba = np.dstack([tk.flip_green(normal), np.full(normal.shape[:2], 255, dtype=np.uint8)])
     check("flip_green turns it green-down", checks.normal_green(texture, True)[0] == "down")
+    down_model = glb("replace_n.glb", [("wall", wall), ("wall_n", tk.flip_green(normal))], {"normal": 1})
+    before, _, _ = KIT.validate(down_model + "#wall_n", settings)
+    tk.replace_glb_image(down_model, "wall_n", normal)
+    after, _, replaced = KIT.validate(down_model + "#wall_n", settings)
+    untouched, _, _ = KIT.validate(down_model + "#wall", settings)
+    check("replace_glb_image rewrites one embedded texture and leaves the model sound",
+          any(f.check == "ready.normal_green" for f in before) and not [f for f in after + untouched if f.severity != "info"]
+          and np.array_equal(replaced.rgba[..., :3], normal), ", ".join(f.check for f in after + untouched if f.severity != "info"))
     painted = normal.copy()
     painted[16:48, 16:48] = (painted[16:48, 16:48].astype(int) * 0.6 + 40).astype(np.uint8)
     fixed = tk.renormalize(painted)

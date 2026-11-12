@@ -56,17 +56,11 @@
     },
     "maps/chamber/geometry.glb#floor_n": {
       "profile": "atlas",
-      "waive": {
-        "ready.normal_green": {
-          "reason": "Known debt from before texturekit: authored green-up, as glTF and the engine's guide ask, but geometry.glb carries no tangents, and the tangents the engine derives light such a map upside down: every bevel of the floor's slabs and conduits is lit from the wrong side top to bottom (subtle under many lights, wrong all the same). Fix in tools/aetherbound/chamber/paint.py normal_map(): negate the green term, as tools/aetherbound/fortress/pix.py does for the same reason; or export tangents / fix generateTangents in engine/assets/Model.cpp, and then flip the fortress and colossus maps instead (see tools/texturekit/README.md, 'What the engine expects').",
-          "max": 1
-        }
-      },
       "review": {
         "verdict": "pass",
         "sha256": "ebc5b11bf59cce9b7c862048498792b447cae9bda6d3b5a2d34f90040b186e10",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged as a set (group sheet, each sheet, and an engine shot of the dais). floor is one 512 medallion: concentric slabs in slate blue and warm grey, bronze conduits, a ring of gold studs, clean hard pixels, 43 colours; floor_e draws only the conduit lines in aetherite violet with a white core (its brightness varies along the lines: a glow's falloff, not blur). metal and stone are trim sheets that wrap along U with no visible column: verdigris and bronze plating with gold rivets and a cut-out railing (alpha 0 or 255), and courses of indigo-grey masonry; metal_e lights the aetherite windows and the furnace band. Palette and values match SPEC.md (old metal, stone in shadow, fire, aetherite). The three normal maps are crisp and match their colour maps, but they are authored green-up and the engine, deriving tangents for this model, lights them upside down: on the sheet's lit views the bevels catch light on their lower edges. Accepted as the waived debt ready.normal_green (subtle under the chamber's many low lights; to fix in the generator or the engine), with floor's oversized PNG encoding.",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Re-read after the engine's derived tangents were corrected to glTF's green-up, which is how these six were authored: in the lit views of all six sheets the floor rings and bricks, the wall courses and rock, and the metal panels, rivets and trim now stand out as relief from both light directions. Pixels unchanged; the waiver for inverted lighting is gone.",
         "date": "2026-11-12"
       }
     },
@@ -92,17 +86,11 @@
     },
     "maps/chamber/geometry.glb#metal_n": {
       "profile": "trim",
-      "waive": {
-        "ready.normal_green": {
-          "reason": "Known debt from before texturekit: authored green-up, as glTF and the engine's guide ask, but geometry.glb carries no tangents, and the tangents the engine derives light such a map upside down: every bevel of the machinery plating is lit from the wrong side top to bottom (subtle under many lights, wrong all the same). Fix in tools/aetherbound/chamber/paint.py normal_map(): negate the green term, as tools/aetherbound/fortress/pix.py does for the same reason; or export tangents / fix generateTangents in engine/assets/Model.cpp, and then flip the fortress and colossus maps instead (see tools/texturekit/README.md, 'What the engine expects').",
-          "max": 1
-        }
-      },
       "review": {
         "verdict": "pass",
         "sha256": "ebc5b11bf59cce9b7c862048498792b447cae9bda6d3b5a2d34f90040b186e10",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged as a set (group sheet, each sheet, and an engine shot of the dais). floor is one 512 medallion: concentric slabs in slate blue and warm grey, bronze conduits, a ring of gold studs, clean hard pixels, 43 colours; floor_e draws only the conduit lines in aetherite violet with a white core (its brightness varies along the lines: a glow's falloff, not blur). metal and stone are trim sheets that wrap along U with no visible column: verdigris and bronze plating with gold rivets and a cut-out railing (alpha 0 or 255), and courses of indigo-grey masonry; metal_e lights the aetherite windows and the furnace band. Palette and values match SPEC.md (old metal, stone in shadow, fire, aetherite). The three normal maps are crisp and match their colour maps, but they are authored green-up and the engine, deriving tangents for this model, lights them upside down: on the sheet's lit views the bevels catch light on their lower edges. Accepted as the waived debt ready.normal_green (subtle under the chamber's many low lights; to fix in the generator or the engine), with floor's oversized PNG encoding.",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Re-read after the engine's derived tangents were corrected to glTF's green-up, which is how these six were authored: in the lit views of all six sheets the floor rings and bricks, the wall courses and rock, and the metal panels, rivets and trim now stand out as relief from both light directions. Pixels unchanged; the waiver for inverted lighting is gone.",
         "date": "2026-11-12"
       }
     },
@@ -128,17 +116,11 @@
     },
     "maps/chamber/geometry.glb#stone_n": {
       "profile": "trim",
-      "waive": {
-        "ready.normal_green": {
-          "reason": "Known debt from before texturekit: authored green-up, as glTF and the engine's guide ask, but geometry.glb carries no tangents, and the tangents the engine derives light such a map upside down: every bevel of the wall stones is lit from the wrong side top to bottom (subtle under many lights, wrong all the same). Fix in tools/aetherbound/chamber/paint.py normal_map(): negate the green term, as tools/aetherbound/fortress/pix.py does for the same reason; or export tangents / fix generateTangents in engine/assets/Model.cpp, and then flip the fortress and colossus maps instead (see tools/texturekit/README.md, 'What the engine expects').",
-          "max": 1
-        }
-      },
       "review": {
         "verdict": "pass",
         "sha256": "ebc5b11bf59cce9b7c862048498792b447cae9bda6d3b5a2d34f90040b186e10",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged as a set (group sheet, each sheet, and an engine shot of the dais). floor is one 512 medallion: concentric slabs in slate blue and warm grey, bronze conduits, a ring of gold studs, clean hard pixels, 43 colours; floor_e draws only the conduit lines in aetherite violet with a white core (its brightness varies along the lines: a glow's falloff, not blur). metal and stone are trim sheets that wrap along U with no visible column: verdigris and bronze plating with gold rivets and a cut-out railing (alpha 0 or 255), and courses of indigo-grey masonry; metal_e lights the aetherite windows and the furnace band. Palette and values match SPEC.md (old metal, stone in shadow, fire, aetherite). The three normal maps are crisp and match their colour maps, but they are authored green-up and the engine, deriving tangents for this model, lights them upside down: on the sheet's lit views the bevels catch light on their lower edges. Accepted as the waived debt ready.normal_green (subtle under the chamber's many low lights; to fix in the generator or the engine), with floor's oversized PNG encoding.",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Re-read after the engine's derived tangents were corrected to glTF's green-up, which is how these six were authored: in the lit views of all six sheets the floor rings and bricks, the wall courses and rock, and the metal panels, rivets and trim now stand out as relief from both light directions. Pixels unchanged; the waiver for inverted lighting is gone.",
         "date": "2026-11-12"
       }
     },
@@ -170,17 +152,11 @@
     },
     "maps/ruins/geometry.glb#floor_n": {
       "profile": "atlas",
-      "waive": {
-        "ready.normal_green": {
-          "reason": "Known debt from before texturekit: authored green-up, as glTF and the engine's guide ask, but geometry.glb carries no tangents, and the tangents the engine derives light such a map upside down: every bevel of the floor's slabs and conduits is lit from the wrong side top to bottom (subtle under many lights, wrong all the same). Fix in tools/aetherbound/chamber/paint.py normal_map(): negate the green term, as tools/aetherbound/fortress/pix.py does for the same reason; or export tangents / fix generateTangents in engine/assets/Model.cpp, and then flip the fortress and colossus maps instead (see tools/texturekit/README.md, 'What the engine expects').",
-          "max": 1
-        }
-      },
       "review": {
         "verdict": "pass",
         "sha256": "943b29509d2273452a36f63fac2693587a27b11aa8b592d61a57ab21db265126",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged as a set (group sheet and each sheet) beside the chamber's. floor is the same medallion after the blast: scorched, cracked centre, dark split conduits, slabs knocked to charcoal, still clean pixel art of 43 colours in a colder, greyer range, as SPEC.md asks of the ruins; floor_e is nearly black with a faint violet crack pattern in the crater (the afterglow), which is what the spec describes. metal, metal_n, metal_e, stone and stone_n are pixel for pixel the chamber's and read the same. The three normal maps are lit upside down by the engine for the same reason as the chamber's (authored green-up, model without tangents): accepted as the waived debt ready.normal_green, with floor's oversized PNG encoding.",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Re-read after the engine's derived tangents were corrected to glTF's green-up, which is how these six were authored: in the lit views of all six sheets the floor rings and bricks, the wall courses and rock, and the metal panels, rivets and trim now stand out as relief from both light directions. Pixels unchanged; the waiver for inverted lighting is gone.",
         "date": "2026-11-12"
       }
     },
@@ -206,17 +182,11 @@
     },
     "maps/ruins/geometry.glb#metal_n": {
       "profile": "trim",
-      "waive": {
-        "ready.normal_green": {
-          "reason": "Known debt from before texturekit: authored green-up, as glTF and the engine's guide ask, but geometry.glb carries no tangents, and the tangents the engine derives light such a map upside down: every bevel of the machinery plating is lit from the wrong side top to bottom (subtle under many lights, wrong all the same). Fix in tools/aetherbound/chamber/paint.py normal_map(): negate the green term, as tools/aetherbound/fortress/pix.py does for the same reason; or export tangents / fix generateTangents in engine/assets/Model.cpp, and then flip the fortress and colossus maps instead (see tools/texturekit/README.md, 'What the engine expects').",
-          "max": 1
-        }
-      },
       "review": {
         "verdict": "pass",
         "sha256": "943b29509d2273452a36f63fac2693587a27b11aa8b592d61a57ab21db265126",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged as a set (group sheet and each sheet) beside the chamber's. floor is the same medallion after the blast: scorched, cracked centre, dark split conduits, slabs knocked to charcoal, still clean pixel art of 43 colours in a colder, greyer range, as SPEC.md asks of the ruins; floor_e is nearly black with a faint violet crack pattern in the crater (the afterglow), which is what the spec describes. metal, metal_n, metal_e, stone and stone_n are pixel for pixel the chamber's and read the same. The three normal maps are lit upside down by the engine for the same reason as the chamber's (authored green-up, model without tangents): accepted as the waived debt ready.normal_green, with floor's oversized PNG encoding.",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Re-read after the engine's derived tangents were corrected to glTF's green-up, which is how these six were authored: in the lit views of all six sheets the floor rings and bricks, the wall courses and rock, and the metal panels, rivets and trim now stand out as relief from both light directions. Pixels unchanged; the waiver for inverted lighting is gone.",
         "date": "2026-11-12"
       }
     },
@@ -242,17 +212,11 @@
     },
     "maps/ruins/geometry.glb#stone_n": {
       "profile": "trim",
-      "waive": {
-        "ready.normal_green": {
-          "reason": "Known debt from before texturekit: authored green-up, as glTF and the engine's guide ask, but geometry.glb carries no tangents, and the tangents the engine derives light such a map upside down: every bevel of the wall stones is lit from the wrong side top to bottom (subtle under many lights, wrong all the same). Fix in tools/aetherbound/chamber/paint.py normal_map(): negate the green term, as tools/aetherbound/fortress/pix.py does for the same reason; or export tangents / fix generateTangents in engine/assets/Model.cpp, and then flip the fortress and colossus maps instead (see tools/texturekit/README.md, 'What the engine expects').",
-          "max": 1
-        }
-      },
       "review": {
         "verdict": "pass",
         "sha256": "943b29509d2273452a36f63fac2693587a27b11aa8b592d61a57ab21db265126",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged as a set (group sheet and each sheet) beside the chamber's. floor is the same medallion after the blast: scorched, cracked centre, dark split conduits, slabs knocked to charcoal, still clean pixel art of 43 colours in a colder, greyer range, as SPEC.md asks of the ruins; floor_e is nearly black with a faint violet crack pattern in the crater (the afterglow), which is what the spec describes. metal, metal_n, metal_e, stone and stone_n are pixel for pixel the chamber's and read the same. The three normal maps are lit upside down by the engine for the same reason as the chamber's (authored green-up, model without tangents): accepted as the waived debt ready.normal_green, with floor's oversized PNG encoding.",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Re-read after the engine's derived tangents were corrected to glTF's green-up, which is how these six were authored: in the lit views of all six sheets the floor rings and bricks, the wall courses and rock, and the metal panels, rivets and trim now stand out as relief from both light directions. Pixels unchanged; the waiver for inverted lighting is gone.",
         "date": "2026-11-12"
       }
     },
@@ -276,9 +240,9 @@
       },
       "review": {
         "verdict": "pass",
-        "sha256": "73557775aee7ae9de5e071a02bf1bb4b9ea8dce4ccfee86b5f49640bda760f5e",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged as a set (group sheet, then each of the twelve sheets) against SPEC.md, with engine shots of the courtyard and the bridge. block, floor, rock and wall are hard-edged pixel art of 16 to 47 colours in the spec's indigo-charcoal to umber stone, one texel size across the set, no line at the wrap in the 3x3 tiles, and they still read as plaster, flagstones, cobbles and brick at the 32 px mip. props is a trim sheet (planks, ember bed, banner, chains, candles) that wraps cleanly along U; props_e lights only the embers, the aetherite line and the candle flames, in the spec's fire and violet. The five normal maps match their colour maps texel for texel and light as raised stones with sunk joints the way the engine reads them (green down, no tangents). mist is three flat blue-greys with a stepped alpha. Accepted, waived as debt: block's darker cloud, floor's dark band and mist's few large shapes turn into a lattice when tiled 3x3 (masked in the game's lighting, plain under flat light).",
+        "sha256": "0833e4eef6bf5d999d62709a67a4e27b09660678111b16d7522d8f7641de0713",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Pixels unchanged (the model file was rewritten only to flip its normal maps' green; every other image verified byte-identical to the reviewed version). Re-read on the group sheet: one texel size, stone, fire and haze colours as before, the earlier verdicts stand, including the waived repeat in block, floor and mist.",
         "date": "2026-11-12"
       }
     },
@@ -286,9 +250,9 @@
       "profile": "tile",
       "review": {
         "verdict": "pass",
-        "sha256": "73557775aee7ae9de5e071a02bf1bb4b9ea8dce4ccfee86b5f49640bda760f5e",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged as a set (group sheet, then each of the twelve sheets) against SPEC.md, with engine shots of the courtyard and the bridge. block, floor, rock and wall are hard-edged pixel art of 16 to 47 colours in the spec's indigo-charcoal to umber stone, one texel size across the set, no line at the wrap in the 3x3 tiles, and they still read as plaster, flagstones, cobbles and brick at the 32 px mip. props is a trim sheet (planks, ember bed, banner, chains, candles) that wraps cleanly along U; props_e lights only the embers, the aetherite line and the candle flames, in the spec's fire and violet. The five normal maps match their colour maps texel for texel and light as raised stones with sunk joints the way the engine reads them (green down, no tangents). mist is three flat blue-greys with a stepped alpha. Accepted, waived as debt: block's darker cloud, floor's dark band and mist's few large shapes turn into a lattice when tiled 3x3 (masked in the game's lighting, plain under flat light).",
+        "sha256": "0833e4eef6bf5d999d62709a67a4e27b09660678111b16d7522d8f7641de0713",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Green channel flipped to glTF's green-up when the engine's derived tangents were corrected; red and blue untouched (checked pixel for pixel). On wall_n's sheet the bricks light as raised blocks from both light directions; the other four judged from the group sheet and the gate, which no longer reports a green-down map. The fortress scenes of the opening replay still match their reference screenshots.",
         "date": "2026-11-12"
       }
     },
@@ -302,9 +266,9 @@
       },
       "review": {
         "verdict": "pass",
-        "sha256": "73557775aee7ae9de5e071a02bf1bb4b9ea8dce4ccfee86b5f49640bda760f5e",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged as a set (group sheet, then each of the twelve sheets) against SPEC.md, with engine shots of the courtyard and the bridge. block, floor, rock and wall are hard-edged pixel art of 16 to 47 colours in the spec's indigo-charcoal to umber stone, one texel size across the set, no line at the wrap in the 3x3 tiles, and they still read as plaster, flagstones, cobbles and brick at the 32 px mip. props is a trim sheet (planks, ember bed, banner, chains, candles) that wraps cleanly along U; props_e lights only the embers, the aetherite line and the candle flames, in the spec's fire and violet. The five normal maps match their colour maps texel for texel and light as raised stones with sunk joints the way the engine reads them (green down, no tangents). mist is three flat blue-greys with a stepped alpha. Accepted, waived as debt: block's darker cloud, floor's dark band and mist's few large shapes turn into a lattice when tiled 3x3 (masked in the game's lighting, plain under flat light).",
+        "sha256": "0833e4eef6bf5d999d62709a67a4e27b09660678111b16d7522d8f7641de0713",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Pixels unchanged (the model file was rewritten only to flip its normal maps' green; every other image verified byte-identical to the reviewed version). Re-read on the group sheet: one texel size, stone, fire and haze colours as before, the earlier verdicts stand, including the waived repeat in block, floor and mist.",
         "date": "2026-11-12"
       }
     },
@@ -312,9 +276,9 @@
       "profile": "tile",
       "review": {
         "verdict": "pass",
-        "sha256": "73557775aee7ae9de5e071a02bf1bb4b9ea8dce4ccfee86b5f49640bda760f5e",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged as a set (group sheet, then each of the twelve sheets) against SPEC.md, with engine shots of the courtyard and the bridge. block, floor, rock and wall are hard-edged pixel art of 16 to 47 colours in the spec's indigo-charcoal to umber stone, one texel size across the set, no line at the wrap in the 3x3 tiles, and they still read as plaster, flagstones, cobbles and brick at the 32 px mip. props is a trim sheet (planks, ember bed, banner, chains, candles) that wraps cleanly along U; props_e lights only the embers, the aetherite line and the candle flames, in the spec's fire and violet. The five normal maps match their colour maps texel for texel and light as raised stones with sunk joints the way the engine reads them (green down, no tangents). mist is three flat blue-greys with a stepped alpha. Accepted, waived as debt: block's darker cloud, floor's dark band and mist's few large shapes turn into a lattice when tiled 3x3 (masked in the game's lighting, plain under flat light).",
+        "sha256": "0833e4eef6bf5d999d62709a67a4e27b09660678111b16d7522d8f7641de0713",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Green channel flipped to glTF's green-up when the engine's derived tangents were corrected; red and blue untouched (checked pixel for pixel). On wall_n's sheet the bricks light as raised blocks from both light directions; the other four judged from the group sheet and the gate, which no longer reports a green-down map. The fortress scenes of the opening replay still match their reference screenshots.",
         "date": "2026-11-12"
       }
     },
@@ -322,9 +286,9 @@
       "profile": "tile",
       "review": {
         "verdict": "pass",
-        "sha256": "73557775aee7ae9de5e071a02bf1bb4b9ea8dce4ccfee86b5f49640bda760f5e",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged as a set (group sheet, then each of the twelve sheets) against SPEC.md, with engine shots of the courtyard and the bridge. block, floor, rock and wall are hard-edged pixel art of 16 to 47 colours in the spec's indigo-charcoal to umber stone, one texel size across the set, no line at the wrap in the 3x3 tiles, and they still read as plaster, flagstones, cobbles and brick at the 32 px mip. props is a trim sheet (planks, ember bed, banner, chains, candles) that wraps cleanly along U; props_e lights only the embers, the aetherite line and the candle flames, in the spec's fire and violet. The five normal maps match their colour maps texel for texel and light as raised stones with sunk joints the way the engine reads them (green down, no tangents). mist is three flat blue-greys with a stepped alpha. Accepted, waived as debt: block's darker cloud, floor's dark band and mist's few large shapes turn into a lattice when tiled 3x3 (masked in the game's lighting, plain under flat light).",
+        "sha256": "0833e4eef6bf5d999d62709a67a4e27b09660678111b16d7522d8f7641de0713",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Pixels unchanged (the model file was rewritten only to flip its normal maps' green; every other image verified byte-identical to the reviewed version). Re-read on the group sheet: one texel size, stone, fire and haze colours as before, the earlier verdicts stand, including the waived repeat in block, floor and mist.",
         "date": "2026-11-12"
       }
     },
@@ -332,9 +296,9 @@
       "profile": "tile",
       "review": {
         "verdict": "pass",
-        "sha256": "73557775aee7ae9de5e071a02bf1bb4b9ea8dce4ccfee86b5f49640bda760f5e",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged as a set (group sheet, then each of the twelve sheets) against SPEC.md, with engine shots of the courtyard and the bridge. block, floor, rock and wall are hard-edged pixel art of 16 to 47 colours in the spec's indigo-charcoal to umber stone, one texel size across the set, no line at the wrap in the 3x3 tiles, and they still read as plaster, flagstones, cobbles and brick at the 32 px mip. props is a trim sheet (planks, ember bed, banner, chains, candles) that wraps cleanly along U; props_e lights only the embers, the aetherite line and the candle flames, in the spec's fire and violet. The five normal maps match their colour maps texel for texel and light as raised stones with sunk joints the way the engine reads them (green down, no tangents). mist is three flat blue-greys with a stepped alpha. Accepted, waived as debt: block's darker cloud, floor's dark band and mist's few large shapes turn into a lattice when tiled 3x3 (masked in the game's lighting, plain under flat light).",
+        "sha256": "0833e4eef6bf5d999d62709a67a4e27b09660678111b16d7522d8f7641de0713",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Green channel flipped to glTF's green-up when the engine's derived tangents were corrected; red and blue untouched (checked pixel for pixel). On wall_n's sheet the bricks light as raised blocks from both light directions; the other four judged from the group sheet and the gate, which no longer reports a green-down map. The fortress scenes of the opening replay still match their reference screenshots.",
         "date": "2026-11-12"
       }
     },
@@ -342,9 +306,9 @@
       "profile": "tile",
       "review": {
         "verdict": "pass",
-        "sha256": "73557775aee7ae9de5e071a02bf1bb4b9ea8dce4ccfee86b5f49640bda760f5e",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged as a set (group sheet, then each of the twelve sheets) against SPEC.md, with engine shots of the courtyard and the bridge. block, floor, rock and wall are hard-edged pixel art of 16 to 47 colours in the spec's indigo-charcoal to umber stone, one texel size across the set, no line at the wrap in the 3x3 tiles, and they still read as plaster, flagstones, cobbles and brick at the 32 px mip. props is a trim sheet (planks, ember bed, banner, chains, candles) that wraps cleanly along U; props_e lights only the embers, the aetherite line and the candle flames, in the spec's fire and violet. The five normal maps match their colour maps texel for texel and light as raised stones with sunk joints the way the engine reads them (green down, no tangents). mist is three flat blue-greys with a stepped alpha. Accepted, waived as debt: block's darker cloud, floor's dark band and mist's few large shapes turn into a lattice when tiled 3x3 (masked in the game's lighting, plain under flat light).",
+        "sha256": "0833e4eef6bf5d999d62709a67a4e27b09660678111b16d7522d8f7641de0713",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Pixels unchanged (the model file was rewritten only to flip its normal maps' green; every other image verified byte-identical to the reviewed version). Re-read on the group sheet: one texel size, stone, fire and haze colours as before, the earlier verdicts stand, including the waived repeat in block, floor and mist.",
         "date": "2026-11-12"
       }
     },
@@ -352,9 +316,9 @@
       "profile": "tile",
       "review": {
         "verdict": "pass",
-        "sha256": "73557775aee7ae9de5e071a02bf1bb4b9ea8dce4ccfee86b5f49640bda760f5e",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged as a set (group sheet, then each of the twelve sheets) against SPEC.md, with engine shots of the courtyard and the bridge. block, floor, rock and wall are hard-edged pixel art of 16 to 47 colours in the spec's indigo-charcoal to umber stone, one texel size across the set, no line at the wrap in the 3x3 tiles, and they still read as plaster, flagstones, cobbles and brick at the 32 px mip. props is a trim sheet (planks, ember bed, banner, chains, candles) that wraps cleanly along U; props_e lights only the embers, the aetherite line and the candle flames, in the spec's fire and violet. The five normal maps match their colour maps texel for texel and light as raised stones with sunk joints the way the engine reads them (green down, no tangents). mist is three flat blue-greys with a stepped alpha. Accepted, waived as debt: block's darker cloud, floor's dark band and mist's few large shapes turn into a lattice when tiled 3x3 (masked in the game's lighting, plain under flat light).",
+        "sha256": "0833e4eef6bf5d999d62709a67a4e27b09660678111b16d7522d8f7641de0713",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Green channel flipped to glTF's green-up when the engine's derived tangents were corrected; red and blue untouched (checked pixel for pixel). On wall_n's sheet the bricks light as raised blocks from both light directions; the other four judged from the group sheet and the gate, which no longer reports a green-down map. The fortress scenes of the opening replay still match their reference screenshots.",
         "date": "2026-11-12"
       }
     },
@@ -362,9 +326,9 @@
       "profile": "trim",
       "review": {
         "verdict": "pass",
-        "sha256": "73557775aee7ae9de5e071a02bf1bb4b9ea8dce4ccfee86b5f49640bda760f5e",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged as a set (group sheet, then each of the twelve sheets) against SPEC.md, with engine shots of the courtyard and the bridge. block, floor, rock and wall are hard-edged pixel art of 16 to 47 colours in the spec's indigo-charcoal to umber stone, one texel size across the set, no line at the wrap in the 3x3 tiles, and they still read as plaster, flagstones, cobbles and brick at the 32 px mip. props is a trim sheet (planks, ember bed, banner, chains, candles) that wraps cleanly along U; props_e lights only the embers, the aetherite line and the candle flames, in the spec's fire and violet. The five normal maps match their colour maps texel for texel and light as raised stones with sunk joints the way the engine reads them (green down, no tangents). mist is three flat blue-greys with a stepped alpha. Accepted, waived as debt: block's darker cloud, floor's dark band and mist's few large shapes turn into a lattice when tiled 3x3 (masked in the game's lighting, plain under flat light).",
+        "sha256": "0833e4eef6bf5d999d62709a67a4e27b09660678111b16d7522d8f7641de0713",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Pixels unchanged (the model file was rewritten only to flip its normal maps' green; every other image verified byte-identical to the reviewed version). Re-read on the group sheet: one texel size, stone, fire and haze colours as before, the earlier verdicts stand, including the waived repeat in block, floor and mist.",
         "date": "2026-11-12"
       }
     },
@@ -372,9 +336,9 @@
       "profile": "trim",
       "review": {
         "verdict": "pass",
-        "sha256": "73557775aee7ae9de5e071a02bf1bb4b9ea8dce4ccfee86b5f49640bda760f5e",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged as a set (group sheet, then each of the twelve sheets) against SPEC.md, with engine shots of the courtyard and the bridge. block, floor, rock and wall are hard-edged pixel art of 16 to 47 colours in the spec's indigo-charcoal to umber stone, one texel size across the set, no line at the wrap in the 3x3 tiles, and they still read as plaster, flagstones, cobbles and brick at the 32 px mip. props is a trim sheet (planks, ember bed, banner, chains, candles) that wraps cleanly along U; props_e lights only the embers, the aetherite line and the candle flames, in the spec's fire and violet. The five normal maps match their colour maps texel for texel and light as raised stones with sunk joints the way the engine reads them (green down, no tangents). mist is three flat blue-greys with a stepped alpha. Accepted, waived as debt: block's darker cloud, floor's dark band and mist's few large shapes turn into a lattice when tiled 3x3 (masked in the game's lighting, plain under flat light).",
+        "sha256": "0833e4eef6bf5d999d62709a67a4e27b09660678111b16d7522d8f7641de0713",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Green channel flipped to glTF's green-up when the engine's derived tangents were corrected; red and blue untouched (checked pixel for pixel). On wall_n's sheet the bricks light as raised blocks from both light directions; the other four judged from the group sheet and the gate, which no longer reports a green-down map. The fortress scenes of the opening replay still match their reference screenshots.",
         "date": "2026-11-12"
       }
     },
@@ -382,9 +346,9 @@
       "profile": "trim",
       "review": {
         "verdict": "pass",
-        "sha256": "73557775aee7ae9de5e071a02bf1bb4b9ea8dce4ccfee86b5f49640bda760f5e",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged as a set (group sheet, then each of the twelve sheets) against SPEC.md, with engine shots of the courtyard and the bridge. block, floor, rock and wall are hard-edged pixel art of 16 to 47 colours in the spec's indigo-charcoal to umber stone, one texel size across the set, no line at the wrap in the 3x3 tiles, and they still read as plaster, flagstones, cobbles and brick at the 32 px mip. props is a trim sheet (planks, ember bed, banner, chains, candles) that wraps cleanly along U; props_e lights only the embers, the aetherite line and the candle flames, in the spec's fire and violet. The five normal maps match their colour maps texel for texel and light as raised stones with sunk joints the way the engine reads them (green down, no tangents). mist is three flat blue-greys with a stepped alpha. Accepted, waived as debt: block's darker cloud, floor's dark band and mist's few large shapes turn into a lattice when tiled 3x3 (masked in the game's lighting, plain under flat light).",
+        "sha256": "0833e4eef6bf5d999d62709a67a4e27b09660678111b16d7522d8f7641de0713",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Pixels unchanged (the model file was rewritten only to flip its normal maps' green; every other image verified byte-identical to the reviewed version). Re-read on the group sheet: one texel size, stone, fire and haze colours as before, the earlier verdicts stand, including the waived repeat in block, floor and mist.",
         "date": "2026-11-12"
       }
     },
@@ -398,9 +362,9 @@
       },
       "review": {
         "verdict": "pass",
-        "sha256": "73557775aee7ae9de5e071a02bf1bb4b9ea8dce4ccfee86b5f49640bda760f5e",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged as a set (group sheet, then each of the twelve sheets) against SPEC.md, with engine shots of the courtyard and the bridge. block, floor, rock and wall are hard-edged pixel art of 16 to 47 colours in the spec's indigo-charcoal to umber stone, one texel size across the set, no line at the wrap in the 3x3 tiles, and they still read as plaster, flagstones, cobbles and brick at the 32 px mip. props is a trim sheet (planks, ember bed, banner, chains, candles) that wraps cleanly along U; props_e lights only the embers, the aetherite line and the candle flames, in the spec's fire and violet. The five normal maps match their colour maps texel for texel and light as raised stones with sunk joints the way the engine reads them (green down, no tangents). mist is three flat blue-greys with a stepped alpha. Accepted, waived as debt: block's darker cloud, floor's dark band and mist's few large shapes turn into a lattice when tiled 3x3 (masked in the game's lighting, plain under flat light).",
+        "sha256": "0833e4eef6bf5d999d62709a67a4e27b09660678111b16d7522d8f7641de0713",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Pixels unchanged (the model file was rewritten only to flip its normal maps' green; every other image verified byte-identical to the reviewed version). Re-read on the group sheet: one texel size, stone, fire and haze colours as before, the earlier verdicts stand, including the waived repeat in block, floor and mist.",
         "date": "2026-11-12"
       }
     },
@@ -433,7 +397,7 @@
       "waive": {
         "ready.unused": {
           "reason": "Known debt from before texturekit: nothing reads this file: it is the generator's working copy of the texture that geometry.glb embeds. Fix in tools/aetherbound/fortress/build.py: write the textures to a folder outside samples/aetherbound (texdir), or keep them here and make the .glb reference them by URI, which would also let `fengine_assetc cook` compress them.",
-          "max": 24185
+          "max": 24216
         },
         "file.duplicate": {
           "reason": "Known debt from before texturekit: the same pixels ship twice, here and inside maps/fortress/geometry.glb. Fix in tools/aetherbound/fortress/build.py with the unused file above: it is one fix.",
@@ -442,9 +406,9 @@
       },
       "review": {
         "verdict": "pass",
-        "sha256": "394aee1fc8c230985b5bf9a767a02171ce2f364cf073e2ef2c8ed80344055967",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged from their group sheet, and from the sheets of their twins embedded in maps/fortress/geometry.glb, which hold the same pixels (file.duplicate says so), so that verdict applies: clean pixel-art stone, trim and mist in SPEC.md's palette, normal maps authored green-down. As files they are the generator's working copies and nothing reads them (waived as debt: remove them, or reference them from the model); the lattice of block, floor and mist when tiled is accepted here as there.",
+        "sha256": "ab0ab20f445a43209b396c55db8791146da4a863735b600c814932da9b565948",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Green channel flipped to glTF's green-up when the engine's derived tangents were corrected; red and blue untouched (checked pixel for pixel). On wall_n's sheet the bricks light as raised blocks from both light directions; the other four judged from the group sheet and the gate, which no longer reports a green-down map. The fortress scenes of the opening replay still match their reference screenshots.",
         "date": "2026-11-12"
       }
     },
@@ -477,7 +441,7 @@
       "waive": {
         "ready.unused": {
           "reason": "Known debt from before texturekit: nothing reads this file: it is the generator's working copy of the texture that geometry.glb embeds. Fix in tools/aetherbound/fortress/build.py: write the textures to a folder outside samples/aetherbound (texdir), or keep them here and make the .glb reference them by URI, which would also let `fengine_assetc cook` compress them.",
-          "max": 87183
+          "max": 87307
         },
         "file.duplicate": {
           "reason": "Known debt from before texturekit: the same pixels ship twice, here and inside maps/fortress/geometry.glb. Fix in tools/aetherbound/fortress/build.py with the unused file above: it is one fix.",
@@ -486,9 +450,9 @@
       },
       "review": {
         "verdict": "pass",
-        "sha256": "01bd70ce8326d201610b65a71eaf064b104853d5e13fc21fa6df58192cfa7b66",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged from their group sheet, and from the sheets of their twins embedded in maps/fortress/geometry.glb, which hold the same pixels (file.duplicate says so), so that verdict applies: clean pixel-art stone, trim and mist in SPEC.md's palette, normal maps authored green-down. As files they are the generator's working copies and nothing reads them (waived as debt: remove them, or reference them from the model); the lattice of block, floor and mist when tiled is accepted here as there.",
+        "sha256": "75a1c64ef50cd1ddf547fcfd80ea35e1fc6b60954313cefdbed2ad35432283c9",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Green channel flipped to glTF's green-up when the engine's derived tangents were corrected; red and blue untouched (checked pixel for pixel). On wall_n's sheet the bricks light as raised blocks from both light directions; the other four judged from the group sheet and the gate, which no longer reports a green-down map. The fortress scenes of the opening replay still match their reference screenshots.",
         "date": "2026-11-12"
       }
     },
@@ -517,7 +481,7 @@
       "waive": {
         "ready.unused": {
           "reason": "Known debt from before texturekit: nothing reads this file: it is the generator's working copy of the texture that geometry.glb embeds. Fix in tools/aetherbound/fortress/build.py: write the textures to a folder outside samples/aetherbound (texdir), or keep them here and make the .glb reference them by URI, which would also let `fengine_assetc cook` compress them.",
-          "max": 44622
+          "max": 44612
         },
         "file.duplicate": {
           "reason": "Known debt from before texturekit: the same pixels ship twice, here and inside maps/fortress/geometry.glb. Fix in tools/aetherbound/fortress/build.py with the unused file above: it is one fix.",
@@ -526,9 +490,9 @@
       },
       "review": {
         "verdict": "pass",
-        "sha256": "c0264f5ae9d6c5f4e29c323b16f247b7cf708e64f599d1bd098c9d68bb0da70d",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged from their group sheet, and from the sheets of their twins embedded in maps/fortress/geometry.glb, which hold the same pixels (file.duplicate says so), so that verdict applies: clean pixel-art stone, trim and mist in SPEC.md's palette, normal maps authored green-down. As files they are the generator's working copies and nothing reads them (waived as debt: remove them, or reference them from the model); the lattice of block, floor and mist when tiled is accepted here as there.",
+        "sha256": "c6efda40bf0cbebaf346810c11120477aabe1c6e37aaa8ddbbd31b7f43369711",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Green channel flipped to glTF's green-up when the engine's derived tangents were corrected; red and blue untouched (checked pixel for pixel). On wall_n's sheet the bricks light as raised blocks from both light directions; the other four judged from the group sheet and the gate, which no longer reports a green-down map. The fortress scenes of the opening replay still match their reference screenshots.",
         "date": "2026-11-12"
       }
     },
@@ -557,7 +521,7 @@
       "waive": {
         "ready.unused": {
           "reason": "Known debt from before texturekit: nothing reads this file: it is the generator's working copy of the texture that geometry.glb embeds. Fix in tools/aetherbound/fortress/build.py: write the textures to a folder outside samples/aetherbound (texdir), or keep them here and make the .glb reference them by URI, which would also let `fengine_assetc cook` compress them.",
-          "max": 86867
+          "max": 87023
         },
         "file.duplicate": {
           "reason": "Known debt from before texturekit: the same pixels ship twice, here and inside maps/fortress/geometry.glb. Fix in tools/aetherbound/fortress/build.py with the unused file above: it is one fix.",
@@ -566,9 +530,9 @@
       },
       "review": {
         "verdict": "pass",
-        "sha256": "da323be5094227b9e169cfc512c9eac04306f7c0d8d73bee1bce476a93df4b30",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged from their group sheet, and from the sheets of their twins embedded in maps/fortress/geometry.glb, which hold the same pixels (file.duplicate says so), so that verdict applies: clean pixel-art stone, trim and mist in SPEC.md's palette, normal maps authored green-down. As files they are the generator's working copies and nothing reads them (waived as debt: remove them, or reference them from the model); the lattice of block, floor and mist when tiled is accepted here as there.",
+        "sha256": "78995c023cacc82a131ecb2dbd330bd7f91b6790ff6709ed06cfdbcc1991ff88",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Green channel flipped to glTF's green-up when the engine's derived tangents were corrected; red and blue untouched (checked pixel for pixel). On wall_n's sheet the bricks light as raised blocks from both light directions; the other four judged from the group sheet and the gate, which no longer reports a green-down map. The fortress scenes of the opening replay still match their reference screenshots.",
         "date": "2026-11-12"
       }
     },
@@ -597,7 +561,7 @@
       "waive": {
         "ready.unused": {
           "reason": "Known debt from before texturekit: nothing reads this file: it is the generator's working copy of the texture that geometry.glb embeds. Fix in tools/aetherbound/fortress/build.py: write the textures to a folder outside samples/aetherbound (texdir), or keep them here and make the .glb reference them by URI, which would also let `fengine_assetc cook` compress them.",
-          "max": 140232
+          "max": 140695
         },
         "file.duplicate": {
           "reason": "Known debt from before texturekit: the same pixels ship twice, here and inside maps/fortress/geometry.glb. Fix in tools/aetherbound/fortress/build.py with the unused file above: it is one fix.",
@@ -606,9 +570,9 @@
       },
       "review": {
         "verdict": "pass",
-        "sha256": "3fb30837e4a86f032cf52cbfb7de93e51101765ab0e14893a076da6ddccfde93",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "Judged from their group sheet, and from the sheets of their twins embedded in maps/fortress/geometry.glb, which hold the same pixels (file.duplicate says so), so that verdict applies: clean pixel-art stone, trim and mist in SPEC.md's palette, normal maps authored green-down. As files they are the generator's working copies and nothing reads them (waived as debt: remove them, or reference them from the model); the lattice of block, floor and mist when tiled is accepted here as there.",
+        "sha256": "e9557a9f45a0af56e9aef49a1a33d13a7f269191af3b8ffa57ae6c18f51778f9",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Green channel flipped to glTF's green-up when the engine's derived tangents were corrected; red and blue untouched (checked pixel for pixel). On wall_n's sheet the bricks light as raised blocks from both light directions; the other four judged from the group sheet and the gate, which no longer reports a green-down map. The fortress scenes of the opening replay still match their reference screenshots.",
         "date": "2026-11-12"
       }
     },
@@ -788,9 +752,9 @@
       },
       "review": {
         "verdict": "pass",
-        "sha256": "ce0bb4e7e54527a2a73c51ffef3b54d558523500b6bbb621d43acfc4e8474db4",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "The five sheets and the group sheet, with modelkit's engine shots of the model in mind. colossus_albedo: dark bronze plates with verdigris panels and thin gold inlay lines, as SPEC.md's old metal, readable plate by plate in the detail tile and as a bronze-and-gold mass at the 32 px mip; colossus_normal: plate bevels, hatching and rivets that light as raised under the engine's reading (green down, no tangents); colossus_glow: a few violet veins and specks around the wound, almost all black. aetherite_albedo and aetherite_glow are the spire: the same eight-colour violet ramp as the crystal's. Accepted, waived as debt: the albedo's occlusion shading leaves 75 near-duplicate colours (slightly soft shading, not visible blur), its PNG is twice the size it needs, and four fifths of the spire's 512x256 atlas is unused.",
+        "sha256": "b527d67bfba392a43ac1c80433f0cab6ee62a795566a3352f35474b38c82ad92",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Pixels unchanged (the model file was rewritten only to flip colossus_normal's green; these four images verified byte-identical to the reviewed version). Re-read on the group sheet: teal plate, brass, violet aetherite as before; the earlier verdicts and waivers stand.",
         "date": "2026-11-12"
       }
     },
@@ -798,9 +762,9 @@
       "profile": "atlas",
       "review": {
         "verdict": "pass",
-        "sha256": "ce0bb4e7e54527a2a73c51ffef3b54d558523500b6bbb621d43acfc4e8474db4",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "The five sheets and the group sheet, with modelkit's engine shots of the model in mind. colossus_albedo: dark bronze plates with verdigris panels and thin gold inlay lines, as SPEC.md's old metal, readable plate by plate in the detail tile and as a bronze-and-gold mass at the 32 px mip; colossus_normal: plate bevels, hatching and rivets that light as raised under the engine's reading (green down, no tangents); colossus_glow: a few violet veins and specks around the wound, almost all black. aetherite_albedo and aetherite_glow are the spire: the same eight-colour violet ramp as the crystal's. Accepted, waived as debt: the albedo's occlusion shading leaves 75 near-duplicate colours (slightly soft shading, not visible blur), its PNG is twice the size it needs, and four fifths of the spire's 512x256 atlas is unused.",
+        "sha256": "b527d67bfba392a43ac1c80433f0cab6ee62a795566a3352f35474b38c82ad92",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Green channel flipped to glTF's green-up when the engine's derived tangents were corrected; red and blue untouched (checked pixel for pixel). Plates, rivets and grooves read as relief in both lit views of its sheet, and the gate no longer reports a green-down map.",
         "date": "2026-11-12"
       }
     },
@@ -808,9 +772,9 @@
       "profile": "atlas",
       "review": {
         "verdict": "pass",
-        "sha256": "ce0bb4e7e54527a2a73c51ffef3b54d558523500b6bbb621d43acfc4e8474db4",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "The five sheets and the group sheet, with modelkit's engine shots of the model in mind. colossus_albedo: dark bronze plates with verdigris panels and thin gold inlay lines, as SPEC.md's old metal, readable plate by plate in the detail tile and as a bronze-and-gold mass at the 32 px mip; colossus_normal: plate bevels, hatching and rivets that light as raised under the engine's reading (green down, no tangents); colossus_glow: a few violet veins and specks around the wound, almost all black. aetherite_albedo and aetherite_glow are the spire: the same eight-colour violet ramp as the crystal's. Accepted, waived as debt: the albedo's occlusion shading leaves 75 near-duplicate colours (slightly soft shading, not visible blur), its PNG is twice the size it needs, and four fifths of the spire's 512x256 atlas is unused.",
+        "sha256": "b527d67bfba392a43ac1c80433f0cab6ee62a795566a3352f35474b38c82ad92",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Pixels unchanged (the model file was rewritten only to flip colossus_normal's green; these four images verified byte-identical to the reviewed version). Re-read on the group sheet: teal plate, brass, violet aetherite as before; the earlier verdicts and waivers stand.",
         "date": "2026-11-12"
       }
     },
@@ -824,9 +788,9 @@
       },
       "review": {
         "verdict": "pass",
-        "sha256": "ce0bb4e7e54527a2a73c51ffef3b54d558523500b6bbb621d43acfc4e8474db4",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "The five sheets and the group sheet, with modelkit's engine shots of the model in mind. colossus_albedo: dark bronze plates with verdigris panels and thin gold inlay lines, as SPEC.md's old metal, readable plate by plate in the detail tile and as a bronze-and-gold mass at the 32 px mip; colossus_normal: plate bevels, hatching and rivets that light as raised under the engine's reading (green down, no tangents); colossus_glow: a few violet veins and specks around the wound, almost all black. aetherite_albedo and aetherite_glow are the spire: the same eight-colour violet ramp as the crystal's. Accepted, waived as debt: the albedo's occlusion shading leaves 75 near-duplicate colours (slightly soft shading, not visible blur), its PNG is twice the size it needs, and four fifths of the spire's 512x256 atlas is unused.",
+        "sha256": "b527d67bfba392a43ac1c80433f0cab6ee62a795566a3352f35474b38c82ad92",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Pixels unchanged (the model file was rewritten only to flip colossus_normal's green; these four images verified byte-identical to the reviewed version). Re-read on the group sheet: teal plate, brass, violet aetherite as before; the earlier verdicts and waivers stand.",
         "date": "2026-11-12"
       }
     },
@@ -834,9 +798,9 @@
       "profile": "atlas",
       "review": {
         "verdict": "pass",
-        "sha256": "ce0bb4e7e54527a2a73c51ffef3b54d558523500b6bbb621d43acfc4e8474db4",
-        "by": "Claude (AI agent), from the review sheet",
-        "notes": "The five sheets and the group sheet, with modelkit's engine shots of the model in mind. colossus_albedo: dark bronze plates with verdigris panels and thin gold inlay lines, as SPEC.md's old metal, readable plate by plate in the detail tile and as a bronze-and-gold mass at the 32 px mip; colossus_normal: plate bevels, hatching and rivets that light as raised under the engine's reading (green down, no tangents); colossus_glow: a few violet veins and specks around the wound, almost all black. aetherite_albedo and aetherite_glow are the spire: the same eight-colour violet ramp as the crystal's. Accepted, waived as debt: the albedo's occlusion shading leaves 75 near-duplicate colours (slightly soft shading, not visible blur), its PNG is twice the size it needs, and four fifths of the spire's 512x256 atlas is unused.",
+        "sha256": "b527d67bfba392a43ac1c80433f0cab6ee62a795566a3352f35474b38c82ad92",
+        "by": "Claude (AI agent), from the review sheets",
+        "notes": "Pixels unchanged (the model file was rewritten only to flip colossus_normal's green; these four images verified byte-identical to the reviewed version). Re-read on the group sheet: teal plate, brass, violet aetherite as before; the earlier verdicts and waivers stand.",
         "date": "2026-11-12"
       }
     },

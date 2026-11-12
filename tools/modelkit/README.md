@@ -241,7 +241,7 @@ that is not meant to be closed).
 | `normals.inconsistent_winding` | Neighbouring faces wound opposite ways: one of them is culled | Recalculate outside; check the generator's vertex order |
 | `normals.inside_out` | A closed shell wound inwards: invisible from outside | Flip it |
 | `normals.shading` | More than 1% of the surface shaded by normals over 80 degrees off the face: smoothing across hard edges | Mark sharp edges (`mk.clean(obj, sharp_angle=40)`) |
-| `normals.tangents` | Broken tangents on a normal-mapped mesh | Fix the UVs, or export without tangents: the engine then derives them, and reads the normal map's green as pointing *down* the image (see "What the engine expects" in `tools/texturekit/README.md`), so the map must be authored to match |
+| `normals.tangents` | Broken tangents on a normal-mapped mesh | Fix the UVs, or export without tangents: the engine derives them, in the same frame glTF gives authored ones, so the normal map needs no change |
 
 ### 3. Topology
 

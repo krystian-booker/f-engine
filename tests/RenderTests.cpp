@@ -479,8 +479,10 @@ TEST_CASE("pixel snapping moves a point onto a pixel centre by less than a pixel
     }
 }
 
-TEST_CASE("generated tangents follow +u and record mirrored UVs") {
+TEST_CASE("generated tangents follow +u, point green up the image as glTF does, and record mirrored UVs") {
     std::vector<MeshVertex> quad(4);
+    // A floor seen from above with the texture the right way round: u runs
+    // along +x, and the top of the image (glTF v = 0) is the far edge, -z.
     const glm::vec3 positions[] = {{0, 0, 0}, {1, 0, 0}, {1, 0, -1}, {0, 0, -1}};
     for (std::size_t i = 0; i < 4; ++i) {
         quad[i].position = positions[i];
@@ -489,17 +491,24 @@ TEST_CASE("generated tangents follow +u and record mirrored UVs") {
     }
     const std::vector<std::uint32_t> indices = {0, 1, 2, 0, 2, 3};
     generateTangents(quad, indices);
-    // cross(normal, tangent) is -z; +v runs towards +z, so the UVs are mirrored.
+    // The frame glTF gives authored tangents: tangent +u, and the bitangent
+    // (where a normal map's green points) up the image, here -z, which is
+    // cross(normal, tangent): handedness +1, as an exporter writes for it.
     for (const auto& v : quad) {
         CHECK(v.tangent.x == doctest::Approx(1.0f));
         CHECK(std::abs(v.tangent.y) + std::abs(v.tangent.z) == doctest::Approx(0.0f));
-        CHECK(v.tangent.w == doctest::Approx(-1.0f));
+        CHECK(v.tangent.w == doctest::Approx(1.0f));
+        const auto bitangent = glm::cross(v.normal, glm::vec3(v.tangent)) * v.tangent.w;
+        CHECK(bitangent.z == doctest::Approx(-1.0f));
     }
+    // The same floor with the image flipped top to bottom is mirrored.
     for (auto& v : quad) {
         v.uv.y = -v.position.z;
     }
     generateTangents(quad, indices);
-    CHECK(quad[0].tangent.w == doctest::Approx(1.0f));
+    CHECK(quad[0].tangent.w == doctest::Approx(-1.0f));
+    CHECK((glm::cross(quad[0].normal, glm::vec3(quad[0].tangent)) * quad[0].tangent.w).z ==
+          doctest::Approx(1.0f));
     std::vector<MeshVertex> noUv(3);
     generateTangents(noUv, {0, 1, 2});
     CHECK(glm::dot(glm::vec3(noUv[0].tangent), noUv[0].normal) == doctest::Approx(0.0f));

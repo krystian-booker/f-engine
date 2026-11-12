@@ -161,9 +161,9 @@
       },
       "review": {
         "verdict": "pass",
-        "sha256": "ce0bb4e7e54527a2a73c51ffef3b54d558523500b6bbb621d43acfc4e8474db4",
+        "sha256": "b527d67bfba392a43ac1c80433f0cab6ee62a795566a3352f35474b38c82ad92",
         "by": "Claude (AI agent), from the review sheets with engine shots",
-        "notes": "Looked at the overview and all eleven pages (stills: filmstrips, frame-by-frame strips, trails, speed graphs, engine shots at four moments each); not watched playing. The engine shots match the offline poses. Poses read from the battle side: slam winds back, raises the right fist and brings it down in four frames to a dead stop on the game's 0.9 s, then holds; sweep winds up, crosses the front (fastest at 0.83 s, still at half speed on the game's 1.0 s) and follows through; pulse curls, rears with arms spread and discharges on 1.6 s. Loop seams (idle, dormant, overload) are one figure, and every one-shot starts and ends in the pose it declares. The motion suits a heavy machine. Accepted: the spike of the kneeling knee's guard is under the floor in dormant, awaken, stagger and overload_enter (waived debt); the shoulder cables pull taut when an arm is raised (by design); pulse's release and the starts of hit and stagger put most of their move into one frame, which reads as a jolt and is softened by the game's cross-fades; idle is restrained (the hips sway 0.08 units, the fists up to 0.5) and dormant all but still, as SPEC.md asks.",
+        "notes": "Re-signed after the file was rewritten to flip its normal map's green: every animation sampler verified identical to the reviewed file. Read the overview again: loops steady, slam, sweep and pulse peak at the game's marks, the kneeling poses still dip a knee spike into the floor (waived debt). Judged from stills, not from motion playing.",
         "date": "2026-11-12"
       }
     },

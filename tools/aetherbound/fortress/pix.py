@@ -101,8 +101,8 @@ class Canvas:
             self.height[np.ix_(ys, xs)] = height
 
     def normal_map(self, strength=2.0, wrap=True):
-        """Tangent-space normal map; green + is image-down (+v), which is the
-        bitangent the engine derives from UVs."""
+        """Tangent-space normal map in glTF's convention, which is the engine's:
+        red leans right, green leans up the image."""
         hgt = self.height
         if wrap:
             dx = (np.roll(hgt, -1, 1) - np.roll(hgt, 1, 1)) * 0.5
@@ -111,7 +111,7 @@ class Canvas:
             p = np.pad(hgt, 1, mode="edge")
             dx = (p[1:-1, 2:] - p[1:-1, :-2]) * 0.5
             dy = (p[2:, 1:-1] - p[:-2, 1:-1]) * 0.5
-        nx, ny, nz = -dx * strength, -dy * strength, np.ones_like(hgt)
+        nx, ny, nz = -dx * strength, dy * strength, np.ones_like(hgt)  # dy is taken down the image, green points up it
         ln = np.sqrt(nx * nx + ny * ny + nz * nz)
         n = np.stack([nx / ln, ny / ln, nz / ln], -1)
         return np.clip(n * 127.5 + 127.5, 0, 255).astype(np.uint8)

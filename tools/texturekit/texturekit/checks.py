@@ -708,24 +708,19 @@ def _check_normal(texture, profile, context):
     if back.sum() > profile.get("normal_back_share", 0.005) * total:
         out.append(Finding("ready.normal_blue", WARN, "vectors that point into the surface (blue under 128): they are lit from behind", int(back.sum()),
                            None, "Blue is the part towards the viewer and is never negative: check the channel order and the encoding."))
-    # Which way green points, against what the engine will do with it on this mesh.
+    # Which way green points. The engine reads it as up the image (glTF), on a mesh with
+    # authored tangents and on one whose tangents it derives alike.
     direction, ratio = normal_green(texture, profile.get("tile", "none") == "both")
     if direction and ratio >= profile.get("normal_green_confidence", 1.5):
         for use in texture.uses:
             if use["role"] != ti.NORMAL:
                 continue
-            tangents = ti.use_has_tangents(use)
-            if tangents is None:
-                continue
-            expected = "up" if tangents else profile.get("derived_tangents_green", "down")
+            expected = profile.get("normal_green", "up")
             if direction != expected:
-                why = ("its mesh carries tangents, so the engine reads green as up (glTF)" if tangents else
-                       "its mesh has no tangents, and the tangents the engine derives read green as pointing down the image")
-                out.append(Finding("ready.normal_green", WARN, f"a green-{direction} normal map where the engine will light it as green-{expected}: "
-                                   f"{why}; every bump is lit from the wrong side top to bottom", None,
+                out.append(Finding("ready.normal_green", WARN, f"a green-{direction} normal map: the engine reads green as pointing {expected} "
+                                   "the image (glTF), so every bump is lit from the wrong side top to bottom", None,
                                    f"material '{use['material']}' of {use['model']}",
-                                   "Export the mesh with tangents and keep maps green-up (the documented convention), or flip green "
-                                   "(tools.flip_green) for a mesh without tangents; see the guide, 'What the engine expects'."))
+                                   "Flip green (tools.flip_green), or derive the map again from its height (tools.normal_from_height)."))
                 break
         else:
             if not any(use["role"] == ti.NORMAL for use in texture.uses) and direction != profile.get("normal_green", "up"):

@@ -278,10 +278,7 @@ def draw(texture, profile, findings, lines, swatches=None, title=None):
         tiles.append(_tile(_over(sampled, (0, 0, 0)), f"detail on black ({how})"))
         tiles.append(_tile(_over(sampled, (255, 255, 255)), f"detail on white ({how})"))
     elif texture.role == ti.NORMAL:
-        green_up = True
-        for use in texture.uses:
-            if use["role"] == ti.NORMAL and ti.use_has_tangents(use) is False:
-                green_up = profile.get("derived_tangents_green", "down") == "up"
+        green_up = profile.get("normal_green", "up") == "up"
         reading = "green up" if green_up else "green down"
         for name, light in (("upper left", (-0.55, 0.55, 0.62)), ("lower right", (0.55, -0.55, 0.62))):
             lit, _ = _fit(_lit(texture, light, green_up))

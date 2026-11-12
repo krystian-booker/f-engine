@@ -100,7 +100,7 @@ engine's own account.
 | Model textures | Embedded in the `.glb` (PNG or JPEG) or a file next to it. Base colour and emissive are decoded from sRGB, normal maps are read as plain numbers. The glTF sampler decides the rest: `magFilter` NEAREST or linear; a mip-mapped `minFilter` (the Blender default; `NEAREST_MIPMAP_NEAREST` for pixel art) makes the engine build a mip chain; wrap is repeat, clamp or mirror. A texture with no sampler is filtered linearly, with mips, repeating |
 | Mips | Built by the engine at load, a 2x2 box per level, colour averaged in linear light and weighted by alpha, so the colour under transparent texels does not darken mips. Magnification with linear filtering still reaches under the edge |
 | Alpha on meshes | The material's `alphaMode`: OPAQUE ignores the texture's alpha, MASK cuts at the cutoff, BLEND blends straight (not premultiplied) alpha and is sorted. Emissive and normal maps: only RGB is read |
-| Normal maps | Tangent space, unit vectors, red to the right, blue towards the viewer. **Green depends on the mesh.** With a `TANGENT` attribute in the file the engine follows glTF: green points up the image. Without one (every model of Aetherbound) the engine derives tangents from the UVs, and those put green *down* the image: a green-up map is then lit upside down. Verified by rendering one dome both ways (`engine/assets/Model.cpp`, `generateTangents`). Until that changes, a map for a mesh without tangents is authored green-down (`tk.flip_green`); profile key `derived_tangents_green` holds this fact in one place. Sprite normal maps are green-up (spritekit) |
+| Normal maps | Tangent space, unit vectors, in glTF's convention: red leans right, green leans **up the image**, blue towards the viewer; flat is (128, 128, 255). The engine reads it the same way whether the mesh carries a `TANGENT` attribute or the engine derives tangents from the UVs (`engine/assets/Model.cpp`, `generateTangents`), and on sprites (spritekit). A map from a tool that writes green down (DirectX style) must be flipped (`tk.flip_green`) |
 | Emissive | `emissiveFactor` times `KHR_materials_emissive_strength` times the map's RGB, added unlit; above 1 it blooms |
 | Canvas images | `fe.canvas.image`, `fe.canvas.nine_slice`, `fe.text.icon`: drawn as stored (no sRGB decode; the canvas composes in sRGB), straight alpha, clamped, no mips, point sampled unless the call passes `linear = true`. Any size |
 | Sky | `environment.sky.backdrops[].image`: a card far away, decoded from sRGB, with mips, linear, clamped, straight alpha times a tint. `sky.mode = "panorama"`: sRGB, no mips, linear, repeating along U and clamped along V |
@@ -239,7 +239,7 @@ from texturekit import tools as tk
 
 pixels = tk.quantize(painted, tk.load_palette("tools/<game>/palette.hex"))   # or a number of colours
 print(tk.seam(pixels))                                                       # how the wrap compares with the interior
-normal = tk.normal_from_height(height, strength=2.0)                         # green up; tk.flip_green for a mesh without tangents
+normal = tk.normal_from_height(height, strength=2.0)                         # green up, as the engine reads it
 tk.save_png("samples/<game>/maps/keep/textures/wall.png", pixels)
 tk.save_png("samples/<game>/ui/cursor.png", tk.bleed_edges(cursor))
 ```
@@ -255,7 +255,8 @@ tk.save_png("samples/<game>/ui/cursor.png", tk.bleed_edges(cursor))
 | `quantize(pixels, palette_or_n, dither=False)` | Every texel to its nearest palette colour (or to the image's best `n`); `dither=True` adds an ordered dither between the two nearest. Fixes `colour.count`, `colour.near_duplicates`, `colour.palette` |
 | `palette_of(pixels, limit=None)`, `load_palette(source)` | The image's colours by share; a palette from a `.hex`, `.gpl` or `.json` file, a list, or an image |
 | `normal_from_height(height, strength=1.0, wrap=True)` | A unit-length, green-up normal map from a height field; `wrap` keeps a tileable height tileable |
-| `flip_green(pixels)`, `renormalize(pixels)` | Between green-up and green-down; unit length again after painting or blending |
+| `flip_green(pixels)`, `renormalize(pixels)` | A green-down map (from a DirectX-style tool) to green-up; unit length again after painting or blending |
+| `replace_glb_image(path, name, pixels)` | Write a repaired texture over the image of that name inside a `.glb`, leaving the rest of the model as it is |
 | `pad_pow2(pixels, mode)` | Pads an atlas to powers of two and returns the factor to scale its UVs by. Not for tiles |
 | `halve(pixels, srgb=True)`, `mip_chain(pixels, srgb=True)` | The engine's own mip levels (2x2 box, linear light, alpha-weighted), to look at what the texture is at a distance |
 
@@ -346,7 +347,7 @@ profiles; an emissive map may hold a glow's falloff.
 | `ready.sampler` | The glTF sampler against the profile: pixel art magnified linearly (or no sampler at all, which means linear), smooth art point-sampled, a world texture without mips, a tiling texture that clamps |
 | `ready.unused` | An embedded image no drawn material samples; a file no map, data file, Lua script or model names (a name Lua builds from `"folder/" .. name .. ".png"` counts as named, and is noted) |
 | `ready.normal_flat`, `ready.normal_encoding`, `ready.normal_length`, `ready.normal_blue` | A normal map that is flat everywhere; whose red and green do not centre on 128 (saved through a gamma or colour conversion, or channels swapped); with over 2% of its vectors off unit length (painted on, scaled, blended); with vectors pointing into the surface |
-| `ready.normal_green` | A map whose green points the other way from how the engine will read it on the mesh that uses it (see "What the engine expects"). The direction is read from the map itself: only one reading of green makes its slopes fit together into a surface. Relief of straight horizontal and vertical bevels alone cannot tell, and then nothing is said |
+| `ready.normal_green` | A green-down map on a mesh: the engine reads green as up, so every bump is lit from the wrong side top to bottom. The direction is read from the map itself: only one reading of green makes its slopes fit together into a surface. Relief of straight horizontal and vertical bevels alone cannot tell, and then nothing is said |
 | `ready.map_size` | A normal or emissive map that is not the size of the colour map of its material |
 | `ready.emissive_black`, `ready.emissive_coverage` | An emissive map with nothing lit; or with more than half of it lit |
 | `ready.nine_slice` | With `"nine_slice"`: detail across the direction the panel stretches (in its edges or middle); or borders that leave no middle (an error) |

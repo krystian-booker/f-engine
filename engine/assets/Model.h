@@ -13,7 +13,9 @@
 namespace fe {
 struct MeshVertex {
     glm::vec3 position{0}, normal{0, 1, 0};
-    glm::vec4 tangent{1, 0, 0, 1}; // xyz along +u, w = handedness of the bitangent (+v)
+    // xyz along +u; w = handedness: the bitangent, cross(normal, tangent) * w, points up the
+    // texture image (against glTF's +v), where a normal map's green channel points.
+    glm::vec4 tangent{1, 0, 0, 1};
     glm::vec2 uv{0};
     glm::vec4 color{1};
 };
@@ -21,8 +23,10 @@ struct MeshVertex {
 // Per-vertex tangents for normal mapping: each triangle's tangent and
 // bitangent from its UV gradients, weighted by triangle area and summed per
 // vertex (so shared vertices are smoothed), then made orthogonal to the
-// vertex normal. Vertices without usable UVs get any tangent perpendicular to
-// their normal.
+// vertex normal. The frame is glTF's: tangent along +u, bitangent up the image
+// (against +v, which runs down it), so a normal map means the same on a mesh
+// with authored tangents and on one without. Vertices without usable UVs get
+// any tangent perpendicular to their normal.
 void generateTangents(std::vector<MeshVertex>& vertices, const std::vector<std::uint32_t>& indices);
 
 enum class MaterialKind { Lit, Unlit, Water };
