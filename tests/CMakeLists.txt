@@ -10,6 +10,7 @@ add_executable(fengine_tests
   EngineTests.cpp
   MiscTests.cpp
   EditorTests.cpp
+  ReflectionTests.cpp SessionTests.cpp
   ReplayTests.cpp
   PlatformTests.cpp
   PackTests.cpp

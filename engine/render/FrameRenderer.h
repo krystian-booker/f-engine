@@ -11,6 +11,18 @@
 namespace fe {
 class Renderer;
 
+// Where a rendered frame ends up and which bgfx views it may use. The
+// defaults are the game's: the back buffer, and every view between the
+// renderer's (0) and ImGui's (the last). A host that draws several frames
+// per bgfx frame (the editor's Scene and Game views, each a FrameRenderer
+// with its own swap chain) chains them: each starts at the view the previous
+// render() returned.
+struct FrameOutput {
+    bgfx::FrameBufferHandle target = BGFX_INVALID_HANDLE; // invalid = the back buffer
+    std::uint16_t firstView = 1;
+    std::uint16_t lastView = 0; // first view not to use; 0 = ImGui's view
+};
+
 // Draws a whole frame: every requested world in order, each composited over
 // the previous ones (full screen, into a screen rect, or into a named render
 // target); the canvas UI on top; then one screen pass that applies the
@@ -35,8 +47,11 @@ public:
     // `tick` counts logic ticks: a draw's camera override is interpolated
     // between the values it had on the previous tick and this one, like the
     // world camera, for each world and target (and the n-th such draw).
-    void render(const std::vector<WorldDraw>& draws, const Canvas& canvas, const ScreenFx& screen,
-                glm::ivec2 viewport, double alpha, double time, std::uint64_t tick);
+    // `viewport` is the size of `output.target` in pixels. Returns the first
+    // view the frame did not use.
+    std::uint16_t render(const std::vector<WorldDraw>& draws, const Canvas& canvas, const ScreenFx& screen,
+                         glm::ivec2 viewport, double alpha, double time, std::uint64_t tick,
+                         const FrameOutput& out = {});
     // Writes the next rendered frame's worlds (no canvas, screen effects or
     // editor) to a PNG at most 480 pixels wide, once the GPU has read it back.
     void captureScene(const std::filesystem::path& file) { sceneCaptures_.push_back(file); }

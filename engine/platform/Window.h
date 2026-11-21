@@ -1,6 +1,7 @@
 #pragma once
 #include "engine/core/GameConfig.h"
 #include "engine/platform/Display.h"
+#include "engine/render/RenderSurface.h"
 #include "engine/services/Clipboard.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_metal.h>
@@ -11,19 +12,17 @@
 #include <vector>
 
 namespace fe {
-class Window {
+class Window final : public RenderSurface {
 public:
     explicit Window(const GameConfig& config);
-    ~Window();
+    ~Window() override;
     Window(const Window&) = delete;
     Window& operator=(const Window&) = delete;
     [[nodiscard]] SDL_Window* native() const { return window_; }
-    [[nodiscard]] bgfx::SwapChain swapChain() const;
-    // What swapChain() handles are: Wayland surfaces or the platform default
-    // (X11 on Linux). bgfx::Init::platformData.type must match.
-    [[nodiscard]] bgfx::NativeWindowHandleType::Enum handleType() const;
-    [[nodiscard]] std::pair<int, int> pixelSize() const;
-    [[nodiscard]] bool minimized() const;
+    [[nodiscard]] bgfx::SwapChain swapChain() const override;
+    [[nodiscard]] bgfx::NativeWindowHandleType::Enum handleType() const override;
+    [[nodiscard]] std::pair<int, int> pixelSize() const override;
+    [[nodiscard]] bool minimized() const override;
     // Connected monitors in SDL's order, with their exclusive fullscreen modes.
     [[nodiscard]] static std::vector<Monitor> monitors();
     // Fills the window's fullscreen mode, size and monitor into `state`.

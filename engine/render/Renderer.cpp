@@ -1,8 +1,8 @@
 #include "engine/render/Renderer.h"
 #include "engine/assets/Image.h"
 #include "engine/core/Log.h"
-#include "engine/platform/Window.h"
 #include "engine/render/FrameRenderer.h"
+#include "engine/render/RenderSurface.h"
 #include <algorithm>
 #include <array>
 #include <bx/allocator.h>
@@ -12,13 +12,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <imgui.h>
-#include <string_view>
-#if FENGINE_DEV
-#include <IconsFontAwesome6.h>
-#include <filesystem>
-#endif
-#include <imgui_impl_sdl3.h>
 #include <stdexcept>
+#include <string_view>
 
 namespace fe {
 namespace {
@@ -155,13 +150,13 @@ struct Renderer::Callback final : bgfx::CallbackI {
     void captureFrame(const void*, std::uint32_t) override {}
 };
 
-Renderer::Renderer(Window& window, const std::filesystem::path& root, const OutputColor& wanted)
-    : window_(window), shaderRoot_(root), output_(wanted), callback_(std::make_unique<Callback>()) {
-    // Submission and rendering stay on the SDL thread (required on macOS).
+Renderer::Renderer(RenderSurface& surface, const std::filesystem::path& root, const OutputColor& wanted)
+    : surface_(surface), shaderRoot_(root), output_(wanted), callback_(std::make_unique<Callback>()) {
+    // Submission and rendering stay on the window thread (required on macOS).
 #if BGFX_CONFIG_MULTITHREADED
     bgfx::renderFrame();
 #endif
-    auto [width, height] = window.pixelSize();
+    auto [width, height] = surface.pixelSize();
     width_ = width;
     height_ = height;
     // Ask for the 16F swap chain first; bgfx falls back to 8 bits when the
@@ -169,7 +164,7 @@ Renderer::Renderer(Window& window, const std::filesystem::path& root, const Outp
     const bool wantHdr = wanted.encoding != OutputEncoding::Srgb;
     output_.encoding = wantHdr ? OutputEncoding::ScRgb : OutputEncoding::Srgb;
     bgfx::Init init;
-    init.platformData.type = window.handleType();
+    init.platformData.type = surface.handleType();
     init.swapChain = swapChain();
     init.swapChain.width = static_cast<std::uint32_t>(width);
     init.swapChain.height = static_cast<std::uint32_t>(height);
@@ -234,29 +229,9 @@ Renderer::Renderer(Window& window, const std::filesystem::path& root, const Outp
     io.IniFilename = nullptr;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable | ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();
-#if FENGINE_DEV && defined(FENGINE_EDITOR_FONT)
-    // The editor's icons (Font Awesome 6 Free, solid) merged into the default
-    // font; without the file the icon names render as blank glyphs.
-    io.Fonts->AddFontDefault();
-    if (std::filesystem::is_regular_file(FENGINE_EDITOR_FONT)) {
-        ImFontConfig icons;
-        icons.MergeMode = true;
-        icons.PixelSnapH = true;
-        icons.GlyphMinAdvanceX = 13;
-        icons.GlyphOffset = ImVec2(0, 1);
-        static const ImWchar ranges[] = {ICON_MIN_FA, ICON_MAX_16_FA, 0};
-        io.Fonts->AddFontFromFileTTF(FENGINE_EDITOR_FONT, 13.0f, &icons, ranges);
-    }
-#endif
-    if (!ImGui_ImplSDL3_InitForOther(window.native())) {
-        ImGui::DestroyContext();
-        bgfx::shutdown();
-        throw std::runtime_error("ImGui SDL3 initialisation failed");
-    }
     try {
         imgui_ = std::make_unique<ImGuiRenderer>(root);
     } catch (...) {
-        ImGui_ImplSDL3_Shutdown();
         ImGui::DestroyContext();
         bgfx::shutdown();
         throw;
@@ -266,13 +241,12 @@ Renderer::Renderer(Window& window, const std::filesystem::path& root, const Outp
 
 Renderer::~Renderer() {
     imgui_.reset();
-    ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
     bgfx::shutdown();
 }
 
 bgfx::SwapChain Renderer::swapChain() const {
-    auto chain = window_.swapChain();
+    auto chain = surface_.swapChain();
     chain.formatColor = backBufferFormat(output_.encoding);
     if (output_.encoding != OutputEncoding::Srgb) {
         chain.flags |= BGFX_SWAP_CHAIN_HDR10; // scRGB or PQ colour space, per the format
@@ -285,13 +259,9 @@ void Renderer::setVsync(bool on) {
     vsync_ = on;
 }
 
-void Renderer::processEvent(const SDL_Event& event) {
-    ImGui_ImplSDL3_ProcessEvent(&event);
-}
-
 bool Renderer::beginFrame() {
-    const auto [width, height] = window_.pixelSize();
-    if (width <= 0 || height <= 0 || window_.minimized()) {
+    const auto [width, height] = surface_.pixelSize();
+    if (width <= 0 || height <= 0 || surface_.minimized()) {
         return false;
     }
     if (width != width_ || height != height_ || resetPending_) {
@@ -306,14 +276,18 @@ bool Renderer::beginFrame() {
     bgfx::setViewRect(0, 0, 0, static_cast<std::uint16_t>(width), static_cast<std::uint16_t>(height));
     bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x000000ff, 1.0f, 0);
     bgfx::touch(0);
-    ImGui_ImplSDL3_NewFrame();
+    if (imguiPlatformFrame_) {
+        imguiPlatformFrame_();
+    }
     ImGui::NewFrame();
     return true;
 }
 
 std::uint32_t Renderer::endFrame() {
     ImGui::Render();
-    imgui_->render(ImGui::GetDrawData(), static_cast<std::uint16_t>(bgfx::getCaps()->limits.maxViews - 1));
+    const auto view = static_cast<std::uint16_t>(bgfx::getCaps()->limits.maxViews - 1);
+    imgui_->render(ImGui::GetDrawData(), view);
+    bgfx::setViewFrameBuffer(view, imguiTarget_);
     return bgfx::frame();
 }
 
