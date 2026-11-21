@@ -1,5 +1,5 @@
 # The windowed runtime: SDL3 window/input, bgfx rendering, miniaudio, the
-# developer editor and the main loop.
+# development debug overlay and the main loop.
 add_library(fengine_audio STATIC engine/audio/MiniAudio.cpp)
 target_link_libraries(fengine_audio PUBLIC fengine_core PRIVATE fengine_audio_dependency)
 fengine_warnings(fengine_audio)
@@ -24,32 +24,8 @@ add_library(fengine_runtime STATIC
   engine/render/CanvasRenderer.cpp
   engine/render/FrameRenderer.cpp
   engine/runtime/MainLoop.cpp
-  $<${FENGINE_DEV_ENABLED}:${CMAKE_CURRENT_SOURCE_DIR}/engine/editor/Editor.cpp>
-  $<${FENGINE_DEV_ENABLED}:${CMAKE_CURRENT_SOURCE_DIR}/engine/editor/EditorWidgets.cpp>
-  $<${FENGINE_DEV_ENABLED}:${CMAKE_CURRENT_SOURCE_DIR}/engine/editor/EditorWorldTab.cpp>
-  $<${FENGINE_DEV_ENABLED}:${CMAKE_CURRENT_SOURCE_DIR}/engine/editor/EditorMapTab.cpp>
-  $<${FENGINE_DEV_ENABLED}:${CMAKE_CURRENT_SOURCE_DIR}/engine/editor/EditorMapObjects.cpp>
-  $<${FENGINE_DEV_ENABLED}:${CMAKE_CURRENT_SOURCE_DIR}/engine/editor/EditorDataTab.cpp>
-  $<${FENGINE_DEV_ENABLED}:${CMAKE_CURRENT_SOURCE_DIR}/engine/editor/EditorToolsTabs.cpp>
-  $<${FENGINE_DEV_ENABLED}:${CMAKE_CURRENT_SOURCE_DIR}/engine/editor/EditorShell.cpp>
-  $<${FENGINE_DEV_ENABLED}:${CMAKE_CURRENT_SOURCE_DIR}/engine/editor/EditorViewport.cpp>
-  $<${FENGINE_DEV_ENABLED}:${CMAKE_CURRENT_SOURCE_DIR}/engine/editor/EditorHierarchy.cpp>
-  $<${FENGINE_DEV_ENABLED}:${CMAKE_CURRENT_SOURCE_DIR}/engine/editor/EditorInspector.cpp>
-  $<${FENGINE_DEV_ENABLED}:${CMAKE_CURRENT_SOURCE_DIR}/engine/editor/EditorAssetsPanel.cpp>
-  $<${FENGINE_DEV_ENABLED}:${CMAKE_CURRENT_SOURCE_DIR}/engine/editor/EditorScripts.cpp>
-  $<${FENGINE_DEV_ENABLED}:${CMAKE_CURRENT_SOURCE_DIR}/engine/editor/EditorPickers.cpp>
-  $<${FENGINE_DEV_ENABLED}:${CMAKE_CURRENT_SOURCE_DIR}/engine/editor/EditorScript.cpp>
+  $<${FENGINE_DEV_ENABLED}:${CMAKE_CURRENT_SOURCE_DIR}/engine/editor/overlay/DebugOverlay.cpp>
 )
-# Dismissing the OS file dialog from a scripted walkthrough needs AppKit on macOS.
-if(FENGINE_DEV_ENABLED)
-  if(APPLE)
-    target_sources(fengine_runtime PRIVATE engine/editor/EditorNativeMac.mm)
-    set_source_files_properties(engine/editor/EditorNativeMac.mm PROPERTIES COMPILE_FLAGS "-x objective-c++ -fobjc-arc")
-    target_link_libraries(fengine_runtime PUBLIC "-framework AppKit")
-  else()
-    target_sources(fengine_runtime PRIVATE engine/editor/EditorNativeStub.cpp)
-  endif()
-endif()
 target_link_libraries(fengine_runtime PUBLIC fengine_core fengine_audio SDL3::SDL3 bgfx bx fengine_imgui)
 # Development builds fall back to the build and source trees (shaders, shader
 # hot rebuild); ship builds only look next to the executable.
@@ -57,7 +33,6 @@ target_compile_definitions(fengine_runtime PRIVATE
   $<${FENGINE_DEV_ENABLED}:FENGINE_SHADER_DIR="${PROJECT_BINARY_DIR}/shaders">
   $<${FENGINE_DEV_ENABLED}:FENGINE_SHADER_SOURCE_DIR="${PROJECT_SOURCE_DIR}/shaders">
   $<${FENGINE_DEV_ENABLED}:FENGINE_BUILD_DIR="${PROJECT_BINARY_DIR}">
-  $<${FENGINE_DEV_ENABLED}:FENGINE_EDITOR_FONT="${FENGINE_EDITOR_FONT}">
   $<${FENGINE_DEV_ENABLED}:FENGINE_CMAKE="${CMAKE_COMMAND}">)
 fengine_warnings(fengine_runtime)
 add_dependencies(fengine_runtime fengine_shaders)

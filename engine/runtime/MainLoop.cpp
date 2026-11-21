@@ -11,11 +11,13 @@
 #include "engine/runtime/Engine.h"
 #include "engine/runtime/ReplayHarness.h"
 #if FENGINE_DEV
-#include "engine/editor/Editor.h"
+#include "engine/editor/overlay/DebugOverlay.h"
 #endif
 #include <SDL3/SDL.h>
 #include <chrono>
+#include <imgui_impl_sdl3.h>
 #include <iostream>
+#include <stdexcept>
 #include <vector>
 
 namespace fe {
@@ -224,15 +226,36 @@ OutputColor outputRequest(const RuntimeOptions& options, const GameConfig& confi
     return output;
 }
 
+// ImGui's SDL platform backend for the renderer's ImGui context: display size
+// and input come from the game window. Lives inside the renderer's lifetime.
+class ImGuiSdl {
+public:
+    ImGuiSdl(Window& window, Renderer& renderer) : renderer_(renderer) {
+        if (!ImGui_ImplSDL3_InitForOther(window.native())) {
+            throw std::runtime_error("ImGui SDL3 initialisation failed");
+        }
+        renderer_.setImGuiPlatformFrame([] { ImGui_ImplSDL3_NewFrame(); });
+    }
+    ~ImGuiSdl() {
+        renderer_.setImGuiPlatformFrame(nullptr);
+        ImGui_ImplSDL3_Shutdown();
+    }
+    ImGuiSdl(const ImGuiSdl&) = delete;
+    ImGuiSdl& operator=(const ImGuiSdl&) = delete;
+
+private:
+    Renderer& renderer_;
+};
+
 // One run of a game in a window: owns every subsystem and splits a frame
 // into event handling, fixed-step ticks, rendering and app requests.
 class Session {
 public:
     Session(const RuntimeOptions& options, const GameConfig& config)
         : options_(options), window_(config),
-          renderer_(window_, options.shaders, outputRequest(options, config)), replay_(loadReplay(options)),
-          engine_(engineOptions(), config), frame_(renderer_, engine_.assets(), config.pixelsPerUnit),
-          input_(engine_.input())
+          renderer_(window_, options.shaders, outputRequest(options, config)),
+          imguiPlatform_(window_, renderer_), replay_(loadReplay(options)), engine_(engineOptions(), config),
+          frame_(renderer_, engine_.assets(), config.pixelsPerUnit), input_(engine_.input())
 #if FENGINE_DEV
           ,
           editor_(engine_), reloader_(options, options.shaders)
@@ -243,16 +266,8 @@ public:
             input_.record(&*recorder_);
         }
 #if FENGINE_DEV
-        editor_.attach(frame_);
-        editor_.setWindow(window_.native());
-        engine_.editorHooks().leaveMap = [this](const std::string& world) {
-            return editor_.requestLeaveMap(world);
-        };
-        engine_.editorHooks().leaveResult = [this] {
-            return editor_.leaveMapResult();
-        };
         if (!options.userData.empty()) {
-            editor_.setLayoutFile(options.userData / "editor.ini");
+            editor_.setLayoutFile(options.userData / "debug.ini");
         }
         if (options.tools) {
             editor_.toggle();
@@ -344,7 +359,7 @@ private:
     void pumpEvents() {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
-            renderer_.processEvent(event);
+            ImGui_ImplSDL3_ProcessEvent(&event);
             activity_.handle(event);
             if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
                 running_ = false;
@@ -375,11 +390,6 @@ private:
             if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
                 event.key.scancode == SDL_SCANCODE_F1) {
                 editor_.toggle();
-                continue;
-            }
-            if (event.type == SDL_EVENT_DROP_FILE && event.drop.data) {
-                // Window coordinates (points); the editor scales them to pixels.
-                editor_.dropFile(std::filesystem::path(event.drop.data), {event.drop.x, event.drop.y});
                 continue;
             }
             const bool captured = editor_.capturesInput();
@@ -458,8 +468,8 @@ private:
         }
 #if FENGINE_DEV
         // Replays never pause (like focus loss), so a replay can drive the
-        // game under an open editor.
-        if (editor_.paused() && !replay_) {
+        // game under an open overlay. Step lets one tick through.
+        if (editor_.paused() && !replay_ && !editor_.takeStep()) {
             return;
         }
 #endif
@@ -485,19 +495,13 @@ private:
         }
         requests.sceneCaptures.clear();
 #if FENGINE_DEV
-        // The editor runs before the frame renders: the Scene viewport it
-        // lays out this frame is where the world is drawn this frame. ImGui's
-        // own draw data is submitted in endFrame, after everything else.
+        // The debug overlay; ImGui's draw data is submitted in endFrame,
+        // over everything else.
         editor_.drawErrors();
-        editor_.draw({frameMilliseconds, engine_.stats().drawCalls, step_.alpha(), viewport_});
-        std::vector<WorldDraw> draws = engine_.drawList();
-        editor_.adjustDraws(draws);
-        frame_.render(draws, engine_.canvas(), engine_.screen(), viewport_, step_.alpha(), engine_.gameTime(),
-                      engine_.ticks());
-#else
+        editor_.draw(frameMilliseconds, engine_.stats().drawCalls);
+#endif
         frame_.render(engine_.drawList(), engine_.canvas(), engine_.screen(), viewport_, step_.alpha(),
                       engine_.gameTime(), engine_.ticks());
-#endif
         engine_.stats().frame = frameMilliseconds;
         engine_.stats().drawCalls = frame_.drawCalls();
         for (const auto& file : requests.captures) {
@@ -563,6 +567,7 @@ private:
     const RuntimeOptions& options_;
     Window window_;
     Renderer renderer_;
+    ImGuiSdl imguiPlatform_;
     std::optional<ReplayHarness> replay_;
     MiniAudio* audio_ = nullptr; // owned by the engine
     Engine engine_;
@@ -572,7 +577,7 @@ private:
     std::optional<ReplayRecorder> recorder_;
     CaptureChecks captures_{options_.writeReferences};
 #if FENGINE_DEV
-    Editor editor_;
+    DebugOverlay editor_;
     Reloader reloader_;
     double sinceReload_ = 0;
 #endif

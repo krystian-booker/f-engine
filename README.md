@@ -2,7 +2,7 @@
 
 A C++20 engine for HD-2D role-playing games: pixel-art sprites, and rigged 3D creatures where a scene wants them, standing in lit 3D dioramas. Every game rule is the game's own Lua.
 
-The C++ engine provides **services only**: windowing, input action maps with keyboard and gamepad hot-swap, a 3D world of entities (sprites, static and skinned meshes, lights, particles) with HD-2D post-processing (mip-chain bloom, depth-aware depth of field, ambient occlusion, distortion, FXAA, game post shaders), several views per frame (screen rects and render targets), freeze-frame transitions, grid navigation, 2D canvas drawing, text layout, audio, saves, hot reload, replays and an in-game editor. It contains no JRPG concepts and **ships no Lua**: HP, parties, items, battles, menus, shops, quests and encounters are written by each game against the bindings in [docs/api.md](docs/api.md). `tools/ci/check_boundary.py` enforces the first half in CI, and the packaging job checks that the shipped `builtin.pak` holds no Lua.
+The C++ engine provides **services only**: windowing, input action maps with keyboard and gamepad hot-swap, a 3D world of entities (sprites, static and skinned meshes, lights, particles) with HD-2D post-processing (mip-chain bloom, depth-aware depth of field, ambient occlusion, distortion, FXAA, game post shaders), several views per frame (screen rects and render targets), freeze-frame transitions, grid navigation, 2D canvas drawing, text layout, audio, saves, hot reload, replays, a standalone editor application and an in-game debug overlay. It contains no JRPG concepts and **ships no Lua**: HP, parties, items, battles, menus, shops, quests and encounters are written by each game against the bindings in [docs/api.md](docs/api.md). `tools/ci/check_boundary.py` enforces the first half in CI, and the packaging job checks that the shipped `builtin.pak` holds no Lua.
 
 Two samples show games built that way. `samples/starfall` is a whole small RPG: a town, a walkable world map with a mount and an airship, a dungeon, and round-based battles with a break gauge and unison attacks, in about three thousand lines of Lua. `samples/aetherbound` is a ten-minute vertical slice staged like a commercial game's opening: a burning fortress, an active-time boss battle against a rigged war machine, and two scenes cut to music (see [The samples](#the-samples)).
 
@@ -27,11 +27,12 @@ sudo apt-get install build-essential cmake ninja-build libx11-dev libxrandr-dev 
 
 Renderers are Metal on macOS, D3D11 on Windows and Vulkan on Linux (Wayland or X11), with OpenGL as a fallback.
 
-Debug builds include the F1 editor, hot reload and the error overlay; Release builds leave them out. `-DFENGINE_DEV=ON` or `OFF` overrides that (see [verification.md](docs/verification.md)).
+Debug builds include the F1 debug overlay, hot reload and the error popup; Release builds leave them out. `-DFENGINE_DEV=ON` or `OFF` overrides that (see [verification.md](docs/verification.md)).
 
 | Program | Use |
 | --- | --- |
-| `fengine <game> [--mute] [--replay file] [--record file] [--seed n] [--frames n] [--max-fps n] [--user-data dir]` | Play or develop a game. F1 opens the editor (dev builds; `--tools` starts with it open). `--record` saves the session's input as a replay. Saves, settings and `log.txt` go to the per-user folder named by `game.json`'s `id`. |
+| `fengine <game> [--mute] [--replay file] [--record file] [--seed n] [--frames n] [--max-fps n] [--user-data dir]` | Play or develop a game. F1 opens the debug overlay (dev builds; `--tools` starts with it open). `--record` saves the session's input as a replay. Saves, settings and `log.txt` go to the per-user folder named by `game.json`'s `id`. |
+| `fengine_editor [<game>] [--map id]` | The editor: scenes, assets, scripts, data, Play mode and builds, laid out like Unity's. Built when Qt 6 (with its private headers) is installed; see [the editor guide](docs/editor.md). |
 | `fengine_headless --test <game> [--filter text]` | Run a game's Lua tests (`tests/*.lua`) without a window |
 | `fengine_headless --check <game>` | Validate maps, sprites, referenced assets and the game's own `validate` |
 | `fengine_headless <game> --replay <file>` | Run a replay without a window or GPU (screenshots skipped) |
@@ -67,12 +68,12 @@ return {
 }
 ```
 
-Maps are made in the F1 editor (terrain from a glTF file, placed models, walkable cells baked from the geometry and painted over, zones, lights, environment) and saved as `maps/<id>/map.json`. What a placement *is* (an NPC, a chest, a door) is up to the game: the editor shows forms for the types the game describes through the optional `editor` hooks of its entry module, and without any hooks still opens, previews, edits and saves maps.
+Maps are made in the editor, `fengine_editor <game>` (terrain from a glTF file, placed models, walkable cells baked from the geometry and painted over, zones, lights, environment) and saved as `maps/<id>/map.json`. What a placement *is* (an NPC, a chest, a door) is up to the game: the editor shows forms for the types the game describes through the optional `editor` hooks of its entry module, and without any hooks still opens, edits and saves maps.
 
 - [Architecture](docs/architecture.md): the engine and game layers and how a frame runs.
 - [Scripting](docs/scripting.md): writing a game against the bindings: the entry module, worlds, input, tasks and tests.
 - [Authoring](docs/authoring.md): the game folder, maps, Blender, sprites, skinned models and the editor.
-- [Editor guide](docs/editor.md): building a scene with the F1 editor, for artists and designers.
+- [Editor guide](docs/editor.md): building a scene with the editor application, for artists and designers.
 - [Lua API reference](docs/api.md): every engine binding (generated; `builtin/types/fengine.d.lua` is the LuaLS stub).
 - [Build, test and ship](docs/verification.md): tests, replays, CI and packaging.
 - [Debugging](docs/debugging.md): the error overlay, console and tests.
@@ -106,4 +107,4 @@ python3 tools/package_game.py --runtime build-release/fengine --assetc build-rel
   --licenses build-release/licenses --output dist/my-game --zip --self-check
 ```
 
-The game ships as `game.pak` and the engine's own assets (the default font, input glyphs, weather presets) as `builtin.pak`. Release builds have `FENGINE_DEV` off: no editor, and shaders and `builtin` are found only next to the executable. Signing hooks: `--sign-identity` and `--notarize-profile` (macOS), `--signtool` (Windows); `--appimage` builds a Linux AppImage. See [verification.md](docs/verification.md#package-a-game). On macOS the package is an `.app` bundle (add `-DFENGINE_UNIVERSAL=ON` for arm64 and x86_64); on Windows `fengine.exe` is a GUI program with no console window.
+The game ships as `game.pak` and the engine's own assets (the default font, input glyphs, weather presets) as `builtin.pak`. Release builds have `FENGINE_DEV` off: no debug overlay, and shaders and `builtin` are found only next to the executable. Signing hooks: `--sign-identity` and `--notarize-profile` (macOS), `--signtool` (Windows); `--appimage` builds a Linux AppImage. See [verification.md](docs/verification.md#package-a-game). On macOS the package is an `.app` bundle (add `-DFENGINE_UNIVERSAL=ON` for arm64 and x86_64); on Windows `fengine.exe` is a GUI program with no console window.

@@ -55,6 +55,15 @@ public:
     // no loaded module comes from `file`. A failed reload reports an error and
     // keeps the previous version.
     bool reloadFile(const std::filesystem::path& file);
+    // A module `require` has loaded and the file it came from (in the game
+    // folder or the built-in one).
+    struct LoadedModule {
+        std::string name;
+        std::filesystem::path file;
+    };
+    // Every module loaded so far, sorted by name: what a tool lists as the
+    // game's running scripts.
+    [[nodiscard]] std::vector<LoadedModule> loadedModules() const;
     // The members scripts may use on an engine type: TypeBinder records every
     // method and property here. `metatable` is sol2's registry key of the
     // type's value metatable.

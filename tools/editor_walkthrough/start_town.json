@@ -1,1 +1,0 @@
-[ {"tick": 2, "lua": "require('game.editor').play_from('town','entry')"}, {"tick": 2000, "message": "end"} ]

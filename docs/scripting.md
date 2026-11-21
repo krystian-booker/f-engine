@@ -29,7 +29,7 @@ Asset paths are relative to the game folder. `@fe/...` names a file in the engin
 | `draw(alpha)` | Every frame; `alpha` is how far the frame lies between the last two ticks. Call `world:draw()` for each world to show and draw UI with `fe.canvas` |
 | `file_changed(path)` | In development builds, when a file of the game folder other than a Lua module changed (the path is relative to the game folder); reload what the game keeps in memory, such as data tables |
 | `validate()` | By `fengine_headless --check`, after `init`; raise an error to fail the check |
-| `editor` | Not a function: a table of functions the F1 editor calls (see [Editor hooks](#editor-hooks)) |
+| `editor` | Not a function: a table of functions the editor and the debug overlay call (see [Editor hooks](#editor-hooks)) |
 
 Nothing else in a game is called by the engine. There are no engine scenes, no per-entity callbacks and no events pushed into Lua: a game polls input (`fe.input.pressed`), reads what the worlds reported (`world:events()`) and draws what it wants each frame. Engine calls return at once; anything that takes time (a walk, a fade, a conversation) is a coroutine or a state machine the game steps itself.
 
@@ -83,7 +83,7 @@ return main
 The map decides where the hero can walk (its grid, baked from the terrain and the placed models in the editor) and the mover and collider keep the body out of walls and other solid entities; the sprite plays `walk` while the mover moves and `idle` otherwise, facing where `face` pointed it. Next to `main.lua` the folder needs a `game.json` (a title is enough; see [authoring](authoring.md#game-folder)), the map and the sprite. The names here are the sample's: to try it, copy `maps/town`, `sprites/aster.anim.json` with `aster.png`, and the two files the town's environment names (`ui/amber.cube`, `ui/hills.png`) out of `samples/starfall`. With an empty `main.lua` (`return {}`) the editor already opens, so the usual first step is `./build/fengine <folder> --tools`, File > New map, and laying the map out ([editor guide](editor.md)).
 
 ```sh
-./build/fengine path/to/game            # play (F1 opens the editor in development builds)
+./build/fengine path/to/game            # play (F1 opens the debug overlay in development builds)
 ./build/fengine_headless --check path/to/game
 ./build/fengine_headless --test path/to/game
 ```
@@ -269,7 +269,7 @@ e:play("attack", false, 0.12)        -- blend from idle into attack over 0.12 s
 
 ## Editor hooks
 
-The F1 editor edits maps, assets and data files without any help from the game. What it cannot know is what the game's placement types are, how to start the game on a map, and what is running. For that it calls optional functions in the `editor` table of the table `main.lua` returns. A game without the table still gets the whole editor: opening a map then loads it into a preview world of the editor's own, where placements with a `model` or `sprite` prop are shown as that model or sprite.
+The editor (`fengine_editor`) edits maps, assets and data files without any help from the game. What it cannot know is what the game's placement types are, how to start the game on a map, and what is running. For that it calls optional functions in the `editor` table of the table `main.lua` returns. A game without the table still gets the whole editor: a scene is always shown in a preview world of the editor's own, where placements with a `model` or `sprite` prop are shown as that model or sprite, and Play then starts the game from its beginning.
 
 The three hooks most games want first (`start`, `spawn_placement` and `world` stand for the game's own function that loads a map, its function that spawns one placement's entity, and the world it loaded):
 
@@ -285,7 +285,7 @@ main.editor = {
       defaults = { entities = "npc" },
     }
   end,
-  -- Open map, New map and "Play from here": start the game on this map at this point.
+  -- Play in the editor: start the game on this map at this point.
   play_from = function(map, point) start(map, point) end,
   -- A placement was added, removed or edited: respawn its entity from the live map.
   placement_changed = function(world_name, id)

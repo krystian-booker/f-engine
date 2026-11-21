@@ -43,6 +43,9 @@ public:
     // write the API files (problems()), so tools/ci/check_api.py fails too.
     void add(Entry entry);
     [[nodiscard]] const std::vector<std::string>& problems() const { return problems_; }
+    // Every recorded entry, in registration order (what a code editor offers
+    // as completions and hover text).
+    [[nodiscard]] const std::vector<Entry>& entries() const { return entries_; }
     void writeStubs(const std::filesystem::path& file) const;
     void writeMarkdown(const std::filesystem::path& file) const;
     // Parameters a LuaLS function type declares: "fun(a: x, b?: {c: y, d: z}): r" has 2.

@@ -105,6 +105,7 @@ add_library(fengine_core STATIC
   engine/nav/Query.cpp
   engine/world/Animation.cpp
   engine/world/Camera.cpp
+  engine/world/ComponentInfo.cpp
   engine/world/Collision.cpp
   engine/world/MapData.cpp
   engine/world/Movement.cpp
@@ -137,6 +138,7 @@ add_library(fengine_core STATIC
   engine/editor/MapEdits.cpp
   engine/editor/AssetCatalog.cpp
   engine/editor/EditorCamera.cpp
+  engine/editor/EditorSession.cpp
   engine/editor/Selection.cpp
   engine/editor/ScenePicking.cpp
   engine/editor/SceneHandles.cpp
@@ -144,6 +146,7 @@ add_library(fengine_core STATIC
   engine/editor/WalkBake.cpp
   engine/editor/MapFiles.cpp
   engine/editor/PropLinks.cpp
+  engine/editor/ScenePreview.cpp
   engine/assets/SpriteSheetBuilder.cpp
 )
 target_include_directories(fengine_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -187,6 +190,7 @@ endif()
 if(FENGINE_BUILD_RUNTIME)
   include(cmake/Shaders.cmake)
   include(cmake/Runtime.cmake)
+  include(cmake/Editor.cmake)
 endif()
 
 if(FENGINE_BUILD_TESTS)

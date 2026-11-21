@@ -7,7 +7,8 @@
 | `FENGINE_BUILD_RUNTIME` | ON | SDL/bgfx runtime (`fengine`) and editor. OFF gives a headless build with no GPU or display. |
 | `FENGINE_BUILD_TESTS` | ON | C++ doctests, the engine's and the sample's Lua tests, sample checks and CI lint tests |
 | `FENGINE_BUILD_TOOLS` | ON | `fengine_assetc` |
-| `FENGINE_DEV` | AUTO | F1 editor, hot reload, the error overlay and source/build-tree fallbacks for `builtin` and shaders. AUTO turns them on for Debug and off for Release, RelWithDebInfo and MinSizeRel; `ON` or `OFF` forces either. Builds with it off embed no build-machine paths (`-ffile-prefix-map` on GCC/Clang, `/pathmap` on MSVC, which also gets `/Brepro`) and leave out the ImGui demo window. |
+| `FENGINE_DEV` | AUTO | F1 debug overlay, hot reload, the error popup and source/build-tree fallbacks for `builtin` and shaders. AUTO turns them on for Debug and off for Release, RelWithDebInfo and MinSizeRel; `ON` or `OFF` forces either. Builds with it off embed no build-machine paths (`-ffile-prefix-map` on GCC/Clang, `/pathmap` on MSVC, which also gets `/Brepro`) and leave out the ImGui demo window. |
+| `FENGINE_BUILD_EDITOR` | AUTO | `fengine_editor`, the editor application. AUTO builds it when Qt 6.5 or newer is found with its private Gui headers (Fedora: `qt6-qtbase-devel qt6-qtbase-private-devel`; Debian and Ubuntu: `qt6-base-dev qt6-base-private-dev`); ON makes a missing Qt an error. It is a development tool: never installed, packaged or shipped with a game. Developed and tested on Linux (Wayland and X11) |
 | `FENGINE_WARNINGS_AS_ERRORS` | OFF | Treat warnings in engine code as errors (CI turns this on) |
 | `FENGINE_RUN_REPLAYS` | OFF | Also register `samples/*/replays/*.json` as windowed CTest tests (label `windowed`; needs a display and GPU) |
 | `FENGINE_ENABLE_SANITIZERS` | OFF | Address and undefined-behaviour sanitizers |

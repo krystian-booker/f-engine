@@ -92,8 +92,9 @@ void FrameRenderer::warm(const Engine& engine) {
     warmup_.run(warmList_, Budget);
 }
 
-void FrameRenderer::render(const std::vector<WorldDraw>& draws, const Canvas& canvas, const ScreenFx& screen,
-                           glm::ivec2 viewport, double alpha, double time, std::uint64_t tick) {
+std::uint16_t FrameRenderer::render(const std::vector<WorldDraw>& draws, const Canvas& canvas,
+                                    const ScreenFx& screen, glm::ivec2 viewport, double alpha, double time,
+                                    std::uint64_t tick, const FrameOutput& out) {
     gpu_.sync();
     calls_ = 0;
     ++frameCount_;
@@ -106,8 +107,8 @@ void FrameRenderer::render(const std::vector<WorldDraw>& draws, const Canvas& ca
         frame_ = Framebuffer(bgfx::createFrameBuffer(1, attachments, false));
     }
     // View 0 belongs to the Renderer and the last view to the editor UI.
-    const auto last = static_cast<std::uint32_t>(bgfx::getCaps()->limits.maxViews - 1);
-    std::uint16_t next = 1;
+    const std::uint32_t last = out.lastView != 0 ? out.lastView : bgfx::getCaps()->limits.maxViews - 1u;
+    std::uint16_t next = out.firstView;
     const auto take = [&] {
         bgfx::resetView(next);
         return next++;
@@ -264,6 +265,9 @@ void FrameRenderer::render(const std::vector<WorldDraw>& draws, const Canvas& ca
 
     const auto view = take();
     bgfx::setViewName(view, "Screen effects");
+    if (bgfx::isValid(out.target)) {
+        bgfx::setViewFrameBuffer(view, out.target);
+    }
     bgfx::setViewRect(view, 0, 0, static_cast<std::uint16_t>(viewport.x),
                       static_cast<std::uint16_t>(viewport.y));
     const auto& t = screen.transition;
@@ -282,6 +286,7 @@ void FrameRenderer::render(const std::vector<WorldDraw>& draws, const Canvas& ca
     bgfx::setTexture(0, uniforms_.frame.get(), frameColor_.get(), PointClamp);
     bgfx::setTexture(1, freezeSampler_.get(), frozen ? freezeColor_.get() : frameColor_.get(), LinearClamp);
     fullscreen(view, present_.get(), BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A, calls_);
+    return next;
 }
 
 bgfx::TextureHandle FrameRenderer::keptTarget(std::string_view key) const {

@@ -454,6 +454,16 @@ sol::object LuaHost::require(const std::string& name) {
     return value;
 }
 
+std::vector<LuaHost::LoadedModule> LuaHost::loadedModules() const {
+    std::vector<LoadedModule> modules;
+    modules.reserve(moduleFiles_.size());
+    // The map is ordered by module name.
+    for (const auto& [name, file] : moduleFiles_) {
+        modules.push_back({name, file});
+    }
+    return modules;
+}
+
 void LuaHost::report(const std::string& message) {
     // An update that fails every tick would write (and flush) the same
     // traceback sixty times a second: the log gets it once a second, with a
